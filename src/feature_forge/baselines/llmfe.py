@@ -1,0 +1,222 @@
+"""LLM-FE baseline with artifact collection.
+
+Supports two modes:
+- single_shot (default): One LLM call generates all features at once.
+- iterative: Sequential LLM calls, one feature at a time, with CV-based
+  keep/discard decisions after each iteration.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Literal
+
+import pandas as pd
+
+from feature_forge.artifacts.base import ArtifactConfig
+from feature_forge.baselines.base import Baseline
+from feature_forge.evaluation.cv import CVEvaluator
+from feature_forge.evaluation.sandbox import SandboxedExecutor
+from feature_forge.llm.base import LLMClient
+from feature_forge.llm.providers.deepseek import DeepSeekProvider
+from feature_forge.utils import strip_markdown_fences
+
+
+class LLMFEBaseline(Baseline):
+    """LLM-based feature engineering baseline with artifact tracking.
+
+    Parameters:
+        llm_client: LLM client for generation.
+        n_features: Number of features to generate (single_shot) or
+            iterations (iterative).
+        mode: 'single_shot' or 'iterative'.
+        evaluator: CVEvaluator for iterative mode. If None, uses default.
+        artifact_config: Configuration for artifact storage.
+    """
+
+    def __init__(
+        self,
+        llm_client: LLMClient | None = None,
+        n_features: int = 5,
+        mode: Literal["single_shot", "iterative"] = "single_shot",
+        evaluator: CVEvaluator | None = None,
+        artifact_config: ArtifactConfig | None = None,
+    ) -> None:
+        super().__init__("llmfe", artifact_config=artifact_config)
+        self.llm_client = llm_client or DeepSeekProvider()
+        self.n_features = n_features
+        self.mode = mode
+        self.evaluator = evaluator
+        self.sandbox = SandboxedExecutor()
+        self._iteration_codes: list[str] = []
+
+    def fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> LLMFEBaseline:
+        import asyncio
+        if self.mode == "iterative":
+            asyncio.run(self._fit_iterative(X_train, y_train))
+        else:
+            asyncio.run(self._fit_single_shot(X_train, y_train))
+        return self
+
+    async def _fit_single_shot(self, X: pd.DataFrame, y: pd.Series) -> None:
+        prompt = self._build_prompt(X, y)
+        raw_response = await self._call_llm(prompt)
+        code = strip_markdown_fences(raw_response)
+        self._iteration_codes = [code]
+        self._artifacts["prompt"] = prompt
+        self._artifacts["raw_response"] = raw_response
+        self._artifacts["generated_code"] = code
+
+    async def _fit_iterative(self, X: pd.DataFrame, y: pd.Series) -> None:
+        """Iterative feature generation with CV-based keep/discard.
+
+        Each iteration generates one feature block, evaluates each new
+        column against the *original* feature set, and keeps columns
+        with positive gain.
+        """
+        evaluator = self.evaluator or CVEvaluator()
+        baseline_score = evaluator.evaluate_baseline(X, y)
+        self._artifacts["baseline_score"] = baseline_score
+
+        iterations: list[dict[str, Any]] = []
+        cumulative_cols: list[str] = []
+        iteration_codes: list[str] = []
+
+        for i in range(self.n_features):
+            prompt = self._build_iterative_prompt(X, y, cumulative_cols, i)
+            raw_response = await self._call_llm(prompt)
+            code_block = strip_markdown_fences(raw_response)
+            iteration_record: dict[str, Any] = {
+                "iteration": i,
+                "prompt": prompt,
+                "raw_response": raw_response,
+                "generated_code": code_block,
+            }
+
+            try:
+                new_features = self.sandbox.execute(code_block, X)
+                kept_features = pd.DataFrame(index=X.index)
+                kept_gains: dict[str, float] = {}
+
+                for col in new_features.columns:
+                    gain = evaluator.evaluate_feature(
+                        X, y, new_features[[col]], baseline_score=baseline_score,
+                    )
+                    if gain > 0:
+                        kept_features[col] = new_features[col].values
+                        kept_gains[col] = gain
+                        cumulative_cols.append(col)
+
+                iteration_record["all_new_features"] = self._storage.store(f"llmfe_iter_{i}_all", new_features)
+                iteration_record["kept_features"] = self._storage.store(f"llmfe_iter_{i}_kept", kept_features)
+                iteration_record["gains"] = kept_gains
+                iteration_record["kept"] = len(kept_gains) > 0
+
+            except Exception as exc:
+                iteration_record["error"] = str(exc)
+                iteration_record["kept"] = False
+
+            iteration_codes.append(code_block)
+            iterations.append(iteration_record)
+
+        self._iteration_codes = iteration_codes
+        self._artifacts["iterations"] = iterations
+        self._artifacts["generated_code"] = "\n\n".join(iteration_codes)
+
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        if not self._iteration_codes:
+            raise RuntimeError("LLMFEBaseline not fitted yet")
+        result = X.copy()
+        for code in self._iteration_codes:
+            try:
+                features = self.sandbox.execute(code, result)
+                for col in features.columns:
+                    if col not in result.columns:
+                        result[col] = features[col].values
+            except Exception:
+                continue
+        new_cols = [c for c in result.columns if c not in X.columns]
+        return result[new_cols] if new_cols else result
+
+    @property
+    def generated_scripts(self) -> list[str]:
+        return list(self._iteration_codes)
+
+    @property
+    def feature_metadata(self) -> list[dict[str, Any]]:
+        iterations = self._artifacts.get("iterations")
+        if iterations:
+            meta = []
+            for it in iterations:
+                for col, gain in it.get("gains", {}).items():
+                    meta.append({
+                        "name": col,
+                        "method": "llmfe",
+                        "iteration": it.get("iteration"),
+                        "gain": gain,
+                        "kept": it.get("kept", False),
+                        "code": it.get("generated_code", ""),
+                    })
+            return meta
+        code = self._artifacts.get("generated_code", "")
+        if code:
+            return [{"name": "single_shot", "method": "llmfe", "code": code}]
+        return []
+
+    @property
+    def provenance_records(self) -> list[dict[str, Any]]:
+        iterations = self._artifacts.get("iterations")
+        if not iterations:
+            return []
+        records = []
+        for it in iterations:
+            for col, gain in it.get("gains", {}).items():
+                records.append({
+                    "feature_name": col,
+                    "source_method": "llmfe",
+                    "iteration_index": it.get("iteration"),
+                    "generated_code": it.get("generated_code", ""),
+                    "cv_gain": gain,
+                })
+        return records
+
+    def _build_prompt(self, X: pd.DataFrame, y: pd.Series) -> str:
+        cols = ", ".join(X.columns)
+        task = "classification" if y.nunique() <= 10 else "regression"
+        return (
+            f"You are a feature engineering assistant. "
+            f"Given a dataset with columns: {cols}, "
+            f"and a {task} task, "
+            f"generate {self.n_features} new features that could improve model performance.\n\n"
+            f"Write a Python function `generate_features(df)` that returns a pandas DataFrame "
+            f"with only the new features. Use only pandas and numpy.\n\n"
+            f"Output ONLY the code, no explanation."
+        )
+
+    def _build_iterative_prompt(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        existing_cols: list[str],
+        iteration: int,
+    ) -> str:
+        cols = ", ".join(X.columns)
+        task = "classification" if y.nunique() <= 10 else "regression"
+        existing = ", ".join(existing_cols) if existing_cols else "none"
+        return (
+            f"You are a feature engineering assistant. "
+            f"Given a dataset with columns: {cols}, "
+            f"and a {task} task, "
+            f"generate exactly ONE new feature (iteration {iteration + 1}/{self.n_features}).\n"
+            f"Already created features: {existing}.\n\n"
+            f"Write a Python function `generate_features(df)` that returns a pandas DataFrame "
+            f"with only the new feature(s) for this iteration. Use only pandas and numpy.\n\n"
+            f"Output ONLY the code, no explanation."
+        )
+
+    async def _call_llm(self, prompt: str) -> str:
+        response = await self.llm_client.complete(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=2048,
+        )
+        return response.content.strip()

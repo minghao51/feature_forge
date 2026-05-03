@@ -1,0 +1,25 @@
+name: Benchmark
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly on Sunday
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v1
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run benchmark suite
+        run: uv run pytest tests/benchmarks/ -v --tb=short
+        env:
+          FF_LLM__API_KEY: ${{ secrets.LLM_API_KEY }}
+          WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}

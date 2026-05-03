@@ -1,0 +1,35 @@
+# Default settings for feature_forge.
+# Override via environment variables (FF_* prefix) or init args.
+
+task: "classification"  # classification | regression
+metric: "auc"           # auc | acc | f1 | rmse | mae | r2
+n_rounds: 4
+min_effective: 2
+random_state: 42
+verbose: 1
+
+llm:
+  model: "deepseek-chat"
+  base_url: "https://api.deepseek.com"
+  temperature: 0.2
+  max_tokens: 4096
+  # cache_responses is enforced True in code; override via env var only
+  max_concurrent_calls: 3
+
+tracker:
+  backend: "wandb"      # wandb | mlflow | none
+  project: "feature-forge"
+  # entity: "your-wandb-team"  # Set via FF_TRACKER__ENTITY env var
+
+router:
+  strategy: "hybrid"    # data_driven | performance_driven | hybrid | llm
+  max_agents: ~         # null = dynamic
+  min_agents: 1
+
+memory:
+  max_size: 100
+  persistence_dir: "memory_files/agent_memories"
+
+evaluation:
+  cv_folds: 5
+  test_size: 0.4

@@ -1,0 +1,6 @@
+# structlog configuration.
+# The application auto-detects TTY for pretty vs JSON output.
+# This file is optional; defaults are in code.
+
+level: "INFO"      # DEBUG | INFO | WARNING | ERROR
+format: "auto"     # auto | json | pretty
