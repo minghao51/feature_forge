@@ -16,7 +16,7 @@ Feature Forge is a production-ready refactoring of the MALMAS (Memory-Augmented 
 - **Enforced LLM Caching**: DiskCache with SHA-256 keys prevents accidental API costs
 - **Sandboxed Execution**: AST-validated code execution for LLM-generated features
 - **Experiment Matrix**: Cartesian product of datasets × methods × seeds × models × rounds
-- **Baselines**: OpenFE, CAAFE, LLM-FE
+- **Baselines**: OpenFE [[2]](#ref-2), CAAFE [[3]](#ref-3), LLM-FE [[4]](#ref-4), Malmus (structured JSON)
 - **Observability**: structlog + Langfuse + OpenTelemetry
 - **Tracking**: WandB (default) + MLflow (optional)
 - **Sklearn Compatible**: `MALMASFeatureEngineer` inherits `BaseEstimator` + `TransformerMixin`
@@ -29,10 +29,10 @@ git clone https://github.com/your-org/feature-forge.git
 cd feature-forge
 
 # Install with uv (recommended)
-uv sync --all-extras --dev
+uv sync
 
 # Or with pip
-pip install -e ".[all,dev]"
+pip install -e ".[base,docs,opinion]"
 ```
 
 ## Quick Start
@@ -144,10 +144,26 @@ pre-commit run --all-files
 
 ## Documentation
 
+- [Methods & References](docs/methods.md) — Full documentation of all methods, pipelines, and academic sources
 - [Implementation Plan](docs/plan/)
 - [API Reference](docs/api_reference.md)
 - [Migration Guide](docs/migration_guide.md)
 - [Quick Start](docs/quick_start.md)
+- [MALMAS Technical Roadmap](docs/MALMAS_Technical_Roadmap.md)
+
+## References
+
+<a id="ref-1"></a>\[1\] **MALMAS** — "Memory-Augmented LLM-based Multi-Agent System for Automated Feature Generation on Tabular Data"
+MINE-USTC. arXiv:[2604.20261](https://arxiv.org/abs/2604.20261), ACL ARR 2026. [GitHub](https://github.com/MINE-USTC/MALMAS)
+
+<a id="ref-2"></a>\[2\] **OpenFE** — "OpenFE: Automated Feature Generation with Expert-level Performance"
+Zhang et al. ICML 2023. arXiv:[2211.12507](https://arxiv.org/abs/2211.12507). [GitHub](https://github.com/IIIS-Li-Group/OpenFE)
+
+<a id="ref-3"></a>\[3\] **CAAFE** — "LLMs for Semi-Automated Data Science: Introducing CAAFE for Context-Aware Automated Feature Engineering"
+Hollmann, Müller, Hutter. NeurIPS 2023. arXiv:[2305.03403](https://arxiv.org/abs/2305.03403). [GitHub](https://github.com/noahho/CAAFE)
+
+<a id="ref-4"></a>\[4\] **LLM-FE** — "LLM-FE: Automated Feature Engineering for Tabular Data with LLMs as Evolutionary Optimizers"
+Abhyankar, Shojaee, Reddy. arXiv:[2503.14434](https://arxiv.org/abs/2503.14434), 2025. [GitHub](https://github.com/nikhilsab/llmfe)
 
 ## License
 

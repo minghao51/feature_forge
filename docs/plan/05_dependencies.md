@@ -69,20 +69,22 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Baselines
-baselines = [
+# Optional functionality (baselines + alternative trackers)
+base = [
     "openfe>=0.1",
     "caafe>=0.1",
+    "mlflow>=2.10",
 ]
 
-# Alternative experiment tracker
-mlflow = ["mlflow>=2.10"]
+# Documentation tooling
+docs = [
+    "mkdocs-material>=9.0",
+    "mkdocstrings[python]>=0.24",
+    "mike>=2.0",
+]
 
-# All extras
-all = ["feature-forge[baselines,mlflow]"]
-
-# Development
-dev = [
+# Opinionated dev tooling (linting, testing, notebooks)
+opinion = [
     "pytest>=8.0",
     "pytest-cov>=4.0",
     "pytest-asyncio>=0.23",

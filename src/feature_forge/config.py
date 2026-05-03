@@ -2,17 +2,12 @@
 
 Configuration priority (highest to lowest):
 1. Constructor arguments
-2. Environment variables (FF_* prefix)
-3. Encrypted .env file (managed by dotenvx, decrypted at runtime)
-4. YAML files (config/settings.yaml)
+2. Environment variables (FF_* prefix, injected by dotenvx)
+3. YAML files (config/settings.yaml)
 
-Runtime loading:
-    Use `dotenvx run --` to decrypt .env before Python starts:
-        dotenvx run -- uv run python script.py
-        dotenvx run -- uv run pytest tests/
-
-    pydantic-settings reads the decrypted .env automatically.
-    No `dotenv.load_dotenv()` needed — dotenvx handles injection.
+Secrets are managed via dotenvx — ``dotenvx run --`` injects decrypted
+values into the environment before Python starts. Non-sensitive defaults
+live in ``config/settings.yaml``.
 
 Example:
     >>> from feature_forge.config import Settings
@@ -25,9 +20,10 @@ Example:
 
 from __future__ import annotations
 
+import os
 from typing import Literal
 
-from pydantic import BaseModel, Field, SecretStr, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -39,24 +35,35 @@ from pydantic_settings import (
 class LLMConfig(BaseModel):
     """LLM provider configuration.
 
+    A single ``api_key`` serves all providers — on validation the key
+    is propagated to provider-specific env vars (``DEEPSEEK_API_KEY``,
+    ``OPENAI_API_KEY``, ``ANTHROPIC_API_KEY``, ``GEMINI_API_KEY``)
+    so LiteLLM and native clients can discover it without separate keys.
+
     Attributes:
         model: Model identifier (e.g. "deepseek-chat", "gpt-4").
-        api_key: API key for the LLM provider.
+        api_key: Single API key for all LLM providers.
         base_url: Base URL for the API endpoint.
         temperature: Sampling temperature for generation.
         max_tokens: Maximum tokens per response.
         cache_responses: Whether to cache LLM responses.
-            **Enforced default True** — override via env var only.
         max_concurrent_calls: Max concurrent LLM calls.
     """
 
     model: str = "deepseek-chat"
-    api_key: SecretStr | None = Field(default=None)
+    api_key: SecretStr | None = None
     base_url: str = "https://api.deepseek.com"
     temperature: float = 0.2
     max_tokens: int = 4096
     cache_responses: bool = True
     max_concurrent_calls: int = 3
+
+    @field_validator("api_key", mode="before")
+    @classmethod
+    def _empty_string_to_none(cls, v: object) -> object:
+        if v == "":
+            return None
+        return v
 
     @field_validator("temperature")
     @classmethod
@@ -71,6 +78,16 @@ class LLMConfig(BaseModel):
         if v < 1:
             raise ValueError(f"max_tokens must be >= 1, got {v}")
         return v
+
+    @model_validator(mode="after")
+    def _set_provider_env_vars(self) -> LLMConfig:
+        """Propagate single API key to provider-specific env vars."""
+        if self.api_key and (key := self.api_key.get_secret_value()):
+            os.environ.setdefault("DEEPSEEK_API_KEY", key)
+            os.environ.setdefault("OPENAI_API_KEY", key)
+            os.environ.setdefault("ANTHROPIC_API_KEY", key)
+            os.environ.setdefault("GEMINI_API_KEY", key)
+        return self
 
 
 class TrackerConfig(BaseModel):
@@ -161,7 +178,6 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="FF_",
         env_nested_delimiter="__",
-        env_file=".env",
         yaml_file="config/settings.yaml",
         extra="ignore",
     )
@@ -209,7 +225,6 @@ class Settings(BaseSettings):
         return (
             init_settings,
             env_settings,
-            dotenv_settings,
             YamlConfigSettingsSource(settings_cls),
         )
 

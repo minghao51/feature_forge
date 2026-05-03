@@ -1,8 +1,9 @@
 # Default settings for feature_forge.
 # Override via environment variables (FF_* prefix) or init args.
+# Secrets are managed in .env via dotenvx — this file is committed in plaintext.
 
-task: "classification"  # classification | regression
-metric: "auc"           # auc | acc | f1 | rmse | mae | r2
+task: "classification"
+metric: "auc"
 n_rounds: 4
 min_effective: 2
 random_state: 42
@@ -13,17 +14,15 @@ llm:
   base_url: "https://api.deepseek.com"
   temperature: 0.2
   max_tokens: 4096
-  # cache_responses is enforced True in code; override via env var only
+  cache_responses: true
   max_concurrent_calls: 3
 
 tracker:
-  backend: "wandb"      # wandb | mlflow | none
+  backend: "wandb"
   project: "feature-forge"
-  # entity: "your-wandb-team"  # Set via FF_TRACKER__ENTITY env var
 
 router:
-  strategy: "hybrid"    # data_driven | performance_driven | hybrid | llm
-  max_agents: ~         # null = dynamic
+  strategy: "hybrid"
   min_agents: 1
 
 memory:
