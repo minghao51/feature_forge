@@ -6,59 +6,53 @@ on:
   pull_request:
     branches: [main, develop]
 
+permissions:
+  contents: read
+
 jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --group dev
+      - uses: pre-commit/action@v3.0.1
+
+  typecheck:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --group dev
+      - run: uv run mypy src
+
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
         with:
-          version: "latest"
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
+          enable-cache: true
           python-version: ${{ matrix.python-version }}
-
-      - name: Install dependencies
-        run: uv sync --all-extras --dev
-
-      - name: Run ruff check
-        run: uv run ruff check src tests
-
-      - name: Run ruff format check
-        run: uv run ruff format --check src tests
-
-      - name: Run mypy
-        run: uv run mypy src
-
-      - name: Run tests
-        run: uv run pytest -m "not slow and not llm"
-
-  benchmark:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'schedule'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - run: uv sync --group dev
+      - run: uv run pytest -m "not slow and not llm" --cov --cov-report=xml
+      - uses: codecov/codecov-action@v4
         with:
-          python-version: "3.12"
+          token: ${{ secrets.CODECOV_TOKEN }}
 
-      - name: Install dependencies
-        run: uv sync --all-extras --dev
-
-      - name: Run benchmarks
-        run: uv run pytest tests/benchmarks -v --tb=short
+  security:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --group dev
+      - run: uv run pip-audit
