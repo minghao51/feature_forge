@@ -83,14 +83,23 @@ class ModelFactory:
             "verbose": False,
             "random_state": self.random_state,
         }
-        return CatBoostClassifier(**kwargs) if task == "classification" else CatBoostRegressor(**kwargs)
+        return (
+            CatBoostClassifier(**kwargs)
+            if task == "classification"
+            else CatBoostRegressor(**kwargs)
+        )
 
     def _random_forest(self, task: str) -> Any:
         kwargs = {"random_state": self.random_state, "n_jobs": 1}
-        return RandomForestClassifier(**kwargs) if task == "classification" else RandomForestRegressor(**kwargs)
+        return (
+            RandomForestClassifier(**kwargs)
+            if task == "classification"
+            else RandomForestRegressor(**kwargs)
+        )
 
     def _mlp(self, task: str) -> Any:
         from sklearn.neural_network import MLPClassifier, MLPRegressor
+
         kwargs = {
             "hidden_layer_sizes": (128, 64),
             "max_iter": 500,

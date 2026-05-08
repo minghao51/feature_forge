@@ -39,6 +39,7 @@ class TestDatasetRegistry:
         train_df.to_csv(sample_dir / "train.csv", index=False)
         meta = {"target": "y", "task": "classification"}
         import json
+
         with open(sample_dir / "metadata.json", "w") as f:
             json.dump(meta, f)
 

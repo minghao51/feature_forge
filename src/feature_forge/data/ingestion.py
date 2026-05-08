@@ -57,7 +57,9 @@ class KaggleFetcher:
 
         return result
 
-    def load_with_metadata(self, dataset_slug: str, target_column: str | None = None) -> dict[str, Any]:
+    def load_with_metadata(
+        self, dataset_slug: str, target_column: str | None = None
+    ) -> dict[str, Any]:
         """Load dataset with metadata.
 
         Returns:

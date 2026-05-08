@@ -58,14 +58,14 @@ class ArtifactDashboard:
         summary = self.diff.summary()
         html = '<div class="card"><h2>Summary</h2><div class="grid">'
         html += f"""
-          <div><div class="metric">{summary['total_unique_features']}</div>
+          <div><div class="metric">{summary["total_unique_features"]}</div>
                <div class="metric-label">Total Unique Features</div></div>
-          <div><div class="metric">{summary['shared_across_all']}</div>
+          <div><div class="metric">{summary["shared_across_all"]}</div>
                <div class="metric-label">Shared Across All Methods</div></div>
         """
         for method, data in summary.get("per_method", {}).items():
             html += f"""
-              <div><div class="metric">{data['total_features']}</div>
+              <div><div class="metric">{data["total_features"]}</div>
                    <div class="metric-label">{method} Features</div></div>
             """
         html += "</div></div>"
@@ -83,7 +83,11 @@ class ArtifactDashboard:
             html += f"<tr><td><strong>{idx}</strong></td>"
             for method in self.diff.all_methods:
                 val = row[method]
-                badge = '<span class="badge badge-success">&#10003;</span>' if val else '<span class="badge badge-warning">-</span>'
+                badge = (
+                    '<span class="badge badge-success">&#10003;</span>'
+                    if val
+                    else '<span class="badge badge-warning">-</span>'
+                )
                 html += f"<td>{badge}</td>"
             html += "</tr>"
         html += "</tbody></table></div>"
@@ -114,7 +118,7 @@ class ArtifactDashboard:
 
         # Feature metadata table
         if bundle.feature_metadata:
-            html += '<h3>Features</h3><table><thead><tr><th>Name</th><th>Gain</th><th>Round</th><th>Agent</th></tr></thead><tbody>'
+            html += "<h3>Features</h3><table><thead><tr><th>Name</th><th>Gain</th><th>Round</th><th>Agent</th></tr></thead><tbody>"
             for fm in bundle.feature_metadata:
                 gain = f"{fm.gain:.4f}" if fm.gain is not None else "-"
                 rnd = fm.round if fm.round is not None else "-"
@@ -124,9 +128,9 @@ class ArtifactDashboard:
 
         # Generated code snippets
         if bundle.generated_scripts:
-            html += '<h3>Generated Code</h3>'
+            html += "<h3>Generated Code</h3>"
             for i, script in enumerate(bundle.generated_scripts):
-                html += f'<details><summary>Script {i+1}</summary><pre><code>{script}</code></pre></details>'
+                html += f"<details><summary>Script {i + 1}</summary><pre><code>{script}</code></pre></details>"
 
         html += "</div>"
         return html
@@ -135,7 +139,7 @@ class ArtifactDashboard:
         html = '<div class="card"><h2>Provenance</h2>'
         for method, bundle in self.bundles.items():
             if bundle.provenance_records:
-                html += f'<h3>{method}</h3><table><thead><tr><th>Feature</th><th>Agent</th><th>Round</th><th>Gain</th></tr></thead><tbody>'
+                html += f"<h3>{method}</h3><table><thead><tr><th>Feature</th><th>Agent</th><th>Round</th><th>Gain</th></tr></thead><tbody>"
                 for pr in bundle.provenance_records:
                     gain = f"{pr.cv_gain:.4f}" if pr.cv_gain is not None else "-"
                     agent = pr.source_agent or "-"

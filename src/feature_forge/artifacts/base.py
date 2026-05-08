@@ -121,8 +121,7 @@ class ArtifactExporter(ABC):
             method_name=getattr(self, "name", "unknown"),
             generated_scripts=self.generated_scripts,
             feature_metadata=[
-                FeatureMetadata(**m) if isinstance(m, dict) else m
-                for m in self.feature_metadata
+                FeatureMetadata(**m) if isinstance(m, dict) else m for m in self.feature_metadata
             ],
             custom=self.get_artifacts(),
         )
@@ -165,8 +164,13 @@ class ArtifactExporter(ABC):
                 safe_key = key.replace("/", "_").replace(" ", "_")
                 dest = df_dir / f"{safe_key}.parquet"
                 import shutil
+
                 shutil.copy(value.path, dest)
-                serializable[key] = {"__type__": "lazy_dataframe", "path": str(dest), "fmt": value.fmt}
+                serializable[key] = {
+                    "__type__": "lazy_dataframe",
+                    "path": str(dest),
+                    "fmt": value.fmt,
+                }
             elif isinstance(value, (list, dict, str, int, float, bool, type(None))):
                 serializable[key] = value
             else:

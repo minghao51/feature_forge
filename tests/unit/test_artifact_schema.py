@@ -106,12 +106,14 @@ class TestArtifactBundle:
 class TestSaveLoadArtifacts:
     def test_roundtrip(self) -> None:
         df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
-        exporter = DummyExporter({
-            "scripts": ["def f(): pass"],
-            "metadata": [{"name": "feat", "gain": 0.1}],
-            "my_df": df,
-            "text": "hello",
-        })
+        exporter = DummyExporter(
+            {
+                "scripts": ["def f(): pass"],
+                "metadata": [{"name": "feat", "gain": 0.1}],
+                "my_df": df,
+                "text": "hello",
+            }
+        )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             exporter.save_artifacts(tmpdir)
@@ -239,9 +241,7 @@ class TestProvenanceRecords:
         from feature_forge.api import MALMASFeatureEngineer
 
         # Mock LLM client to avoid API key requirement
-        monkeypatch.setattr(
-            MALMASFeatureEngineer, "_default_llm_client", lambda self: object()
-        )
+        monkeypatch.setattr(MALMASFeatureEngineer, "_default_llm_client", lambda self: object())
         fe = MALMASFeatureEngineer()
         fe.pipeline_result = {
             "selected_features": ["f1"],
@@ -265,9 +265,7 @@ class TestProvenanceRecords:
     def test_malmas_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from feature_forge.api import MALMASFeatureEngineer
 
-        monkeypatch.setattr(
-            MALMASFeatureEngineer, "_default_llm_client", lambda self: object()
-        )
+        monkeypatch.setattr(MALMASFeatureEngineer, "_default_llm_client", lambda self: object())
         fe = MALMASFeatureEngineer()
         assert fe.provenance_records == []
 
@@ -281,11 +279,13 @@ class TestLogArtifactsDedup:
             def log_artifacts_dict(self, artifacts: dict[str, Any], prefix: str = "") -> None:
                 self.logged.update({f"{prefix}{k}": v for k, v in artifacts.items()})
 
-        exporter = DummyExporter({
-            "code1": "def a(): pass",
-            "code2": "def a(): pass",  # duplicate
-            "code3": "def b(): pass",
-        })
+        exporter = DummyExporter(
+            {
+                "code1": "def a(): pass",
+                "code2": "def a(): pass",  # duplicate
+                "code3": "def b(): pass",
+            }
+        )
         tracker = FakeTracker()
         exporter.log_artifacts(tracker)
         assert "code1" in tracker.logged

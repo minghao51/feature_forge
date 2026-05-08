@@ -16,14 +16,17 @@ def _make_llm(code: str):
     class FakeLLM:
         async def complete(self, messages, temperature=0.2, max_tokens=4096, **kw):
             return LLMResponse(content=code, model="fake")
+
     return FakeLLM()
 
 
 def _make_df():
-    X = pd.DataFrame({
-        "a": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-        "b": [4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
-    })
+    X = pd.DataFrame(
+        {
+            "a": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            "b": [4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+        }
+    )
     y = pd.Series([0, 1, 0, 1, 0, 1, 0, 1, 0, 1])
     return X, y
 
@@ -216,6 +219,7 @@ def generate_features(df):
 class TestMALMASArtifacts:
     def _make_fe(self):
         from feature_forge.api import MALMASFeatureEngineer
+
         return MALMASFeatureEngineer(llm_client=_make_llm("pass"))
 
     def test_get_artifacts_empty_before_fit(self):
@@ -246,7 +250,13 @@ def generate_features(df):
 """
         llm = _make_llm(code)
         cfg = ArtifactConfig(storage_mode="disk", storage_format="parquet")
-        baseline = LLMFEBaseline(llm_client=llm, mode="iterative", n_features=1, evaluator=_make_evaluator(), artifact_config=cfg)
+        baseline = LLMFEBaseline(
+            llm_client=llm,
+            mode="iterative",
+            n_features=1,
+            evaluator=_make_evaluator(),
+            artifact_config=cfg,
+        )
         X, y = _make_df()
         baseline.fit(X, y)
 

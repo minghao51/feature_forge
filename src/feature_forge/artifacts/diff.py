@@ -66,14 +66,16 @@ class ArtifactDiff:
     def shared_features(self) -> list[str]:
         """Return feature names present in *all* methods."""
         return [
-            feat for feat in self.all_features
+            feat
+            for feat in self.all_features
             if len(self._feature_index[feat]) == len(self.bundles)
         ]
 
     def unique_features(self, method: str) -> list[str]:
         """Return feature names unique to a single method."""
         return [
-            feat for feat in self.all_features
+            feat
+            for feat in self.all_features
             if method in self._feature_index[feat] and len(self._feature_index[feat]) == 1
         ]
 
@@ -105,8 +107,7 @@ class ArtifactDiff:
         }
         for method in self.all_methods:
             method_features = [
-                feat for feat in self.all_features
-                if method in self._feature_index[feat]
+                feat for feat in self.all_features if method in self._feature_index[feat]
             ]
             unique = self.unique_features(method)
             gains = [
@@ -128,10 +129,7 @@ class ArtifactDiff:
         records: list[dict[str, Any]] = []
         for feat in self.all_features:
             methods_present = list(self._feature_index[feat].keys())
-            gains = {
-                m: self._feature_index[feat][m].gain
-                for m in methods_present
-            }
+            gains = {m: self._feature_index[feat][m].gain for m in methods_present}
             record: dict[str, Any] = {
                 "feature": feat,
                 "methods": ", ".join(methods_present),

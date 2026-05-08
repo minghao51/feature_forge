@@ -69,6 +69,7 @@ class DatasetRegistry:
             return self._load_local(info)
         if info["source"] == "kaggle":
             from feature_forge.data.ingestion import KaggleFetcher
+
             fetcher = KaggleFetcher()
             return fetcher.load_with_metadata(info["slug"], info.get("target"))
         raise ValueError(f"Unknown source: {info['source']}")
