@@ -20,7 +20,7 @@ We implement **MALMAS + 3 baselines**:
 
 ### 1. OpenFE (Highest Priority Non-LLM Baseline)
 
-**Why:** 
+**Why:**
 - Strongest non-LLM method, often beats 99% of Kaggle teams
 - "Feature boosting" algorithm with two-stage pruning
 - Fast, deterministic, no API costs
@@ -33,7 +33,7 @@ class OpenFEBaseline(Baseline):
         self.openfe = OpenFE()
         self.openfe.fit(data=X_train, label=y_train, n_jobs=4)
         return self
-    
+
     def transform(self, X):
         return self.openfe.transform(X)
 ```
@@ -55,7 +55,7 @@ class CAAFEBaseline(Baseline):
         )
         self.caafe.fit(X_train, y_train)
         return self
-    
+
     def transform(self, X):
         return self.caafe.transform(X)
 ```
@@ -74,7 +74,7 @@ class LLMFEBaseline(Baseline):
         self.llmfe = LLMFE()
         self.llmfe.fit(X_train, y_train)
         return self
-    
+
     def transform(self, X):
         return self.llmfe.transform(X)
 ```

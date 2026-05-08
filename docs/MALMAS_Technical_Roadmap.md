@@ -250,7 +250,7 @@ class LLMConfig:
 @dataclass
 class MALMASConfig:
     """Immutable configuration for MALMAS feature engineering.
-    
+
     Attributes:
         task: ML task type ('classification' or 'regression')
         metric: Evaluation metric
@@ -267,7 +267,7 @@ class MALMASConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     random_state: int = 42
     verbose: int = 0
-    
+
     def __post_init__(self):
         """Validate configuration after initialization."""
         if self.task not in ("classification", "regression"):
@@ -292,22 +292,22 @@ import numpy as np
 
 class MALMASFeatureEngineer(BaseEstimator, TransformerMixin):
     """LLM-powered multi-agent feature engineering transformer.
-    
+
     Compatible with sklearn pipelines:
-    
+
     Examples
     --------
     >>> from sklearn.pipeline import Pipeline
     >>> from sklearn.preprocessing import StandardScaler
     >>> from xgboost import XGBClassifier
-    >>> 
+    >>>
     >>> pipeline = Pipeline([
     ...     ('fe', MALMASFeatureEngineer(task='classification')),
     ...     ('scaler', StandardScaler()),
     ...     ('model', XGBClassifier())
     ... ])
     >>> pipeline.fit(X_train, y_train)
-    
+
     Parameters
     ----------
     task : {'classification', 'regression'}
@@ -322,7 +322,7 @@ class MALMASFeatureEngineer(BaseEstimator, TransformerMixin):
         API key for LLM service.
     verbose : int
         Verbosity level (0=silent, 1=progress, 2=detailed).
-    
+
     Attributes
     ----------
     n_features_in_ : int
@@ -334,7 +334,7 @@ class MALMASFeatureEngineer(BaseEstimator, TransformerMixin):
     is_fitted_ : bool
         Whether the transformer has been fitted.
     """
-    
+
     def __init__(
         self,
         task: str = "classification",
@@ -353,11 +353,11 @@ class MALMASFeatureEngineer(BaseEstimator, TransformerMixin):
         self.api_key = api_key
         self.base_url = base_url
         self.verbose = verbose
-        
-    def fit(self, X: pd.DataFrame, y: pd.Series, 
+
+    def fit(self, X: pd.DataFrame, y: pd.Series,
             description: Optional[str] = None) -> "MALMASFeatureEngineer":
         """Generate features using LLM-powered agents.
-        
+
         Parameters
         ----------
         X : DataFrame
@@ -366,7 +366,7 @@ class MALMASFeatureEngineer(BaseEstimator, TransformerMixin):
             Training labels.
         description : str, optional
             Dataset description for context-aware feature generation.
-        
+
         Returns
         -------
         self : MALMASFeatureEngineer
@@ -374,17 +374,17 @@ class MALMASFeatureEngineer(BaseEstimator, TransformerMixin):
         """
         # Input validation
         X, y = check_X_y(X, y, dtype=None, force_all_finite='allow-nan')
-        
+
         if isinstance(X, np.ndarray):
             X = pd.DataFrame(X)
         if isinstance(y, np.ndarray):
             y = pd.Series(y)
-            
+
         # Store training data info
         self.n_features_in_ = X.shape[1]
         self.feature_names_in_ = X.columns.tolist()
         self._description = description
-        
+
         # Initialize configuration
         config = MALMASConfig(
             task=self.task,
@@ -397,24 +397,24 @@ class MALMASFeatureEngineer(BaseEstimator, TransformerMixin):
             ),
             verbose=self.verbose
         )
-        
+
         # Run feature generation
         self.generated_features_ = self._generate_features(X, y, config)
         self.is_fitted_ = True
-        
+
         if self.verbose > 0:
             print(f"Generated {len(self.generated_features_)} features")
-            
+
         return self
-    
+
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         """Apply generated features to new data.
-        
+
         Parameters
         ----------
         X : DataFrame
             Features to transform.
-            
+
         Returns
         -------
         X_new : DataFrame
@@ -422,25 +422,25 @@ class MALMASFeatureEngineer(BaseEstimator, TransformerMixin):
         """
         check_is_fitted(self, 'is_fitted_')
         X = self._validate_data(X, reset=False)
-        
+
         # Apply generated features
         X_new = self._apply_features(X)
         return X_new
-    
+
     def fit_transform(self, X, y, description=None, **fit_params):
         """Fit and transform in one step."""
         return self.fit(X, y, description=description, **fit_params).transform(X)
-    
+
     def get_feature_names_out(self) -> List[str]:
         """Get names of generated features."""
         check_is_fitted(self, 'is_fitted_')
         return list(self.generated_features_.keys())
-    
+
     def _generate_features(self, X, y, config):
         """Core feature generation logic."""
         # ... implementation
         pass
-    
+
     def _apply_features(self, X):
         """Apply generated features to data."""
         # ... implementation
@@ -486,19 +486,19 @@ import ast
 
 def safe_exec(code: str, allowed_names: dict) -> dict:
     """Execute code with restricted builtins.
-    
+
     Parameters
     ----------
     code : str
         Python code to execute.
     allowed_names : dict
         Names allowed in the execution context.
-    
+
     Returns
     -------
     dict
         Local variables after execution.
-    
+
     Raises
     ------
     CodeExecutionError
@@ -509,7 +509,7 @@ def safe_exec(code: str, allowed_names: dict) -> dict:
         tree = ast.parse(code)
     except SyntaxError as e:
         raise CodeExecutionError(f"Invalid Python syntax: {e}")
-    
+
     # Check for dangerous operations
     forbidden = {'eval', 'exec', 'compile', 'open', 'input', '__import__'}
     for node in ast.walk(tree):
@@ -519,17 +519,17 @@ def safe_exec(code: str, allowed_names: dict) -> dict:
             if isinstance(node.func, ast.Name):
                 if node.func.id in forbidden:
                     raise CodeExecutionError(f"Forbidden function: {node.func.id}")
-    
+
     # Execute with restricted globals
     safe_globals = {"__builtins__": {}}
     safe_globals.update(allowed_names)
-    
+
     local_vars = {}
     try:
         exec(code, safe_globals, local_vars)
     except Exception as e:
         raise CodeExecutionError(f"Code execution failed: {e}")
-    
+
     return local_vars
 ```
 
@@ -604,21 +604,21 @@ import pandas as pd
 
 class Agent(ABC):
     """Abstract base class for feature generation agents.
-    
+
     All agents must implement the generate method that produces
     feature engineering code based on input data and context.
     """
-    
+
     def __init__(self, name: str, config: 'MALMASConfig'):
         self.name = name
         self.config = config
         self.memory = []
-    
+
     @abstractmethod
-    def generate(self, X: pd.DataFrame, y: pd.Series, 
+    def generate(self, X: pd.DataFrame, y: pd.Series,
                  context: Dict[str, Any]) -> List['FeatureSpec']:
         """Generate feature specifications.
-        
+
         Parameters
         ----------
         X : DataFrame
@@ -627,14 +627,14 @@ class Agent(ABC):
             Target variable.
         context : dict
             Additional context (previous features, feedback, etc.).
-        
+
         Returns
         -------
         list of FeatureSpec
             Generated feature specifications.
         """
         pass
-    
+
     def update_memory(self, feedback: Dict[str, Any]):
         """Update agent memory with feedback."""
         self.memory.append(feedback)
@@ -649,16 +649,16 @@ import pandas as pd
 
 class RouterAgent:
     """Dynamically selects active agent subsets based on data characteristics."""
-    
+
     def __init__(self, agents: List[Type[Agent]], config: 'MALMASConfig'):
         self.agents = agents
         self.config = config
         self.active_history = []
-    
-    def select_agents(self, X: pd.DataFrame, y: pd.Series, 
+
+    def select_agents(self, X: pd.DataFrame, y: pd.Series,
                       iteration: int) -> List[Agent]:
         """Select active agents for the current iteration.
-        
+
         Parameters
         ----------
         X : DataFrame
@@ -667,7 +667,7 @@ class RouterAgent:
             Target variable.
         iteration : int
             Current iteration number.
-        
+
         Returns
         -------
         list of Agent
@@ -678,28 +678,28 @@ class RouterAgent:
         n_samples = X.shape[0]
         has_temporal = self._detect_temporal(X)
         has_categorical = self._detect_categorical(X)
-        
+
         # Select agents based on characteristics and iteration
         selected = []
-        
+
         # Always include unary agent
         selected.append(self._get_agent('unary'))
-        
+
         # Include cross-compositional for high-dimensional data
         if n_features > 5:
             selected.append(self._get_agent('cross_compositional'))
-        
+
         # Include temporal agent if temporal features detected
         if has_temporal:
             selected.append(self._get_agent('temporal'))
-        
+
         # Include aggregation for large datasets
         if n_samples > 1000:
             selected.append(self._get_agent('aggregation'))
-        
+
         # Rotate in other agents based on iteration
         # ... selection logic
-        
+
         self.active_history.append([a.name for a in selected])
         return selected
 ```
@@ -724,38 +724,38 @@ class MemoryEntry:
 
 class AgentMemory:
     """Multi-level memory system for agents.
-    
+
     Maintains three types of memory:
     - Procedural: Successful feature generation patterns
     - Feedback: Evaluation results and agent performance
     - Conceptual: High-level feature abstractions
     """
-    
+
     def __init__(self, max_size: int = 100):
         self.max_size = max_size
         self.procedural: List[MemoryEntry] = []
         self.feedback: Dict[str, List[float]] = defaultdict(list)
         self.conceptual: List[str] = []
-    
+
     def add_procedural(self, entry: MemoryEntry):
         """Add entry to procedural memory."""
         self.procedural.append(entry)
         if len(self.procedural) > self.max_size:
             self.procedural = self.procedural[-self.max_size:]
-    
+
     def add_feedback(self, feature_name: str, score: float):
         """Add feedback for a feature."""
         self.feedback[feature_name].append(score)
-    
+
     def add_conceptual(self, summary: str):
         """Add conceptual summary."""
         self.conceptual.append(summary)
-    
+
     def get_top_features(self, k: int = 10) -> List[MemoryEntry]:
         """Get top-k features by score."""
         sorted_entries = sorted(self.procedural, key=lambda x: x.score, reverse=True)
         return sorted_entries[:k]
-    
+
     def get_agent_performance(self, agent_name: str) -> float:
         """Get average performance for an agent."""
         agent_entries = [e for e in self.procedural if e.agent == agent_name]
@@ -774,7 +774,7 @@ from malmas.agents.base import Agent
 
 class MyCustomAgent(Agent):
     """Domain-specific feature generation agent."""
-    
+
     def generate(self, X, y, context):
         # Custom feature generation logic
         pass

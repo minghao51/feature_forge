@@ -13,32 +13,32 @@ from typing import Any
 
 class ExperimentTracker(ABC):
     """Abstract base for experiment tracking backends."""
-    
+
     @abstractmethod
     def init_run(self, config: dict[str, Any]) -> None:
         """Initialize a new run with configuration."""
         pass
-    
+
     @abstractmethod
     def log_params(self, params: dict[str, Any]) -> None:
         """Log hyperparameters."""
         pass
-    
+
     @abstractmethod
     def log_metrics(self, metrics: dict[str, float], step: int | None = None) -> None:
         """Log metrics, optionally with step."""
         pass
-    
+
     @abstractmethod
     def log_artifact(self, path: str, artifact_type: str) -> None:
         """Log a file or directory as an artifact."""
         pass
-    
+
     @abstractmethod
     def log_table(self, name: str, dataframe: Any) -> None:
         """Log a table (e.g., feature comparison)."""
         pass
-    
+
     @abstractmethod
     def finish(self) -> None:
         """Finalize the run."""
@@ -47,13 +47,13 @@ class ExperimentTracker(ABC):
 
 class TrackerFactory:
     """Create tracker instances based on configuration."""
-    
+
     _backends = {
         "wandb": "feature_forge.experiment.wandb_backend.WandBTracker",
         "mlflow": "feature_forge.experiment.mlflow_backend.MLflowTracker",
         "none": "feature_forge.experiment.tracker.NoOpTracker",
     }
-    
+
     @classmethod
     def create(cls, backend: str) -> ExperimentTracker:
         module_path, class_name = cls._backends[backend].rsplit(".", 1)
@@ -81,10 +81,10 @@ from .tracker import ExperimentTracker
 
 class WandBTracker(ExperimentTracker):
     """Weights & Biases experiment tracker."""
-    
+
     def __init__(self):
         self.run = None
-    
+
     def init_run(self, config: dict) -> None:
         self.run = wandb.init(
             project=config.get("tracker", {}).get("project", "feature-forge"),
@@ -92,13 +92,13 @@ class WandBTracker(ExperimentTracker):
             config=config,
             job_type="feature-engineering",
         )
-    
+
     def log_params(self, params: dict) -> None:
         wandb.config.update(params)
-    
+
     def log_metrics(self, metrics: dict, step: int | None = None) -> None:
         wandb.log(metrics, step=step)
-    
+
     def log_artifact(self, path: str, artifact_type: str) -> None:
         art = wandb.Artifact(
             name=f"{artifact_type}-{wandb.run.id}",
@@ -109,11 +109,11 @@ class WandBTracker(ExperimentTracker):
         else:
             art.add_dir(path)
         wandb.log_artifact(art)
-    
+
     def log_table(self, name: str, dataframe) -> None:
         table = wandb.Table(dataframe=dataframe)
         wandb.log({name: table})
-    
+
     def finish(self) -> None:
         if self.run:
             self.run.finish()
@@ -131,10 +131,10 @@ with wandb.init(project="feature-forge") as run:
         ("fe", MALMASFeatureEngineer(task="classification")),
         ("clf", XGBClassifier()),
     ])
-    
+
     pipeline.fit(X_train, y_train)
     score = pipeline.score(X_test, y_test)
-    
+
     wandb.log({"test_accuracy": score})
     wandb.sklearn.plot_classifier(
         pipeline.named_steps["clf"],
@@ -208,35 +208,35 @@ from .tracker import ExperimentTracker
 
 class MLflowTracker(ExperimentTracker):
     """MLflow experiment tracker."""
-    
+
     def __init__(self, tracking_uri: str | None = None):
         if tracking_uri:
             mlflow.set_tracking_uri(tracking_uri)
         self.run = None
-    
+
     def init_run(self, config: dict) -> None:
         experiment_name = config.get("tracker", {}).get("project", "feature-forge")
         mlflow.set_experiment(experiment_name)
         self.run = mlflow.start_run()
         mlflow.log_params(self._flatten_dict(config))
-    
+
     def log_params(self, params: dict) -> None:
         mlflow.log_params(params)
-    
+
     def log_metrics(self, metrics: dict, step: int | None = None) -> None:
         mlflow.log_metrics(metrics, step=step)
-    
+
     def log_artifact(self, path: str, artifact_type: str) -> None:
         mlflow.log_artifact(path)
-    
+
     def log_table(self, name: str, dataframe) -> None:
         path = f"/tmp/{name}.csv"
         dataframe.to_csv(path, index=False)
         mlflow.log_artifact(path)
-    
+
     def finish(self) -> None:
         mlflow.end_run()
-    
+
     def _flatten_dict(self, d: dict, parent_key: str = "", sep: str = ".") -> dict:
         """Flatten nested dicts for MLflow params."""
         items = []
@@ -270,7 +270,7 @@ For local development or when tracking is disabled:
 ```python
 class NoOpTracker(ExperimentTracker):
     """No-op tracker for when tracking is disabled."""
-    
+
     def init_run(self, config): pass
     def log_params(self, params): pass
     def log_metrics(self, metrics, step=None): pass
@@ -310,11 +310,11 @@ class NoOpTracker(ExperimentTracker):
     "round_1/best_feature_gain": 0.04,
     "round_1/llm_cost_usd": 0.15,
     "round_1/latency_seconds": 45.2,
-    
+
     # Cumulative metrics
     "cumulative/n_features_total": 12,
     "cumulative/auc_improvement": 0.05,
-    
+
     # Final metrics
     "final/base_auc": 0.82,
     "final/malmas_auc": 0.87,

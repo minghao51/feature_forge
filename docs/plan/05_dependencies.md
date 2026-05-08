@@ -38,32 +38,32 @@ dependencies = [
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
     "pyyaml>=6.0",
-    
+
     # Data
     "pandas>=2.0",
     "numpy>=1.24",
     "scikit-learn>=1.3",
-    
+
     # ML Models
     "xgboost>=2.0",
-    
+
     # LLM
     "openai>=1.0",
-    
+
     # Caching
     "diskcache>=5.6",
-    
+
     # Progress + CLI
     "tqdm>=4.65",
     "rich>=13.0",
-    
+
     # Logging
     "structlog>=24.0",
-    
+
     # Observability
     "langfuse>=2.0",
     "opentelemetry-api>=1.20",
-    
+
     # Experiment Tracking (default)
     "wandb>=0.16",
 ]

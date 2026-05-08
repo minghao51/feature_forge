@@ -1,8 +1,8 @@
 # Session Handoff Plan
 
-**Slug:** feature-forge-phases-4-13  
-**Readable Summary:** Continue Feature Forge Implementation (Phases 4-13)  
-**Date:** 2026-05-02  
+**Slug:** feature-forge-phases-4-13
+**Readable Summary:** Continue Feature Forge Implementation (Phases 4-13)
+**Date:** 2026-05-02
 
 ---
 

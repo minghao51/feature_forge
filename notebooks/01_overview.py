@@ -12,9 +12,10 @@ app = marimo.App(width="medium")
 
 @app.cell
 def __():
-    import pandas as pd
     import numpy as np
+    import pandas as pd
     from sklearn.datasets import make_classification
+
     return make_classification, np, pd
 
 
@@ -37,8 +38,8 @@ def __(df):
 
 @app.cell
 def __(df, y):
-    from feature_forge.evaluation import CVEvaluator
     from feature_forge.config import Settings
+    from feature_forge.evaluation import CVEvaluator
 
     config = Settings(task="classification", metric="auc")
     evaluator = CVEvaluator(config=config)
@@ -57,6 +58,7 @@ def __(baseline_score):
 def __():
     # Agent Registry
     from feature_forge.agents import AgentRegistry
+
     agents = AgentRegistry.get_builtin_agents()
     list(agents.keys())
     return AgentRegistry, agents

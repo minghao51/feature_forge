@@ -1,8 +1,8 @@
 # Feature Forge Implementation Plan
 
-**Version:** 0.1.0  
-**Date:** May 2026  
-**Status:** Draft  
+**Version:** 0.1.0
+**Date:** May 2026
+**Status:** Draft
 
 ## Overview
 

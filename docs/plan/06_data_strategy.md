@@ -41,20 +41,20 @@ import pandas as pd
 
 class DatasetFetcher(ABC):
     """Abstract base for dataset fetchers."""
-    
+
     @abstractmethod
     def fetch(self, name: str, save_dir: str = "data/raw") -> dict:
         """Download dataset and return paths + metadata.
-        
+
         Returns:
-            dict with keys: train_path, test_path, target_column, 
+            dict with keys: train_path, test_path, target_column,
                            description, task_type
         """
         pass
 
 class KaggleFetcher(DatasetFetcher):
     """Fetch datasets from Kaggle using kagglehub."""
-    
+
     def fetch(self, name: str, save_dir: str = "data/raw") -> dict:
         import kagglehub
         path = kagglehub.dataset_download(name)
@@ -64,7 +64,7 @@ class KaggleFetcher(DatasetFetcher):
 
 class OpenMLFetcher(DatasetFetcher):
     """Fetch datasets from OpenML."""
-    
+
     def fetch(self, name: str, save_dir: str = "data/raw") -> dict:
         from sklearn.datasets import fetch_openml
         # Download and save locally
@@ -72,7 +72,7 @@ class OpenMLFetcher(DatasetFetcher):
 
 class LocalFetcher(DatasetFetcher):
     """Load from local files."""
-    
+
     def fetch(self, name: str, save_dir: str = "data/raw") -> dict:
         # Load from data/raw/{name}/
         return {...}
@@ -84,7 +84,7 @@ class LocalFetcher(DatasetFetcher):
 # src/feature_forge/data/registry.py
 class DatasetRegistry:
     """Built-in registry of known datasets."""
-    
+
     DATASETS = {
         "titanic": {
             "source": "kaggle",
@@ -102,11 +102,11 @@ class DatasetRegistry:
         },
         # ... etc
     }
-    
+
     @classmethod
     def list(cls) -> list[str]:
         return list(cls.DATASETS.keys())
-    
+
     @classmethod
     def get(cls, name: str) -> dict:
         return cls.DATASETS[name]
@@ -221,11 +221,11 @@ Return: df_train, df_test, target, metadata
 # Future extension for Phase 2
 class RelationalDataset:
     """Multi-table dataset with relationships."""
-    
+
     def __init__(self, tables: dict[str, pd.DataFrame], relationships: list[dict]):
         self.tables = tables
         self.relationships = relationships
-    
+
     def join(self, table1: str, table2: str, on: str) -> pd.DataFrame:
         """Join two tables on a key."""
         return pd.merge(self.tables[table1], self.tables[table2], on=on)

@@ -26,7 +26,7 @@ def add_open_telemetry_spans(logger, method_name, event_dict):
     if not span.is_recording():
         event_dict["span"] = None
         return event_dict
-    
+
     ctx = span.get_span_context()
     event_dict["span"] = {
         "span_id": format(ctx.span_id, "016x"),
@@ -42,7 +42,7 @@ def configure_logging():
         structlog.processors.TimeStamper(fmt="iso", utc=True),
         add_open_telemetry_spans,
     ]
-    
+
     if sys.stderr.isatty():
         # Development: colorful, human-readable
         processors = shared_processors + [
@@ -54,7 +54,7 @@ def configure_logging():
             structlog.processors.dict_tracebacks,
             structlog.processors.JSONRenderer(),
         ]
-    
+
     structlog.configure(
         processors=processors,
         context_class=dict,
@@ -151,7 +151,7 @@ async def generate_features(self, X, y, context):
 async def _generate_plan(self, prompt, model, temperature):
     """LLM call with token/cost tracking."""
     response = await self.llm_client.complete(prompt, model, temperature)
-    
+
     # Update with usage metrics
     # (Langfuse auto-captures if using wrapped OpenAI client)
     return response
@@ -281,13 +281,13 @@ Langfuse exports OTel traces natively. structlog includes `trace_id` and `span_i
 logging:
   level: "INFO"  # DEBUG, INFO, WARNING, ERROR
   format: "json"  # json or pretty (auto-detected if not set)
-  
+
 langfuse:
   enabled: true
   public_key: "${LANGFUSE_PUBLIC_KEY}"  # From .env
   secret_key: "${LANGFUSE_SECRET_KEY}"  # From .env
   host: "https://cloud.langfuse.com"
-  
+
 opentelemetry:
   enabled: true
   exporter: "langfuse"  # Langfuse acts as OTel backend

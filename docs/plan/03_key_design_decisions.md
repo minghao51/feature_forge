@@ -87,10 +87,10 @@ import json
 
 class LLMCache:
     """Deterministic disk cache for LLM responses."""
-    
+
     def __init__(self, cache_dir: str = "memory_files/llm_cache"):
         self.cache = Cache(cache_dir)
-    
+
     def get_key(self, messages: list, model: str, temperature: float, max_tokens: int) -> str:
         content = json.dumps({
             "model": model,
@@ -99,10 +99,10 @@ class LLMCache:
             "messages": messages,
         }, sort_keys=True)
         return hashlib.sha256(content.encode()).hexdigest()
-    
+
     def get(self, key: str) -> dict | None:
         return self.cache.get(key)
-    
+
     def set(self, key: str, value: dict) -> None:
         self.cache[key] = value
 ```
@@ -130,18 +130,18 @@ import builtins
 
 class SandboxedExecutor:
     """AST-validated, restricted-builtin code execution."""
-    
+
     FORBIDDEN_NAMES = {
         "eval", "exec", "compile", "open", "input",
         "__import__", "exit", "quit",
     }
-    
+
     ALLOWED_BUILTINS = {
         "abs", "all", "any", "bool", "dict", "float", "int",
         "len", "list", "map", "max", "min", "range", "round",
         "sorted", "str", "sum", "tuple", "zip",
     }
-    
+
     def execute(self, code: str, globals_dict: dict) -> dict:
         """Execute code with restricted builtins."""
         # Parse and validate AST
@@ -149,23 +149,23 @@ class SandboxedExecutor:
             tree = ast.parse(code)
         except SyntaxError as e:
             raise CodeExecutionError(f"Invalid syntax: {e}")
-        
+
         self._validate_ast(tree)
-        
+
         # Build restricted globals
         safe_globals = {
             "__builtins__": {name: getattr(builtins, name) for name in self.ALLOWED_BUILTINS},
         }
         safe_globals.update(globals_dict)
-        
+
         local_vars = {}
         try:
             exec(code, safe_globals, local_vars)
         except Exception as e:
             raise CodeExecutionError(f"Execution failed: {e}") from e
-        
+
         return local_vars
-    
+
     def _validate_ast(self, tree: ast.AST) -> None:
         """Check AST for forbidden operations."""
         for node in ast.walk(tree):
@@ -194,28 +194,28 @@ from abc import ABC, abstractmethod
 
 class Agent(ABC):
     """Abstract base for feature generation agents."""
-    
+
     def __init__(self, name: str, config: "Settings"):
         self.name = name
         self.config = config
         self.memory = []
-    
+
     @abstractmethod
     async def generate(self, X, y, context: dict) -> list["FeatureSpec"]:
         pass
 
 class AgentRegistry:
     """Discover agents via Python entry points."""
-    
+
     ENTRY_POINT_GROUP = "feature_forge.agents"
-    
+
     @classmethod
     def discover(cls) -> dict[str, type[Agent]]:
         agents = {}
         for ep in importlib.metadata.entry_points(group=cls.ENTRY_POINT_GROUP):
             agents[ep.name] = ep.load()
         return agents
-    
+
     @classmethod
     def get_builtin_agents(cls) -> dict[str, type[Agent]]:
         """Return built-in agents without entry point discovery."""
@@ -257,11 +257,11 @@ llmfe = "feature_forge.baselines.llmfe:LLMFEBaseline"
 # Agent-level parallelism
 async def run_round(self, agents: list[Agent], X, y):
     semaphore = asyncio.Semaphore(self.config.llm.max_concurrent_calls or 3)
-    
+
     async def run_with_limit(agent):
         async with semaphore:
             return await agent.generate(X, y, context=self.memory.get_context())
-    
+
     results = await asyncio.gather(*[run_with_limit(a) for a in agents])
     return results
 ```
