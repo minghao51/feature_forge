@@ -55,7 +55,11 @@ class WandBTracker(ExperimentTracker):
 
     def log_artifact(self, path: str, artifact_type: str = "dataset") -> None:
         if self._run is not None:
-            artifact = self._run.use_artifact(path, type=artifact_type) if path.startswith("wandb:") else None
+            artifact = (
+                self._run.use_artifact(path, type=artifact_type)
+                if path.startswith("wandb:")
+                else None
+            )
             if artifact is None:
                 art = self._run.Artifact(name=path.split("/")[-1], type=artifact_type)
                 art.add_file(path)
@@ -71,6 +75,7 @@ class WandBTracker(ExperimentTracker):
             return
         try:
             import wandb
+
             table = wandb.Table(dataframe=df)
             self._run.log({key: table})
         except ImportError:
@@ -86,7 +91,10 @@ class WandBTracker(ExperimentTracker):
 
             if self.log_code_to_artifact:
                 with tempfile.NamedTemporaryFile(
-                    mode="w", suffix=".py", delete=False, prefix=f"{key}_",
+                    mode="w",
+                    suffix=".py",
+                    delete=False,
+                    prefix=f"{key}_",
                 ) as f:
                     f.write(code)
                     f.flush()

@@ -58,5 +58,7 @@ class Reporter:
             "total_runs": len(self.df),
             "successful_runs": len(self.df[self.df.get("error", pd.Series()).isna()]),
             "failed_runs": len(self.df[self.df.get("error", pd.Series()).notna()]),
-            "mean_metrics": {col: float(self.df[col].mean()) for col in numeric_cols if col != "error"},
+            "mean_metrics": {
+                col: float(self.df[col].mean()) for col in numeric_cols if col != "error"
+            },
         }

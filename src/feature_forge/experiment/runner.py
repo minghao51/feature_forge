@@ -49,7 +49,9 @@ class ExperimentRunner:
             try:
                 result = experiment_fn(config)
                 if self.tracker is not None:
-                    self.tracker.log_metrics({k: v for k, v in result.items() if isinstance(v, float)})
+                    self.tracker.log_metrics(
+                        {k: v for k, v in result.items() if isinstance(v, float)}
+                    )
                 results.append({**config, **result})
             except Exception as exc:
                 results.append({**config, "error": str(exc)})

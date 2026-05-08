@@ -12,23 +12,14 @@ from feature_forge.experiment import (
 
 class TestExperimentMatrix:
     def test_generate_combinations(self):
-        matrix = (
-            ExperimentMatrix()
-            .datasets(["titanic"])
-            .seeds([0, 1])
-            .models(["xgb"])
-        )
+        matrix = ExperimentMatrix().datasets(["titanic"]).seeds([0, 1]).models(["xgb"])
         configs = matrix.generate()
         assert len(configs) == 2
         assert configs[0]["dataset"] == "titanic"
         assert configs[0]["seed"] == 0
 
     def test_len(self):
-        matrix = (
-            ExperimentMatrix()
-            .datasets(["a", "b"])
-            .seeds([0, 1, 2])
-        )
+        matrix = ExperimentMatrix().datasets(["a", "b"]).seeds([0, 1, 2])
         assert len(matrix) == 6
 
     def test_empty_params(self):

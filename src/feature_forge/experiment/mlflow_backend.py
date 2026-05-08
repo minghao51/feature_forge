@@ -14,7 +14,9 @@ from feature_forge.experiment.tracker import ExperimentTracker
 class MLflowTracker(ExperimentTracker):
     """MLflow experiment tracking backend."""
 
-    def __init__(self, project: str, entity: str | None = None, tracking_uri: str | None = None) -> None:
+    def __init__(
+        self, project: str, entity: str | None = None, tracking_uri: str | None = None
+    ) -> None:
         super().__init__(project, entity)
         self.tracking_uri = tracking_uri
         self._run_id: str | None = None
@@ -72,7 +74,10 @@ class MLflowTracker(ExperimentTracker):
         except ImportError:
             return
         with tempfile.NamedTemporaryFile(
-            mode="wb", suffix=".parquet", delete=False, prefix=f"{key}_",
+            mode="wb",
+            suffix=".parquet",
+            delete=False,
+            prefix=f"{key}_",
         ) as f:
             df.to_parquet(f.name)
             mlflow.log_artifact(f.name, artifact_path=key)
@@ -86,7 +91,10 @@ class MLflowTracker(ExperimentTracker):
         except ImportError:
             return
         with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", delete=False, prefix=f"{key}_",
+            mode="w",
+            suffix=".py",
+            delete=False,
+            prefix=f"{key}_",
         ) as f:
             f.write(code)
             f.flush()
