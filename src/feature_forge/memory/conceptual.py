@@ -23,7 +23,9 @@ class ConceptualMemory:
         """Generate conceptual summary for a single agent's memory."""
         num_effective = sum(1 for fb in memory.feedback if fb.get("effective", False))
         if num_effective < min_effective:
-            memory.conceptual_summary = "Few valid features, no available information at the moment."
+            memory.conceptual_summary = (
+                "Few valid features, no available information at the moment."
+            )
             memory.record_conceptual(memory.conceptual_summary)
             return memory.conceptual_summary
 
@@ -50,7 +52,9 @@ class ConceptualMemory:
                 )
 
         if not effective_examples:
-            memory.conceptual_summary = "No effective patterns were found in this agent's recent feature generation."
+            memory.conceptual_summary = (
+                "No effective patterns were found in this agent's recent feature generation."
+            )
             memory.record_conceptual(memory.conceptual_summary)
             return memory.conceptual_summary
 
@@ -91,8 +95,16 @@ class ConceptualMemory:
         """Generate a global conceptual summary across all agents."""
         sections: list[str] = []
         for agent_name, memory in memories.items():
-            conceptual = memory.conceptual_summary.strip() if memory.conceptual_summary else "No conceptual summary available."
-            stats = json.dumps(memory.stats, ensure_ascii=False, indent=2) if memory.stats else "No stats available."
+            conceptual = (
+                memory.conceptual_summary.strip()
+                if memory.conceptual_summary
+                else "No conceptual summary available."
+            )
+            stats = (
+                json.dumps(memory.stats, ensure_ascii=False, indent=2)
+                if memory.stats
+                else "No stats available."
+            )
             sections.append(
                 f"Agent: {agent_name}:\nStatistics:\n{stats}\nConceptual Summary:\n{conceptual}\n------------------------"
             )

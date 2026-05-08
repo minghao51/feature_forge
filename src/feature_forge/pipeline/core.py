@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import structlog
 
 from feature_forge.agents.base import Agent
 from feature_forge.config import Settings
@@ -19,6 +20,8 @@ from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.exceptions import PipelineError
 from feature_forge.llm.base import LLMClient
 from feature_forge.types import FeatureSpec
+
+logger = structlog.get_logger()
 
 
 class CodeGenerator:
@@ -67,7 +70,10 @@ class CorePipeline:
         self.config = config
         self.llm_client = llm_client
         self.evaluator = evaluator or CVEvaluator(config)
-        self.sandbox = sandbox or SandboxedExecutor()
+        self.sandbox = sandbox or SandboxedExecutor(
+            timeout_seconds=config.evaluation.sandbox_timeout_seconds,
+            max_memory_mb=config.evaluation.sandbox_max_memory_mb,
+        )
         self.code_generator = code_generator or CodeGenerator(llm_client)
 
     async def run(
@@ -109,6 +115,13 @@ class CorePipeline:
         all_specs: list[FeatureSpec] = []
         for agent, specs in zip(agents, agent_specs_list, strict=False):
             if isinstance(specs, Exception):
+                logger.warning(
+                    "agent_generation_failed",
+                    agent=agent.name,
+                    error=str(specs),
+                )
+                if self.config.evaluation.fail_on_agent_error:
+                    raise PipelineError(f"Agent '{agent.name}' failed: {specs}") from specs
                 continue
             for spec in specs:
                 spec["agent_name"] = agent.name
@@ -156,13 +169,17 @@ class CorePipeline:
         # Step 4: Evaluate each feature
         baseline_score = self.evaluator.evaluate_baseline(X_train, y_train)
         gains: dict[str, float] = {}
-        for col in features_train.columns:
+        candidate_columns = self._prefilter_candidate_columns(features_train)
+        for col in candidate_columns:
             try:
                 gain = self.evaluator.evaluate_feature(
                     X_train, y_train, features_train[[col]], baseline_score=baseline_score
                 )
                 gains[col] = gain
-            except Exception:
+            except Exception as exc:
+                logger.warning("feature_evaluation_failed", feature=col, error=str(exc))
+                if self.config.evaluation.fail_on_feature_error:
+                    raise PipelineError(f"Feature evaluation failed for '{col}': {exc}") from exc
                 gains[col] = float("-inf")
 
         # Step 5: Select top-k effective features
@@ -170,13 +187,19 @@ class CorePipeline:
         top_k = sorted(effective.items(), key=lambda x: x[1], reverse=True)
         top_k_names = [name for name, _ in top_k[: self.config.min_effective]]
 
-        top_features_train = features_train[top_k_names] if top_k_names else pd.DataFrame(index=X_train.index)
-        top_features_test = features_test[top_k_names] if top_k_names and X_test is not None else pd.DataFrame()
+        top_features_train = (
+            features_train[top_k_names] if top_k_names else pd.DataFrame(index=X_train.index)
+        )
+        top_features_test = (
+            features_test[top_k_names] if top_k_names and X_test is not None else pd.DataFrame()
+        )
 
         # Build per-agent gain DataFrames
         agent_gains: dict[str, pd.DataFrame] = {}
         for agent in agents:
-            agent_feature_names = [s["name"] for s in all_specs if s.get("agent_name") == agent.name]
+            agent_feature_names = [
+                s["name"] for s in all_specs if s.get("agent_name") == agent.name
+            ]
             agent_gain_rows = []
             for fname in agent_feature_names:
                 if fname in gains:
@@ -197,3 +220,29 @@ class CorePipeline:
             "gains": gains,
             "generated_code": code,
         }
+
+    def _prefilter_candidate_columns(self, features_train: pd.DataFrame) -> list[str]:
+        """Lightweight pre-filter before expensive CV scoring."""
+        if features_train.empty:
+            return []
+
+        candidates = []
+        for col in features_train.columns:
+            series = features_train[col]
+            if series.nunique(dropna=False) <= 1:
+                continue
+            candidates.append(col)
+
+        max_candidates = self.config.evaluation.max_candidate_features
+        if len(candidates) <= max_candidates:
+            return candidates
+
+        variances: list[tuple[str, float]] = []
+        for col in candidates:
+            series = features_train[col]
+            if pd.api.types.is_numeric_dtype(series):
+                variances.append((col, float(series.var(ddof=0))))
+            else:
+                variances.append((col, 0.0))
+        variances.sort(key=lambda x: x[1], reverse=True)
+        return [col for col, _ in variances[:max_candidates]]

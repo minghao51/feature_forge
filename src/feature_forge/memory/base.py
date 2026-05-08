@@ -162,11 +162,7 @@ class AgentMemory:
 
     def get_positive_negative_features(self) -> tuple[list[str], list[str]]:
         """Return lists of positive (effective) and negative feature names."""
-        positive = [
-            fb["feature_name"]
-            for fb in self.feedback
-            if fb.get("effective", False)
-        ]
+        positive = [fb["feature_name"] for fb in self.feedback if fb.get("effective", False)]
         negative = [item["feature_name"] for item in self.unused_procedural]
         return positive, negative
 
@@ -224,7 +220,9 @@ class AgentMemory:
                 effective_types[ty] = effective_types.get(ty, 0) + 1
 
         self.stats = {
-            "effective_transforms": {k: v for k, v in effective_transforms.items() if v >= min_effective},
+            "effective_transforms": {
+                k: v for k, v in effective_transforms.items() if v >= min_effective
+            },
             "effective_fields": {k: v for k, v in effective_fields.items() if v >= min_effective},
             "effective_types": {k: v for k, v in effective_types.items() if v >= min_effective},
         }

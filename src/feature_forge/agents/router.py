@@ -76,9 +76,7 @@ class RouterAgent:
         self.warmup_rounds = 1
         self.use_llm = self.strategy == "llm"
 
-        self.agent_performance: dict[str, list[float]] = {
-            name: [] for name in self.agent_names
-        }
+        self.agent_performance: dict[str, list[float]] = {name: [] for name in self.agent_names}
         self.agent_selection_count: dict[str, int] = dict.fromkeys(self.agent_names, 0)
         self.dataset_characteristics: dict[str, Any] | None = None
 
@@ -128,7 +126,10 @@ class RouterAgent:
                 should_include = False
             if "no_numerical_columns" in excluded_if and not chars["numerical_columns"]:
                 should_include = False
-            if "no_categorical_for_grouping" in excluded_if and len(chars["categorical_columns"]) < 1:
+            if (
+                "no_categorical_for_grouping" in excluded_if
+                and len(chars["categorical_columns"]) < 1
+            ):
                 should_include = False
             if capabilities.get("requires_enrich") and not chars["has_enrich_description"]:
                 should_include = False
@@ -150,9 +151,7 @@ class RouterAgent:
             name: (sum(gains) / len(gains) if gains else float("-inf"))
             for name, gains in self.agent_performance.items()
         }
-        sorted_agents = sorted(
-            avg_performance.items(), key=lambda x: x[1], reverse=True
-        )
+        sorted_agents = sorted(avg_performance.items(), key=lambda x: x[1], reverse=True)
         selected: list[str] = []
         for agent_name, avg_gain in sorted_agents:
             if avg_gain >= 0.0:
@@ -258,9 +257,7 @@ class RouterAgent:
                     df, description or {}, enrich_description
                 )
             if self.use_llm and self.llm_client is not None:
-                selected = await self._llm_based_selection(
-                    round_idx, description, task_description
-                )
+                selected = await self._llm_based_selection(round_idx, description, task_description)
             elif self.strategy == "data_driven":
                 selected = self._data_driven_selection()
             elif self.strategy == "performance_driven":

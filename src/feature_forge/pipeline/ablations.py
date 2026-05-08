@@ -64,9 +64,12 @@ class SingleAgentPipeline(IterativePipeline):
 
         # Temporarily replace router
         original_select = self.router.select_agents
+
         async def _fixed_select(*args, **kwargs):
             from feature_forge.types import AgentName
+
             return [AgentName(self.fixed_agent_name)]
+
         self.router.select_agents = _fixed_select
         try:
             result = await super().run(X_train, y_train, X_test, description, task_description)
@@ -87,9 +90,12 @@ class NoRouterPipeline(IterativePipeline):
         task_description: str = "",
     ) -> dict[str, Any]:
         """Run with all agents every round."""
+
         async def _all_agents(*args, **kwargs):
             from feature_forge.types import AgentName
+
             return [AgentName(name) for name in self.router.agent_names]
+
         original_select = self.router.select_agents
         self.router.select_agents = _all_agents
         try:

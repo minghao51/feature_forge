@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pandas as pd
+import structlog
 
 from feature_forge.agents.base import Agent, AgentRegistry
 from feature_forge.agents.router import RouterAgent
@@ -15,6 +16,8 @@ from feature_forge.llm.base import LLMClient
 from feature_forge.memory.base import AgentMemory
 from feature_forge.memory.conceptual import ConceptualMemory
 from feature_forge.pipeline.core import CodeGenerator, CorePipeline
+
+logger = structlog.get_logger()
 
 
 class IterativePipeline:
@@ -170,12 +173,12 @@ class IterativePipeline:
 
             # 7. Append top features to enhanced datasets
             top_train = core_results["top_features_train"]
+            top_test = core_results.get("top_features_test", pd.DataFrame())
             if not top_train.empty:
                 for col in top_train.columns:
                     if col not in X_train_enhanced.columns:
                         X_train_enhanced[col] = top_train[col]
                 if X_test_enhanced is not None:
-                    top_test = core_results["top_features_test"]
                     for col in top_test.columns:
                         if col not in X_test_enhanced.columns:
                             X_test_enhanced[col] = top_test[col]
@@ -197,7 +200,9 @@ class IterativePipeline:
                     "all_features_train": core_results.get("all_features_train", pd.DataFrame()),
                     "all_features_test": core_results.get("all_features_test", pd.DataFrame()),
                     "selected_features_train": top_train,
-                    "selected_features_test": top_test if X_test_enhanced is not None else pd.DataFrame(),
+                    "selected_features_test": top_test
+                    if X_test_enhanced is not None
+                    else pd.DataFrame(),
                     "specs": core_results.get("specs", []),
                     "agent_gains": core_results.get("agent_gains", {}),
                     "baseline_score": core_results["baseline_score"],
@@ -212,9 +217,7 @@ class IterativePipeline:
         return {
             "X_train_enhanced": X_train_enhanced,
             "X_test_enhanced": X_test_enhanced,
-            "selected_features": [
-                c for c in X_train_enhanced.columns if c not in X_train.columns
-            ],
+            "selected_features": [c for c in X_train_enhanced.columns if c not in X_train.columns],
             "round_summaries": round_summaries,
             "round_artifacts": self.round_artifacts,
             "agent_gains": all_agent_gains,
@@ -225,6 +228,8 @@ class IterativePipeline:
         """Get or create agent memory."""
         if agent_name not in self.memories:
             import os
+
             path = os.path.join(self.memory_dir, f"{agent_name}_memory.json")
             self.memories[agent_name] = AgentMemory(agent_name, path)
+            logger.debug("agent_memory_initialized", agent=agent_name, path=path)
         return self.memories[agent_name]

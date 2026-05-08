@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 import pandas as pd
+import structlog
 from sklearn.base import BaseEstimator, TransformerMixin
 
 from feature_forge.artifacts.base import ArtifactConfig, ArtifactExporter
@@ -25,6 +26,9 @@ from feature_forge.pipeline.ablations import (
     SingleAgentPipeline,
 )
 from feature_forge.pipeline.iterative import IterativePipeline
+from feature_forge.utils import run_coro_sync
+
+logger = structlog.get_logger()
 
 
 class MALMASFeatureEngineer(BaseEstimator, TransformerMixin, ArtifactExporter):
@@ -54,8 +58,12 @@ class MALMASFeatureEngineer(BaseEstimator, TransformerMixin, ArtifactExporter):
         self.mode = mode
         self.selected_features: list[str] = []
         self.feature_codes: list[str] = []
-        self.sandbox = SandboxedExecutor()
+        self.sandbox = SandboxedExecutor(
+            timeout_seconds=self.config.evaluation.sandbox_timeout_seconds,
+            max_memory_mb=self.config.evaluation.sandbox_max_memory_mb,
+        )
         self.pipeline_result: dict[str, Any] | None = None
+        self.transform_failures: list[dict[str, str]] = []
         ArtifactExporter.__init__(self, artifact_config=artifact_config)
 
     def _default_llm_client(self) -> LLMClient:
@@ -73,7 +81,14 @@ class MALMASFeatureEngineer(BaseEstimator, TransformerMixin, ArtifactExporter):
             return NoMemoryPipeline(self.config, self.llm_client)
         if self.mode == "no_router":
             return NoRouterPipeline(self.config, self.llm_client)
-        if self.mode in ("unary", "cross_compositional", "aggregation", "temporal", "local_transform", "local_pattern"):
+        if self.mode in (
+            "unary",
+            "cross_compositional",
+            "aggregation",
+            "temporal",
+            "local_transform",
+            "local_pattern",
+        ):
             return SingleAgentPipeline(self.mode, self.config, self.llm_client)
         return IterativePipeline(self.config, self.llm_client)
 
@@ -87,12 +102,16 @@ class MALMASFeatureEngineer(BaseEstimator, TransformerMixin, ArtifactExporter):
         Returns:
             Self.
         """
+        self.pipeline_result = run_coro_sync(self.async_fit(X, y))
+        return self
+
+    async def async_fit(self, X: pd.DataFrame, y: pd.Series) -> dict[str, Any]:
+        """Async variant of fit() for notebook/service environments."""
         pipeline = self._get_pipeline()
-        import asyncio
-        self.pipeline_result = asyncio.run(pipeline.run(X, y))
+        self.pipeline_result = await pipeline.run(X, y)
         self.selected_features = self.pipeline_result["selected_features"]
         self.feature_codes = self.pipeline_result.get("feature_codes", [])
-        return self
+        return self.pipeline_result
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         """Apply generated features to new data.
@@ -106,6 +125,7 @@ class MALMASFeatureEngineer(BaseEstimator, TransformerMixin, ArtifactExporter):
             DataFrame with original + generated features.
         """
         X_out = X.copy()
+        self.transform_failures = []
         for code in self.feature_codes:
             if not code:
                 continue
@@ -114,8 +134,12 @@ class MALMASFeatureEngineer(BaseEstimator, TransformerMixin, ArtifactExporter):
                 for col in features.columns:
                     if col not in X_out.columns:
                         X_out[col] = features[col].values
-            except Exception:
-                continue
+            except Exception as exc:
+                error_msg = str(exc)
+                self.transform_failures.append({"code": code[:200], "error": error_msg})
+                logger.warning("transform_feature_generation_failed", error=error_msg)
+                if self.config.evaluation.fail_on_feature_error:
+                    raise
         return X_out
 
     def fit_transform(self, X: pd.DataFrame, y: pd.Series) -> pd.DataFrame:
@@ -165,15 +189,17 @@ class MALMASFeatureEngineer(BaseEstimator, TransformerMixin, ArtifactExporter):
                     feat_name = spec.get("name", "")
                     agent = spec.get("agent", agents[0] if agents else None)
                     gain = gains.get(feat_name) if isinstance(gains, dict) else None
-                    records.append({
-                        "feature_name": feat_name,
-                        "source_method": "malmas",
-                        "source_agent": agent,
-                        "round_index": round_idx,
-                        "iteration_index": None,
-                        "generated_code": code,
-                        "cv_gain": gain,
-                    })
+                    records.append(
+                        {
+                            "feature_name": feat_name,
+                            "source_method": "malmas",
+                            "source_agent": agent,
+                            "round_index": round_idx,
+                            "iteration_index": None,
+                            "generated_code": code,
+                            "cv_gain": gain,
+                        }
+                    )
         return records
 
     def get_artifacts(self) -> dict[str, Any]:
@@ -196,4 +222,5 @@ class MALMASFeatureEngineer(BaseEstimator, TransformerMixin, ArtifactExporter):
         artifacts["selected_features"] = self.selected_features
         artifacts["feature_codes"] = self.feature_codes
         artifacts["provenance"] = self.provenance_records
+        artifacts["transform_failures"] = self.transform_failures
         return artifacts
