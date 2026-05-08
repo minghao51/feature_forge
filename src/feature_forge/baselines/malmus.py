@@ -16,6 +16,7 @@ import json
 from typing import Any, Literal
 
 import pandas as pd
+import structlog
 from pydantic import BaseModel, Field, ValidationError
 
 from feature_forge.artifacts.base import ArtifactConfig
@@ -25,6 +26,9 @@ from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.exceptions import EvaluationError
 from feature_forge.llm.base import LLMClient
 from feature_forge.llm.providers.deepseek import DeepSeekProvider
+from feature_forge.utils import run_coro_sync
+
+logger = structlog.get_logger()
 
 
 class FeatureDefinition(BaseModel):
@@ -115,17 +119,22 @@ class MalmusBaseline(Baseline):
         self.n_features = n_features
         self.mode = mode
         self.evaluator = evaluator
-        self.sandbox = SandboxedExecutor()
+        eval_cfg = evaluator.config.evaluation if evaluator else None
+        self.sandbox = SandboxedExecutor(
+            timeout_seconds=eval_cfg.sandbox_timeout_seconds if eval_cfg else 5.0,
+            max_memory_mb=eval_cfg.sandbox_max_memory_mb if eval_cfg else 512,
+        )
         self._feature_defs: list[FeatureDefinition] = []
 
     def fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> MalmusBaseline:
-        import asyncio
-
-        if self.mode == "iterative":
-            asyncio.run(self._fit_iterative(X_train, y_train))
-        else:
-            asyncio.run(self._fit_single_shot(X_train, y_train))
+        run_coro_sync(self.async_fit(X_train, y_train))
         return self
+
+    async def async_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> None:
+        if self.mode == "iterative":
+            await self._fit_iterative(X_train, y_train)
+        else:
+            await self._fit_single_shot(X_train, y_train)
 
     async def _fit_single_shot(self, X: pd.DataFrame, y: pd.Series) -> None:
         prompt = self._build_prompt(X, y)
@@ -218,6 +227,7 @@ class MalmusBaseline(Baseline):
                 iteration_record["error"] = str(exc)
                 iteration_record["kept"] = False
                 feedback_str = f"Previous iteration failed: {exc}"
+                logger.warning("malmus_iteration_failed", iteration=i, error=str(exc))
 
             iterations.append(iteration_record)
 
@@ -253,9 +263,7 @@ class MalmusBaseline(Baseline):
             for it in iterations:
                 for col, gain in it.get("gains", {}).items():
                     defs = it.get("feature_definitions", [])
-                    matching: dict[str, Any] = next(
-                        (d for d in defs if d.get("name") == col), {}
-                    )
+                    matching: dict[str, Any] = next((d for d in defs if d.get("name") == col), {})
                     meta.append(
                         {
                             "name": col,
@@ -290,9 +298,7 @@ class MalmusBaseline(Baseline):
         for it in iterations:
             for col, gain in it.get("gains", {}).items():
                 defs = it.get("feature_definitions", [])
-                matching: dict[str, Any] = next(
-                    (d for d in defs if d.get("name") == col), {}
-                )
+                matching: dict[str, Any] = next((d for d in defs if d.get("name") == col), {})
                 records.append(
                     {
                         "feature_name": col,

@@ -87,3 +87,17 @@ class LangfuseLLMWrapper(LLMClient):
             )
 
         return response
+
+    async def complete_json(
+        self,
+        messages: list[dict[str, str]],
+        schema_description: str,
+        temperature: float = 0.2,
+        max_tokens: int = 4096,
+    ) -> dict[str, Any]:
+        return await self._client.complete_json(
+            messages=messages,
+            schema_description=schema_description,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )

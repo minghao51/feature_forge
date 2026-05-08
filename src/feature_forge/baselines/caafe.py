@@ -13,6 +13,7 @@ import warnings
 from typing import Any, Literal
 
 import pandas as pd
+import structlog
 
 from feature_forge.artifacts.base import ArtifactConfig
 from feature_forge.baselines.base import Baseline
@@ -20,7 +21,9 @@ from feature_forge.evaluation.cv import CVEvaluator
 from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.exceptions import EvaluationError
 from feature_forge.llm.base import LLMClient
-from feature_forge.utils import strip_markdown_fences
+from feature_forge.utils import run_coro_sync, strip_markdown_fences
+
+logger = structlog.get_logger()
 
 
 class CAAFEBaseline(Baseline):
@@ -50,17 +53,26 @@ class CAAFEBaseline(Baseline):
         self.iterations = iterations
         self.variant = variant
         self.evaluator = evaluator
-        self.sandbox = SandboxedExecutor()
+        eval_cfg = evaluator.config.evaluation if evaluator else None
+        self.sandbox = SandboxedExecutor(
+            timeout_seconds=eval_cfg.sandbox_timeout_seconds if eval_cfg else 5.0,
+            max_memory_mb=eval_cfg.sandbox_max_memory_mb if eval_cfg else 512,
+        )
         self._caafe = None
         self._iteration_codes: list[str] = []
 
     def fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> CAAFEBaseline:
         if self.variant == "fidelity":
             self._fit_fidelity(X_train, y_train)
-        else:
-            import asyncio
-            asyncio.run(self._fit_unified(X_train, y_train))
+            return self
+        run_coro_sync(self.async_fit(X_train, y_train))
         return self
+
+    async def async_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> None:
+        if self.variant == "fidelity":
+            self._fit_fidelity(X_train, y_train)
+        else:
+            await self._fit_unified(X_train, y_train)
 
     def _fit_fidelity(self, X_train: pd.DataFrame, y_train: pd.Series) -> None:
         try:
@@ -109,7 +121,11 @@ class CAAFEBaseline(Baseline):
 
         for i in range(self.iterations):
             prompt = self._build_caafe_prompt(
-                X_train, description, i, cumulative_cols, feedback_str,
+                X_train,
+                description,
+                i,
+                cumulative_cols,
+                feedback_str,
             )
             raw_response = await self.llm_client.complete(
                 messages=[{"role": "user", "content": prompt}],
@@ -132,7 +148,9 @@ class CAAFEBaseline(Baseline):
 
                 for col in new_features.columns:
                     gain = evaluator.evaluate_feature(
-                        X_train, y_train, new_features[[col]],
+                        X_train,
+                        y_train,
+                        new_features[[col]],
                         baseline_score=baseline_score,
                     )
                     if gain > 0:
@@ -140,8 +158,12 @@ class CAAFEBaseline(Baseline):
                         kept_gains[col] = gain
                         cumulative_cols.append(col)
 
-                iteration_record["all_new_features"] = self._storage.store(f"caafe_iter_{i}_all", new_features)
-                iteration_record["kept_features"] = self._storage.store(f"caafe_iter_{i}_kept", kept_features)
+                iteration_record["all_new_features"] = self._storage.store(
+                    f"caafe_iter_{i}_all", new_features
+                )
+                iteration_record["kept_features"] = self._storage.store(
+                    f"caafe_iter_{i}_kept", kept_features
+                )
                 iteration_record["gains"] = kept_gains
                 iteration_record["kept"] = len(kept_gains) > 0
 
@@ -156,6 +178,7 @@ class CAAFEBaseline(Baseline):
                 iteration_record["error"] = str(exc)
                 iteration_record["kept"] = False
                 feedback_str = f"Previous iteration failed: {exc}"
+                logger.warning("caafe_iteration_failed", iteration=i, error=str(exc))
 
             iteration_codes.append(code_block)
             iterations.append(iteration_record)
@@ -186,8 +209,10 @@ class CAAFEBaseline(Baseline):
                 for col in features.columns:
                     if col not in result.columns:
                         result[col] = features[col].values
-            except Exception:
-                continue
+            except Exception as exc:
+                logger.warning("caafe_transform_step_failed", error=str(exc))
+                if self.evaluator and self.evaluator.config.evaluation.fail_on_feature_error:
+                    raise
         new_cols = [c for c in result.columns if c not in X.columns]
         return result[new_cols] if new_cols else result
 
@@ -202,14 +227,16 @@ class CAAFEBaseline(Baseline):
             meta = []
             for it in iterations:
                 for col, gain in it.get("gains", {}).items():
-                    meta.append({
-                        "name": col,
-                        "method": "caafe",
-                        "iteration": it.get("iteration"),
-                        "gain": gain,
-                        "kept": it.get("kept", False),
-                        "code": it.get("generated_code", ""),
-                    })
+                    meta.append(
+                        {
+                            "name": col,
+                            "method": "caafe",
+                            "iteration": it.get("iteration"),
+                            "gain": gain,
+                            "kept": it.get("kept", False),
+                            "code": it.get("generated_code", ""),
+                        }
+                    )
             return meta
         code = self._artifacts.get("generated_code", "")
         if code:
@@ -224,13 +251,15 @@ class CAAFEBaseline(Baseline):
         records = []
         for it in iterations:
             for col, gain in it.get("gains", {}).items():
-                records.append({
-                    "feature_name": col,
-                    "source_method": "caafe",
-                    "iteration_index": it.get("iteration"),
-                    "generated_code": it.get("generated_code", ""),
-                    "cv_gain": gain,
-                })
+                records.append(
+                    {
+                        "feature_name": col,
+                        "source_method": "caafe",
+                        "iteration_index": it.get("iteration"),
+                        "generated_code": it.get("generated_code", ""),
+                        "cv_gain": gain,
+                    }
+                )
         return records
 
     @staticmethod

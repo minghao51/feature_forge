@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 import pandas as pd
+import structlog
 
 from feature_forge.artifacts.base import ArtifactConfig
 from feature_forge.baselines.base import Baseline
@@ -18,7 +19,9 @@ from feature_forge.evaluation.cv import CVEvaluator
 from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.llm.base import LLMClient
 from feature_forge.llm.providers.deepseek import DeepSeekProvider
-from feature_forge.utils import strip_markdown_fences
+from feature_forge.utils import run_coro_sync, strip_markdown_fences
+
+logger = structlog.get_logger()
 
 
 class LLMFEBaseline(Baseline):
@@ -46,16 +49,22 @@ class LLMFEBaseline(Baseline):
         self.n_features = n_features
         self.mode = mode
         self.evaluator = evaluator
-        self.sandbox = SandboxedExecutor()
+        eval_cfg = evaluator.config.evaluation if evaluator else None
+        self.sandbox = SandboxedExecutor(
+            timeout_seconds=eval_cfg.sandbox_timeout_seconds if eval_cfg else 5.0,
+            max_memory_mb=eval_cfg.sandbox_max_memory_mb if eval_cfg else 512,
+        )
         self._iteration_codes: list[str] = []
 
     def fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> LLMFEBaseline:
-        import asyncio
-        if self.mode == "iterative":
-            asyncio.run(self._fit_iterative(X_train, y_train))
-        else:
-            asyncio.run(self._fit_single_shot(X_train, y_train))
+        run_coro_sync(self.async_fit(X_train, y_train))
         return self
+
+    async def async_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> None:
+        if self.mode == "iterative":
+            await self._fit_iterative(X_train, y_train)
+        else:
+            await self._fit_single_shot(X_train, y_train)
 
     async def _fit_single_shot(self, X: pd.DataFrame, y: pd.Series) -> None:
         prompt = self._build_prompt(X, y)
@@ -99,21 +108,29 @@ class LLMFEBaseline(Baseline):
 
                 for col in new_features.columns:
                     gain = evaluator.evaluate_feature(
-                        X, y, new_features[[col]], baseline_score=baseline_score,
+                        X,
+                        y,
+                        new_features[[col]],
+                        baseline_score=baseline_score,
                     )
                     if gain > 0:
                         kept_features[col] = new_features[col].values
                         kept_gains[col] = gain
                         cumulative_cols.append(col)
 
-                iteration_record["all_new_features"] = self._storage.store(f"llmfe_iter_{i}_all", new_features)
-                iteration_record["kept_features"] = self._storage.store(f"llmfe_iter_{i}_kept", kept_features)
+                iteration_record["all_new_features"] = self._storage.store(
+                    f"llmfe_iter_{i}_all", new_features
+                )
+                iteration_record["kept_features"] = self._storage.store(
+                    f"llmfe_iter_{i}_kept", kept_features
+                )
                 iteration_record["gains"] = kept_gains
                 iteration_record["kept"] = len(kept_gains) > 0
 
             except Exception as exc:
                 iteration_record["error"] = str(exc)
                 iteration_record["kept"] = False
+                logger.warning("llmfe_iteration_failed", iteration=i, error=str(exc))
 
             iteration_codes.append(code_block)
             iterations.append(iteration_record)
@@ -132,8 +149,10 @@ class LLMFEBaseline(Baseline):
                 for col in features.columns:
                     if col not in result.columns:
                         result[col] = features[col].values
-            except Exception:
-                continue
+            except Exception as exc:
+                logger.warning("llmfe_transform_step_failed", error=str(exc))
+                if self.evaluator and self.evaluator.config.evaluation.fail_on_feature_error:
+                    raise
         new_cols = [c for c in result.columns if c not in X.columns]
         return result[new_cols] if new_cols else result
 
@@ -148,14 +167,16 @@ class LLMFEBaseline(Baseline):
             meta = []
             for it in iterations:
                 for col, gain in it.get("gains", {}).items():
-                    meta.append({
-                        "name": col,
-                        "method": "llmfe",
-                        "iteration": it.get("iteration"),
-                        "gain": gain,
-                        "kept": it.get("kept", False),
-                        "code": it.get("generated_code", ""),
-                    })
+                    meta.append(
+                        {
+                            "name": col,
+                            "method": "llmfe",
+                            "iteration": it.get("iteration"),
+                            "gain": gain,
+                            "kept": it.get("kept", False),
+                            "code": it.get("generated_code", ""),
+                        }
+                    )
             return meta
         code = self._artifacts.get("generated_code", "")
         if code:
@@ -170,13 +191,15 @@ class LLMFEBaseline(Baseline):
         records = []
         for it in iterations:
             for col, gain in it.get("gains", {}).items():
-                records.append({
-                    "feature_name": col,
-                    "source_method": "llmfe",
-                    "iteration_index": it.get("iteration"),
-                    "generated_code": it.get("generated_code", ""),
-                    "cv_gain": gain,
-                })
+                records.append(
+                    {
+                        "feature_name": col,
+                        "source_method": "llmfe",
+                        "iteration_index": it.get("iteration"),
+                        "generated_code": it.get("generated_code", ""),
+                        "cv_gain": gain,
+                    }
+                )
         return records
 
     def _build_prompt(self, X: pd.DataFrame, y: pd.Series) -> str:

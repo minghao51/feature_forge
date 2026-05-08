@@ -15,6 +15,7 @@ class FakeLLM:
 
     async def complete(self, messages, temperature=0.2, max_tokens=4096, **kwargs):
         from feature_forge.llm.base import LLMResponse
+
         return LLMResponse(content=self.code, model="fake")
 
 

@@ -40,6 +40,19 @@ class FakeProvider(LLMClient):
             total_tokens=15,
         )
 
+    async def complete_json(
+        self,
+        messages: list[dict[str, str]],
+        schema_description: str,
+        temperature: float = 0.2,
+        max_tokens: int = 4096,
+    ) -> dict:
+        import json
+
+        resp = self.responses[self.call_count % len(self.responses)]
+        self.call_count += 1
+        return json.loads(resp)
+
 
 class TestDiskCache:
     def test_get_key_deterministic(self):
@@ -129,6 +142,7 @@ class TestProviders:
 
     def test_openai_missing_key_raises(self):
         from feature_forge.exceptions import LLMError
+
         with pytest.raises(LLMError, match="API key"):
             OpenAIProvider(api_key=None)
 

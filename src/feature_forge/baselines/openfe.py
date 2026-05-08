@@ -45,7 +45,9 @@ class OpenFEBaseline(Baseline):
             warnings.simplefilter("ignore")
             self._ofe = OpenFE(n_jobs=self.n_jobs)
             self._features = self._ofe.fit(data=X_train, label=y_train, metric=self.metric)
-            _, self._train_features = transform(X_train, X_train, self._features, n_jobs=self.n_jobs)
+            _, self._train_features = transform(
+                X_train, X_train, self._features, n_jobs=self.n_jobs
+            )
 
         self._extract_artifacts()
         return self
@@ -115,6 +117,7 @@ class OpenFEBaseline(Baseline):
         """Convert OpenFE importance array into a DataFrame."""
         try:
             import numpy as np
+
             arr = np.asarray(importances)
             return pd.DataFrame({"rank": range(len(arr)), "importance": arr})
         except Exception:

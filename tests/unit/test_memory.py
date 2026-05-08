@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from feature_forge.llm.base import LLMClient, LLMResponse
@@ -19,6 +21,9 @@ class FakeLLM(LLMClient):
 
     async def complete(self, messages, temperature=0.2, max_tokens=4096, **kwargs):
         return LLMResponse(content=self.response_text, model=self.model)
+
+    async def complete_json(self, messages, schema_description, temperature=0.2, max_tokens=4096):
+        return json.loads(self.response_text or "{}")
 
 
 class TestMemoryPersistence:

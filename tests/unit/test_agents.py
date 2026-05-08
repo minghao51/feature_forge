@@ -38,6 +38,11 @@ class FakeLLM(LLMClient):
         self.call_count += 1
         return LLMResponse(content=resp, model=self.model)
 
+    async def complete_json(self, messages, schema_description, temperature=0.2, max_tokens=4096):
+        resp = self.responses[self.call_count % len(self.responses)]
+        self.call_count += 1
+        return json.loads(resp)
+
 
 class TestAgentRegistry:
     def test_get_builtin_agents(self):
@@ -58,19 +63,21 @@ class TestAgentRegistry:
 class TestBaseFeatureAgent:
     @pytest.fixture
     def fake_llm(self):
-        response = json.dumps([
-            {
-                "base_columns": "age",
-                "derived_features": [
-                    {
-                        "name": "age_squared",
-                        "type": "numerical",
-                        "transform": "square",
-                        "logic": "Age squared captures non-linear effects"
-                    }
-                ]
-            }
-        ])
+        response = json.dumps(
+            [
+                {
+                    "base_columns": "age",
+                    "derived_features": [
+                        {
+                            "name": "age_squared",
+                            "type": "numerical",
+                            "transform": "square",
+                            "logic": "Age squared captures non-linear effects",
+                        }
+                    ],
+                }
+            ]
+        )
         return FakeLLM([response])
 
     @pytest.fixture
@@ -104,6 +111,7 @@ class TestBaseFeatureAgent:
 
     def test_parse_response_invalid_json_raises(self, config):
         from feature_forge.exceptions import AgentError
+
         agent = UnaryFeatureAgent(config=config, llm_client=FakeLLM())
         with pytest.raises(AgentError):
             agent._parse_response("not json")
@@ -116,7 +124,13 @@ class TestRouterAgent:
         return RouterAgent(config=config)
 
     def test_analyze_dataset(self, router):
-        df = pd.DataFrame({"num": [1.0, 2.0], "cat": ["a", "b"], "dt": pd.to_datetime(["2020-01-01", "2020-01-02"])})
+        df = pd.DataFrame(
+            {
+                "num": [1.0, 2.0],
+                "cat": ["a", "b"],
+                "dt": pd.to_datetime(["2020-01-01", "2020-01-02"]),
+            }
+        )
         desc = {
             "num": {"type": "numerical"},
             "cat": {"type": "categorical"},

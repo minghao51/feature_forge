@@ -7,7 +7,7 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from feature_forge.baselines import BaselineRegistry, MalmusBaseline
+from feature_forge.baselines import BaselineRegistry
 from feature_forge.baselines.base import Baseline
 from feature_forge.baselines.malmus import (
     FeatureDefinition,
