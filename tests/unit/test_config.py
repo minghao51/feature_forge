@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 from pydantic import ValidationError
 
@@ -36,6 +38,26 @@ class TestLLMConfig:
     def test_api_key_secret(self):
         cfg = LLMConfig(api_key="sk-secret")
         assert cfg.api_key.get_secret_value() == "sk-secret"
+
+    def test_no_environment_side_effects(self):
+        old_values = {
+            k: os.environ.get(k)
+            for k in ["DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"]
+        }
+        try:
+            for key in old_values:
+                os.environ.pop(key, None)
+            _ = LLMConfig(api_key="sk-secret")
+            assert os.environ.get("DEEPSEEK_API_KEY") is None
+            assert os.environ.get("OPENAI_API_KEY") is None
+            assert os.environ.get("ANTHROPIC_API_KEY") is None
+            assert os.environ.get("GEMINI_API_KEY") is None
+        finally:
+            for key, value in old_values.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
 
 class TestRouterConfig:

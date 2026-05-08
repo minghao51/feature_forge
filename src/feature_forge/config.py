@@ -20,10 +20,9 @@ Example:
 
 from __future__ import annotations
 
-import os
 from typing import Literal
 
-from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -35,10 +34,8 @@ from pydantic_settings import (
 class LLMConfig(BaseModel):
     """LLM provider configuration.
 
-    A single ``api_key`` serves all providers — on validation the key
-    is propagated to provider-specific env vars (``DEEPSEEK_API_KEY``,
-    ``OPENAI_API_KEY``, ``ANTHROPIC_API_KEY``, ``GEMINI_API_KEY``)
-    so LiteLLM and native clients can discover it without separate keys.
+    A single ``api_key`` can be passed to provider clients directly.
+    Configuration validation does not mutate global process environment.
 
     Attributes:
         model: Model identifier (e.g. "deepseek-chat", "gpt-4").
@@ -78,16 +75,6 @@ class LLMConfig(BaseModel):
         if v < 1:
             raise ValueError(f"max_tokens must be >= 1, got {v}")
         return v
-
-    @model_validator(mode="after")
-    def _set_provider_env_vars(self) -> LLMConfig:
-        """Propagate single API key to provider-specific env vars."""
-        if self.api_key and (key := self.api_key.get_secret_value()):
-            os.environ.setdefault("DEEPSEEK_API_KEY", key)
-            os.environ.setdefault("OPENAI_API_KEY", key)
-            os.environ.setdefault("ANTHROPIC_API_KEY", key)
-            os.environ.setdefault("GEMINI_API_KEY", key)
-        return self
 
 
 class TrackerConfig(BaseModel):
@@ -143,10 +130,20 @@ class EvaluationConfig(BaseModel):
     Attributes:
         cv_folds: Number of cross-validation folds.
         test_size: Fraction of data for test split.
+        fail_on_feature_error: Raise on feature evaluation failure instead of logging.
+        fail_on_agent_error: Raise on agent generation failure instead of skipping.
+        sandbox_timeout_seconds: Max seconds for sandbox worker execution.
+        sandbox_max_memory_mb: Max memory (MB) for sandbox worker process.
+        max_candidate_features: Cap on candidate features sent to CV scoring.
     """
 
     cv_folds: int = 5
     test_size: float = 0.4
+    fail_on_feature_error: bool = False
+    fail_on_agent_error: bool = False
+    sandbox_timeout_seconds: float = 5.0
+    sandbox_max_memory_mb: int = 512
+    max_candidate_features: int = 50
 
     @field_validator("cv_folds")
     @classmethod
@@ -160,6 +157,27 @@ class EvaluationConfig(BaseModel):
     def _validate_test_size(cls, v: float) -> float:
         if not 0.0 < v < 1.0:
             raise ValueError(f"test_size must be in (0, 1), got {v}")
+        return v
+
+    @field_validator("sandbox_timeout_seconds")
+    @classmethod
+    def _validate_sandbox_timeout(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError(f"sandbox_timeout_seconds must be > 0, got {v}")
+        return v
+
+    @field_validator("sandbox_max_memory_mb")
+    @classmethod
+    def _validate_sandbox_memory(cls, v: int) -> int:
+        if v < 128:
+            raise ValueError(f"sandbox_max_memory_mb must be >= 128, got {v}")
+        return v
+
+    @field_validator("max_candidate_features")
+    @classmethod
+    def _validate_max_candidate_features(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError(f"max_candidate_features must be >= 1, got {v}")
         return v
 
 
@@ -225,6 +243,7 @@ class Settings(BaseSettings):
         return (
             init_settings,
             env_settings,
+            dotenv_settings,
             YamlConfigSettingsSource(settings_cls),
         )
 
