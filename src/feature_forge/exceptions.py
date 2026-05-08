@@ -26,6 +26,18 @@ class CodeExecutionError(FeatureForgeError):
     """Sandboxed code execution failed or was blocked."""
 
 
+class SandboxValidationError(CodeExecutionError):
+    """Code was blocked by static sandbox policy validation."""
+
+
+class SandboxTimeoutError(CodeExecutionError):
+    """Sandbox worker exceeded execution time budget."""
+
+
+class SandboxWorkerError(CodeExecutionError):
+    """Sandbox worker process failed unexpectedly."""
+
+
 class AgentError(FeatureForgeError):
     """Agent operation failed (e.g., router, memory update)."""
 
