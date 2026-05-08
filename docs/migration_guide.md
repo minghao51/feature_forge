@@ -21,6 +21,11 @@ settings = Settings(task="classification", metric="auc")
 # Or via env var: FF_TASK=classification
 ```
 
+**Secrets Management:**
+- Non-sensitive defaults are now in `config/settings.yaml`
+- Only secrets (API keys) go in `.env` (encrypted with dotenvx)
+- Use `FF_LLM__API_KEY` for a single key across all providers, or set provider-specific keys (DEEPSEEK_API_KEY, OPENAI_API_KEY, etc.)
+
 ### LLM Client
 
 **Before:**
@@ -110,3 +115,4 @@ runner = ExperimentRunner(tracker=tracker)
 3. **Memory path format** → Now uses single JSON file per agent
 4. **LLM interface** → Now async with `LLMClient.complete()`
 5. **Metrics** → Now in `feature_forge.evaluation.metrics`
+6. **API Key Configuration** → Use `FF_LLM__API_KEY` for all providers, or set provider-specific keys directly. Keys are passed to LLM clients via config, not auto-propagated to environment variables.
