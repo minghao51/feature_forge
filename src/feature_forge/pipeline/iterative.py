@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import pandas as pd
-import structlog
 
 from feature_forge.agents.base import Agent, AgentRegistry
 from feature_forge.agents.router import RouterAgent
@@ -15,9 +15,10 @@ from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.llm.base import LLMClient
 from feature_forge.memory.base import AgentMemory
 from feature_forge.memory.conceptual import ConceptualMemory
+from feature_forge.observability.structlog_config import get_logger
 from feature_forge.pipeline.core import CodeGenerator, CorePipeline
 
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 
 class IterativePipeline:
@@ -72,12 +73,23 @@ class IterativePipeline:
         self.round_artifacts = []
         self.all_feature_codes = []
 
+        iterative_t0 = time.perf_counter()
+        logger.info(
+            "iterative_pipeline_start",
+            n_rounds=self.config.n_rounds,
+            task=self.config.task,
+            strategy=self.router.strategy,
+        )
+
         X_train_enhanced = X_train.copy()
         X_test_enhanced = X_test.copy() if X_test is not None else None
         round_summaries: list[dict[str, Any]] = []
         all_agent_gains: dict[str, list[pd.DataFrame]] = {}
 
         for round_idx in range(self.config.n_rounds):
+            round_t0 = time.perf_counter()
+            logger.info("round_start", round_idx=round_idx, total_rounds=self.config.n_rounds)
+
             # 1. Router selects agents
             selected_names = await self.router.select_agents(
                 round_idx=round_idx,
@@ -92,6 +104,8 @@ class IterativePipeline:
             for name in selected_names:
                 if name in agent_classes:
                     agents.append(agent_classes[name](self.config, self.llm_client))
+
+            logger.info("agents_selected", round_idx=round_idx, agents=[a.name for a in agents], strategy=self.router.strategy)
 
             # 3. Build memory context for each agent
             context: dict[str, Any] = {
@@ -211,8 +225,27 @@ class IterativePipeline:
                 }
             )
 
+            round_latency_ms = round((time.perf_counter() - round_t0) * 1000, 1)
+            logger.info(
+                "round_complete",
+                round_idx=round_idx,
+                features_generated=len(core_results["specs"]),
+                features_selected=len(top_train.columns),
+                baseline_score=core_results["baseline_score"],
+                latency_ms=round_latency_ms,
+            )
+
         # Optionally generate conceptual summaries
         # (skipped by default to avoid extra LLM calls)
+
+        total_latency_ms = round((time.perf_counter() - iterative_t0) * 1000, 1)
+        selected_features = [c for c in X_train_enhanced.columns if c not in X_train.columns]
+        logger.info(
+            "iterative_pipeline_complete",
+            total_rounds=self.config.n_rounds,
+            total_features=len(selected_features),
+            latency_ms=total_latency_ms,
+        )
 
         return {
             "X_train_enhanced": X_train_enhanced,

@@ -23,7 +23,10 @@ def get_langfuse(settings: Settings | None = None) -> Langfuse:
     """Get or create the global Langfuse client."""
     global _langfuse
     if _langfuse is None:
-        _langfuse = Langfuse()
+        import os
+
+        host = os.environ.get("LANGFUSE_HOST") or os.environ.get("LANGFUSE_BASE_URL")
+        _langfuse = Langfuse(host=host) if host else Langfuse()
     return _langfuse
 
 

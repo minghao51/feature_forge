@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 from feature_forge.llm.base import LLMClient
 from feature_forge.memory.base import AgentMemory
+from feature_forge.observability.structlog_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class ConceptualMemory:
@@ -20,8 +24,9 @@ class ConceptualMemory:
         memory: AgentMemory,
         min_effective: int = 1,
     ) -> str:
-        """Generate conceptual summary for a single agent's memory."""
         num_effective = sum(1 for fb in memory.feedback if fb.get("effective", False))
+        logger.info("conceptual_summarize_start", agent=memory.agent_name, num_effective=num_effective)
+        summary_t0 = time.perf_counter()
         if num_effective < min_effective:
             memory.conceptual_summary = (
                 "Few valid features, no available information at the moment."
@@ -85,6 +90,13 @@ class ConceptualMemory:
         )
         memory.conceptual_summary = response.content
         memory.record_conceptual(memory.conceptual_summary)
+        latency_ms = round((time.perf_counter() - summary_t0) * 1000, 1)
+        logger.info(
+            "conceptual_summarize_complete",
+            agent=memory.agent_name,
+            summary_length=len(response.content),
+            latency_ms=latency_ms,
+        )
         return memory.conceptual_summary
 
     async def summarize_global(
@@ -92,8 +104,12 @@ class ConceptualMemory:
         memories: dict[str, AgentMemory],
         task_description: str = "",
     ) -> str:
-        """Generate a global conceptual summary across all agents."""
         sections: list[str] = []
+        logger.info(
+            "conceptual_global_summarize_start",
+            num_agents=len(memories),
+        )
+        global_t0 = time.perf_counter()
         for agent_name, memory in memories.items():
             conceptual = (
                 memory.conceptual_summary.strip()
@@ -134,4 +150,11 @@ class ConceptualMemory:
         global_summary = response.content
         for memory in memories.values():
             memory.global_summary.append(global_summary)
+        latency_ms = round((time.perf_counter() - global_t0) * 1000, 1)
+        logger.info(
+            "conceptual_global_summarize_complete",
+            num_agents=len(memories),
+            summary_length=len(global_summary),
+            latency_ms=latency_ms,
+        )
         return global_summary

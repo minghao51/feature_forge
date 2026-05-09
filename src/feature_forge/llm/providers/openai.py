@@ -9,12 +9,16 @@ Works with any OpenAI-compatible API endpoint, including:
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 from openai import AsyncOpenAI
 
 from feature_forge.exceptions import LLMError
 from feature_forge.llm.base import LLMClient, LLMResponse
+from feature_forge.observability.structlog_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class OpenAIProvider(LLMClient):
@@ -42,6 +46,15 @@ class OpenAIProvider(LLMClient):
         max_tokens: int = 4096,
         **kwargs: Any,
     ) -> LLMResponse:
+        logger.info(
+            "llm_request",
+            provider=self.provider_name,
+            model=self.model,
+            num_messages=len(messages),
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        t0 = time.perf_counter()
         try:
             response = await self._client.chat.completions.create(
                 model=self.model,
@@ -51,18 +64,34 @@ class OpenAIProvider(LLMClient):
                 **kwargs,
             )
         except Exception as exc:
+            logger.error("llm_error", provider=self.provider_name, model=self.model, error=str(exc))
             raise LLMError(f"OpenAI API error: {exc}") from exc
 
         choice = response.choices[0]
         content = choice.message.content or ""
         usage = response.usage
+        prompt_tokens = usage.prompt_tokens if usage else 0
+        completion_tokens = usage.completion_tokens if usage else 0
+        total_tokens = usage.total_tokens if usage else 0
+        latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+
+        logger.info(
+            "llm_response",
+            provider=self.provider_name,
+            model=self.model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            latency_ms=latency_ms,
+            response_preview=content[:200],
+        )
 
         return LLMResponse(
             content=content,
             model=self.model,
-            prompt_tokens=usage.prompt_tokens if usage else 0,
-            completion_tokens=usage.completion_tokens if usage else 0,
-            total_tokens=usage.total_tokens if usage else 0,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
             raw_response=response,
         )
 
@@ -74,6 +103,16 @@ class OpenAIProvider(LLMClient):
         max_tokens: int = 4096,
     ) -> dict[str, Any]:
         enhanced = self._inject_json_schema(messages, schema_description)
+        logger.info(
+            "llm_request",
+            provider=self.provider_name,
+            model=self.model,
+            num_messages=len(enhanced),
+            temperature=temperature,
+            max_tokens=max_tokens,
+            json_mode=True,
+        )
+        t0 = time.perf_counter()
         try:
             response = await self._client.chat.completions.create(
                 model=self.model,
@@ -83,10 +122,25 @@ class OpenAIProvider(LLMClient):
                 response_format={"type": "json_object"},
             )
         except Exception as exc:
+            logger.error("llm_error", provider=self.provider_name, model=self.model, json_mode=True, error=str(exc))
             raise LLMError(f"OpenAI JSON mode error: {exc}") from exc
 
         content = response.choices[0].message.content or "{}"
+        latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+        usage = response.usage
+        logger.info(
+            "llm_response",
+            provider=self.provider_name,
+            model=self.model,
+            prompt_tokens=usage.prompt_tokens if usage else 0,
+            completion_tokens=usage.completion_tokens if usage else 0,
+            total_tokens=usage.total_tokens if usage else 0,
+            latency_ms=latency_ms,
+            json_mode=True,
+            response_preview=content[:200],
+        )
         try:
             return json.loads(content)  # type: ignore[no-any-return]
         except json.JSONDecodeError as exc:
+            logger.error("llm_json_parse_error", provider=self.provider_name, model=self.model, response_preview=content[:200])
             raise LLMError(f"Invalid JSON response: {exc}") from exc

@@ -7,11 +7,11 @@ and feature evaluation.
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import structlog
 
 from feature_forge.agents.base import Agent
 from feature_forge.config import Settings
@@ -19,9 +19,10 @@ from feature_forge.evaluation.cv import CVEvaluator
 from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.exceptions import PipelineError
 from feature_forge.llm.base import LLMClient
+from feature_forge.observability.structlog_config import get_logger
 from feature_forge.types import FeatureSpec
 
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 
 class CodeGenerator:
@@ -84,6 +85,13 @@ class CorePipeline:
         X_test: pd.DataFrame | None = None,
         context: dict[str, Any] | list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        pipeline_t0 = time.perf_counter()
+        logger.info(
+            "pipeline_start",
+            agents=[a.name for a in agents],
+            num_agents=len(agents),
+            train_shape=X_train.shape,
+        )
         """Run one round of feature engineering.
 
         Returns:
@@ -126,8 +134,10 @@ class CorePipeline:
             for spec in specs:
                 spec["agent_name"] = agent.name
             all_specs.extend(specs)
+            logger.info("agent_specs_generated", agent=agent.name, num_specs=len(specs))
 
         if not all_specs:
+            logger.info("pipeline_complete", num_specs=0, num_selected=0, reason="no_specs_generated")
             empty_train = pd.DataFrame(index=X_train.index)
             empty_test = pd.DataFrame(index=X_test.index if X_test is not None else X_train.index)
             return {
@@ -143,16 +153,31 @@ class CorePipeline:
             }
 
         # Step 2: Generate code for all specs
+        logger.info("code_generation_start", num_specs=len(all_specs))
+        code_gen_t0 = time.perf_counter()
         try:
             code = await self.code_generator.generate_code(all_specs)
         except Exception as exc:
             raise PipelineError(f"Code generation failed: {exc}") from exc
+        logger.info(
+            "code_generation_complete",
+            num_specs=len(all_specs),
+            code_length=len(code),
+            latency_ms=round((time.perf_counter() - code_gen_t0) * 1000, 1),
+        )
 
         # Step 3: Execute code to get feature DataFrames
+        logger.info("sandbox_execution_start")
+        sandbox_t0 = time.perf_counter()
         try:
             features_train = self.sandbox.execute(code, X_train)
         except Exception as exc:
             raise PipelineError(f"Sandbox execution failed: {exc}") from exc
+        logger.info(
+            "sandbox_execution_complete",
+            result_shape=features_train.shape,
+            latency_ms=round((time.perf_counter() - sandbox_t0) * 1000, 1),
+        )
 
         features_test = pd.DataFrame()
         if X_test is not None:
@@ -168,6 +193,7 @@ class CorePipeline:
 
         # Step 4: Evaluate each feature
         baseline_score = self.evaluator.evaluate_baseline(X_train, y_train)
+        logger.info("evaluation_baseline", score=round(baseline_score, 6), metric=self.config.metric)
         gains: dict[str, float] = {}
         candidate_columns = self._prefilter_candidate_columns(features_train)
         for col in candidate_columns:
@@ -176,6 +202,7 @@ class CorePipeline:
                     X_train, y_train, features_train[[col]], baseline_score=baseline_score
                 )
                 gains[col] = gain
+                logger.debug("feature_evaluated", feature=col, gain=round(gain, 6), effective=gain > 0)
             except Exception as exc:
                 logger.warning("feature_evaluation_failed", feature=col, error=str(exc))
                 if self.config.evaluation.fail_on_feature_error:
@@ -207,6 +234,17 @@ class CorePipeline:
             if agent_gain_rows:
                 agent_gains[agent.name] = pd.DataFrame(agent_gain_rows)
 
+        num_effective = len([g for g in gains.values() if g > 0])
+        pipeline_latency_ms = round((time.perf_counter() - pipeline_t0) * 1000, 1)
+        logger.info(
+            "pipeline_complete",
+            num_specs=len(all_specs),
+            num_selected=len(top_k_names),
+            num_effective=num_effective,
+            baseline_score=round(baseline_score, 6),
+            latency_ms=pipeline_latency_ms,
+        )
+
         return {
             "features_train": features_train,
             "features_test": features_test,
@@ -222,7 +260,6 @@ class CorePipeline:
         }
 
     def _prefilter_candidate_columns(self, features_train: pd.DataFrame) -> list[str]:
-        """Lightweight pre-filter before expensive CV scoring."""
         if features_train.empty:
             return []
 

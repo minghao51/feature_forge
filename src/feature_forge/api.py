@@ -9,10 +9,10 @@ Usage:
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import pandas as pd
-import structlog
 from sklearn.base import BaseEstimator, TransformerMixin
 
 from feature_forge.artifacts.base import ArtifactConfig, ArtifactExporter
@@ -20,6 +20,7 @@ from feature_forge.config import Settings, get_settings
 from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.llm.base import LLMClient
 from feature_forge.llm.providers.deepseek import DeepSeekProvider
+from feature_forge.observability.structlog_config import get_logger
 from feature_forge.pipeline.ablations import (
     NoMemoryPipeline,
     NoRouterPipeline,
@@ -28,7 +29,7 @@ from feature_forge.pipeline.ablations import (
 from feature_forge.pipeline.iterative import IterativePipeline
 from feature_forge.utils import run_coro_sync
 
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 
 class MALMASFeatureEngineer(BaseEstimator, TransformerMixin, ArtifactExporter):
@@ -93,16 +94,21 @@ class MALMASFeatureEngineer(BaseEstimator, TransformerMixin, ArtifactExporter):
         return IterativePipeline(self.config, self.llm_client)
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> MALMASFeatureEngineer:
-        """Run iterative feature engineering.
-
-        Args:
-            X: Training features.
-            y: Training target.
-
-        Returns:
-            Self.
-        """
+        fit_t0 = time.perf_counter()
+        logger.info(
+            "fit_start",
+            mode=self.mode,
+            model=self.llm_client.model if hasattr(self.llm_client, "model") else "unknown",
+            train_shape=X.shape,
+            n_rounds=self.config.n_rounds,
+        )
         self.pipeline_result = run_coro_sync(self.async_fit(X, y))
+        latency_ms = round((time.perf_counter() - fit_t0) * 1000, 1)
+        logger.info(
+            "fit_complete",
+            num_selected_features=len(self.selected_features),
+            latency_ms=latency_ms,
+        )
         return self
 
     async def async_fit(self, X: pd.DataFrame, y: pd.Series) -> dict[str, Any]:
@@ -114,16 +120,8 @@ class MALMASFeatureEngineer(BaseEstimator, TransformerMixin, ArtifactExporter):
         return self.pipeline_result
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Apply generated features to new data.
-
-        Re-executes cached feature generation code in the sandbox.
-
-        Args:
-            X: Input features.
-
-        Returns:
-            DataFrame with original + generated features.
-        """
+        transform_t0 = time.perf_counter()
+        logger.info("transform_start", input_shape=X.shape, num_codes=len(self.feature_codes))
         X_out = X.copy()
         self.transform_failures = []
         for code in self.feature_codes:
@@ -140,6 +138,13 @@ class MALMASFeatureEngineer(BaseEstimator, TransformerMixin, ArtifactExporter):
                 logger.warning("transform_feature_generation_failed", error=error_msg)
                 if self.config.evaluation.fail_on_feature_error:
                     raise
+        latency_ms = round((time.perf_counter() - transform_t0) * 1000, 1)
+        logger.info(
+            "transform_complete",
+            output_shape=X_out.shape,
+            latency_ms=latency_ms,
+            num_failures=len(self.transform_failures),
+        )
         return X_out
 
     def fit_transform(self, X: pd.DataFrame, y: pd.Series) -> pd.DataFrame:

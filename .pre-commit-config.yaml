@@ -3,10 +3,13 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
+        exclude: ^(notebooks/_freeze/|docs/notebooks/html/)
       - id: end-of-file-fixer
+        exclude: ^(notebooks/_freeze/|docs/notebooks/html/)
       - id: check-yaml
       - id: check-added-large-files
-        args: ["--maxkb=1000"]
+        args: ["--maxkb=1024"]
+        exclude: ^docs/notebooks/html/
       - id: check-merge-conflict
       - id: debug-statements
 
@@ -20,7 +23,9 @@ repos:
     hooks:
       - id: ruff
         args: [--fix]
+        exclude: ^notebooks/
       - id: ruff-format
+        exclude: ^notebooks/
 
   - repo: https://github.com/compilerla/conventional-pre-commit
     rev: v4.0.0
@@ -36,4 +41,11 @@ repos:
         entry: uv run mypy src
         language: system
         types: [python]
+        pass_filenames: false
+
+      - id: quarto-render
+        name: Render changed .qmd notebooks
+        entry: make notebooks-staged
+        language: system
+        files: '^notebooks/.*\.qmd$'
         pass_filenames: false

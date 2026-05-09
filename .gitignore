@@ -144,3 +144,8 @@ data/raw/
 wandb/
 mlruns/
 
+# Quarto / MkDocs generated notebook outputs
+# (tracked explicitly with git add -f when publishing)
+docs/notebooks/html/
+notebooks/_freeze/
+

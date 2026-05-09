@@ -14,6 +14,7 @@ import multiprocessing as mp
 import os
 import queue
 import tempfile
+import time
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
@@ -25,6 +26,9 @@ from feature_forge.exceptions import (
     SandboxTimeoutError,
     SandboxValidationError,
 )
+from feature_forge.observability.structlog_config import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -94,9 +98,18 @@ class SandboxedExecutor:
 
     def execute(self, code: str, df: pd.DataFrame) -> pd.DataFrame:
         """Execute feature generation code safely."""
+        execute_t0 = time.perf_counter()
+        logger.info("sandbox_execute_start", code_length=len(code), input_shape=df.shape)
         tree = self._parse_and_validate(code)
         payload = ast.unparse(tree) if hasattr(ast, "unparse") else code
-        return self._execute_in_worker(payload, df)
+        result = self._execute_in_worker(payload, df)
+        latency_ms = round((time.perf_counter() - execute_t0) * 1000, 1)
+        logger.info(
+            "sandbox_execute_complete",
+            result_shape=result.shape,
+            latency_ms=latency_ms,
+        )
+        return result
 
     def _execute_in_worker(self, code: str, df: pd.DataFrame) -> pd.DataFrame:
         ctx = mp.get_context("spawn")
@@ -120,6 +133,7 @@ class SandboxedExecutor:
                 if proc.is_alive():
                     proc.terminate()
                     proc.join(timeout=1)
+                logger.error("sandbox_timeout", timeout_seconds=self.limits.timeout_seconds)
                 raise SandboxTimeoutError(
                     f"Sandbox execution timed out after {self.limits.timeout_seconds:.1f}s"
                 ) from exc
@@ -160,19 +174,24 @@ class SandboxedExecutor:
                 for alias in node.names:
                     root = alias.name.split(".")[0]
                     if root not in self.ALLOWED_IMPORTS:
+                        logger.warning("sandbox_validation_blocked", reason=f"import_not_allowed: {alias.name}")
                         raise SandboxValidationError(f"Import not allowed: {alias.name}")
             elif isinstance(node, ast.ImportFrom):
                 root = (node.module or "").split(".")[0]
                 if root not in self.ALLOWED_IMPORTS:
+                    logger.warning("sandbox_validation_blocked", reason=f"import_from_not_allowed: {node.module}")
                     raise SandboxValidationError(f"Import from not allowed: {node.module}")
             elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
                 if node.func.id in self.FORBIDDEN_NAMES:
+                    logger.warning("sandbox_validation_blocked", reason=f"forbidden_function: {node.func.id}")
                     raise SandboxValidationError(f"Forbidden function call: {node.func.id}")
             elif isinstance(node, ast.Name):
                 if node.id in self.FORBIDDEN_NAMES and isinstance(node.ctx, ast.Load):
+                    logger.warning("sandbox_validation_blocked", reason=f"forbidden_name: {node.id}")
                     raise SandboxValidationError(f"Forbidden name reference: {node.id}")
             elif isinstance(node, ast.Attribute):
                 if node.attr.startswith(self.FORBIDDEN_DUNDER_PREFIX):
+                    logger.warning("sandbox_validation_blocked", reason=f"forbidden_dunder: {node.attr}")
                     raise SandboxValidationError(f"Forbidden dunder attribute access: {node.attr}")
 
         return tree

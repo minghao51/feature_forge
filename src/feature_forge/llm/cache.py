@@ -14,6 +14,9 @@ from typing import Any
 from diskcache import Cache
 
 from feature_forge.exceptions import LLMError
+from feature_forge.observability.structlog_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class DiskCache:
@@ -61,26 +64,21 @@ class DiskCache:
         return hashlib.sha256(data.encode("utf-8")).hexdigest()
 
     def get(self, key: str) -> dict[str, Any] | None:
-        """Retrieve cached response by key.
-
-        Returns None if cache is disabled or key not found.
-        """
         if not self.enabled:
             return None
         try:
-            return self._get_cache().get(key)
+            result = self._get_cache().get(key)
+            logger.debug("cache_get", key=key[:16], hit=result is not None)
+            return result
         except Exception as exc:
             raise LLMError(f"Cache read failed for key {key[:16]}...: {exc}") from exc
 
     def set(self, key: str, value: dict[str, Any]) -> None:
-        """Store response in cache.
-
-        No-op if cache is disabled.
-        """
         if not self.enabled:
             return
         try:
             self._get_cache()[key] = value
+            logger.debug("cache_set", key=key[:16])
         except Exception as exc:
             raise LLMError(f"Cache write failed for key {key[:16]}...: {exc}") from exc
 

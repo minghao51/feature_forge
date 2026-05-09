@@ -55,9 +55,12 @@ base = [
     "mlflow>=2.10",
 ]
 docs = [
-    "mkdocs-material>=9.0",
-    "mkdocstrings[python]>=0.24",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.25",
     "mike>=2.0",
+    "pymdown-extensions>=10.0",
+    "ipykernel>=6.0",
+    "matplotlib>=3.7",
 ]
 
 [dependency-groups]

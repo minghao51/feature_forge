@@ -16,6 +16,9 @@ from feature_forge.config import Settings
 from feature_forge.evaluation.metrics import get_metric
 from feature_forge.evaluation.model_factory import ModelFactory
 from feature_forge.exceptions import EvaluationError
+from feature_forge.observability.structlog_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class CVEvaluator:
@@ -48,8 +51,9 @@ class CVEvaluator:
         y: pd.Series,
         model_name: str | None = None,
     ) -> float:
-        """Evaluate baseline score (original features only)."""
-        return self._cv_score(X, y, model_name=model_name)
+        score = self._cv_score(X, y, model_name=model_name)
+        logger.info("cv_baseline_score", score=round(score, 6), metric=self.config.metric, folds=self.cv_folds)
+        return score
 
     def evaluate_feature(
         self,
@@ -79,7 +83,9 @@ class CVEvaluator:
         X_with_new = X_with_new.loc[:, ~X_with_new.columns.duplicated(keep="first")]
 
         new_score = self._cv_score(X_with_new, y, model_name=model_name)
-        return new_score - baseline_score
+        gain = new_score - baseline_score
+        logger.debug("cv_feature_gain", gain=round(gain, 6), new_score=round(new_score, 6), baseline_score=round(baseline_score, 6))
+        return gain
 
     def _cv_score(
         self,

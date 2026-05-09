@@ -11,6 +11,9 @@ from typing import Any
 from feature_forge.llm.base import LLMClient, LLMResponse
 from feature_forge.llm.cache import DiskCache
 from feature_forge.observability.langfuse_tracer import trace_generation
+from feature_forge.observability.structlog_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class LangfuseLLMWrapper(LLMClient):
@@ -49,10 +52,15 @@ class LangfuseLLMWrapper(LLMClient):
         """Complete with cache check and Langfuse tracing."""
         cache_key = self.build_cache_key(messages, temperature, max_tokens, **kwargs)
 
-        # Check cache
         if self._cache is not None:
             cached = self._cache.get(cache_key)
             if cached is not None:
+                logger.info(
+                    "llm_cache_hit",
+                    provider=self.provider_name,
+                    model=self.model,
+                    cache_key=cache_key[:16],
+                )
                 return LLMResponse(
                     content=cached["content"],
                     model=cached.get("model", self.model),
@@ -60,6 +68,13 @@ class LangfuseLLMWrapper(LLMClient):
                     completion_tokens=cached.get("completion_tokens", 0),
                     total_tokens=cached.get("total_tokens", 0),
                 )
+
+        logger.info(
+            "llm_cache_miss",
+            provider=self.provider_name,
+            model=self.model,
+            cache_key=cache_key[:16],
+        )
 
         # Actual LLM call (traced)
         @trace_generation(name=f"{self.provider_name}-completion")

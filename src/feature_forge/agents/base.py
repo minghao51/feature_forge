@@ -8,19 +8,20 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
+import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import structlog
 
 from feature_forge.config import Settings
 from feature_forge.exceptions import AgentError
 from feature_forge.llm.base import LLMClient
+from feature_forge.observability.structlog_config import get_logger
 from feature_forge.types import AgentName, FeatureSpec
 
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 
 class Agent(ABC):
@@ -143,6 +144,13 @@ class BaseFeatureAgent(Agent):
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": user_prompt},
         ]
+        logger.info(
+            "agent_generate_start",
+            agent=self.name,
+            num_columns=len(X.columns),
+            round_idx=context.get("round_idx"),
+        )
+        gen_t0 = time.perf_counter()
         try:
             response = await self.llm_client.complete(
                 messages=messages,
@@ -150,9 +158,18 @@ class BaseFeatureAgent(Agent):
                 max_tokens=self.config.llm.max_tokens,
             )
         except Exception as exc:
+            logger.error("agent_generate_error", agent=self.name, error=str(exc))
             raise AgentError(f"{self.name} LLM call failed: {exc}") from exc
 
-        return self._parse_response(response.content)
+        specs = self._parse_response(response.content)
+        latency_ms = round((time.perf_counter() - gen_t0) * 1000, 1)
+        logger.info(
+            "agent_generate_complete",
+            agent=self.name,
+            num_specs=len(specs),
+            latency_ms=latency_ms,
+        )
+        return specs
 
     def _parse_response(self, content: str) -> list[FeatureSpec]:
         """Parse JSON array of feature specs from LLM response."""
@@ -164,6 +181,7 @@ class BaseFeatureAgent(Agent):
         try:
             data = json.loads(content)
         except json.JSONDecodeError as exc:
+            logger.error("agent_parse_error", agent=self.name, response_preview=content[:200])
             raise AgentError(f"{self.name} invalid JSON: {exc}") from exc
 
         if not isinstance(data, list):

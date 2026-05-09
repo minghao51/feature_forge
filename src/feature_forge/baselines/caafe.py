@@ -13,7 +13,6 @@ import warnings
 from typing import Any, Literal
 
 import pandas as pd
-import structlog
 
 from feature_forge.artifacts.base import ArtifactConfig
 from feature_forge.baselines.base import Baseline
@@ -21,9 +20,10 @@ from feature_forge.evaluation.cv import CVEvaluator
 from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.exceptions import EvaluationError
 from feature_forge.llm.base import LLMClient
+from feature_forge.observability.structlog_config import get_logger
 from feature_forge.utils import run_coro_sync, strip_markdown_fences
 
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 
 class CAAFEBaseline(Baseline):

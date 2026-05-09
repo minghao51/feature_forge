@@ -14,7 +14,10 @@ import pandas as pd
 
 from feature_forge.config import Settings
 from feature_forge.llm.base import LLMClient
+from feature_forge.observability.structlog_config import get_logger
 from feature_forge.types import AgentName
+
+logger = get_logger(__name__)
 
 
 class RouterAgent:
@@ -244,11 +247,6 @@ class RouterAgent:
         enrich_description: dict[str, Any] | None = None,
         task_description: str | None = None,
     ) -> list[AgentName]:
-        """Select active agent subset for the current round.
-
-        Returns:
-            List of selected agent names.
-        """
         if round_idx < self.warmup_rounds:
             selected = self.agent_names
         else:
@@ -267,13 +265,26 @@ class RouterAgent:
 
         for name in selected:
             self.agent_selection_count[name] += 1
+
+        logger.info(
+            "router_select_agents",
+            strategy=self.strategy,
+            round_idx=round_idx,
+            selected_agents=selected,
+        )
         return [AgentName(name) for name in selected]
 
     def update_performance(self, agent_name: str, gain: float) -> None:
-        """Record performance history for an agent."""
         if agent_name in self.agent_performance:
             self.agent_performance[agent_name].append(gain)
             self.agent_performance[agent_name] = self.agent_performance[agent_name][-10:]
+        avg_gain = (
+            sum(self.agent_performance.get(agent_name, []))
+            / len(self.agent_performance.get(agent_name, []))
+            if self.agent_performance.get(agent_name)
+            else 0.0
+        )
+        logger.debug("router_performance_update", agent=agent_name, gain=round(gain, 6), avg_gain=round(avg_gain, 6))
 
     def get_summary(self) -> dict[str, Any]:
         """Return router summary statistics."""

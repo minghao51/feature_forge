@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 try:
@@ -12,6 +13,9 @@ except ImportError:
 
 from feature_forge.exceptions import LLMError
 from feature_forge.llm.base import LLMClient, LLMResponse
+from feature_forge.observability.structlog_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class AnthropicProvider(LLMClient):
@@ -49,6 +53,16 @@ class AnthropicProvider(LLMClient):
             else:
                 conversation.append(msg)
 
+        logger.info(
+            "llm_request",
+            provider=self.provider_name,
+            model=self.model,
+            num_messages=len(conversation),
+            has_system_prompt=bool(system_msg),
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        t0 = time.perf_counter()
         try:
             response = await self._client.messages.create(
                 model=self.model,
@@ -59,6 +73,7 @@ class AnthropicProvider(LLMClient):
                 **kwargs,
             )
         except Exception as exc:
+            logger.error("llm_error", provider=self.provider_name, model=self.model, error=str(exc))
             raise LLMError(f"Anthropic API error: {exc}") from exc
 
         content = ""
@@ -68,12 +83,28 @@ class AnthropicProvider(LLMClient):
                     content += block.text
 
         usage = response.usage
+        prompt_tokens = usage.input_tokens if usage else 0
+        completion_tokens = usage.output_tokens if usage else 0
+        total_tokens = (prompt_tokens + completion_tokens) if usage else 0
+        latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+
+        logger.info(
+            "llm_response",
+            provider=self.provider_name,
+            model=self.model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            latency_ms=latency_ms,
+            response_preview=content[:200],
+        )
+
         return LLMResponse(
             content=content,
             model=self.model,
-            prompt_tokens=usage.input_tokens if usage else 0,
-            completion_tokens=usage.output_tokens if usage else 0,
-            total_tokens=((usage.input_tokens + usage.output_tokens) if usage else 0),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
             raw_response=response,
         )
 
@@ -93,6 +124,16 @@ class AnthropicProvider(LLMClient):
             else:
                 conversation.append(msg)
 
+        logger.info(
+            "llm_request",
+            provider=self.provider_name,
+            model=self.model,
+            num_messages=len(conversation),
+            temperature=temperature,
+            max_tokens=max_tokens,
+            json_mode=True,
+        )
+        t0 = time.perf_counter()
         try:
             response = await self._client.messages.create(
                 model=self.model,
@@ -102,6 +143,7 @@ class AnthropicProvider(LLMClient):
                 messages=conversation,  # type: ignore[arg-type]
             )
         except Exception as exc:
+            logger.error("llm_error", provider=self.provider_name, model=self.model, json_mode=True, error=str(exc))
             raise LLMError(f"Anthropic JSON mode error: {exc}") from exc
 
         content = ""
@@ -110,12 +152,27 @@ class AnthropicProvider(LLMClient):
                 if getattr(block, "type", None) == "text":
                     content += block.text
 
+        latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+        usage = response.usage
+        logger.info(
+            "llm_response",
+            provider=self.provider_name,
+            model=self.model,
+            prompt_tokens=usage.input_tokens if usage else 0,
+            completion_tokens=usage.output_tokens if usage else 0,
+            total_tokens=(usage.input_tokens + usage.output_tokens) if usage else 0,
+            latency_ms=latency_ms,
+            json_mode=True,
+            response_preview=content[:200],
+        )
+
         if not content.strip():
             raise LLMError("Anthropic returned empty content in JSON mode.")
 
         try:
             return json.loads(content)  # type: ignore[no-any-return]
         except json.JSONDecodeError as exc:
+            logger.error("llm_json_parse_error", provider=self.provider_name, model=self.model, response_preview=content[:200])
             raise LLMError(
                 f"Anthropic returned invalid JSON: {content[:200]}... Parse error: {exc}"
             ) from exc
