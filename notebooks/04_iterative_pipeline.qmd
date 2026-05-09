@@ -152,9 +152,12 @@ mem.record_procedure(
 )
 mem.record_feedback(
     feature_name="log_var_1",
-    gain=0.03,
+    metric="auc",
+    value=0.03,
     effective=True,
     round_idx=0,
+    base=["var_1"],
+    ty="numerical",
 )
 mem.save()
 
@@ -173,11 +176,11 @@ print(mem.stats)
 #| error: true
 
 conceptual = ConceptualMemory(llm)
-summary = await conceptual.summarize(mem)
+summary = await conceptual.summarize_agent(mem)
 print(f"Conceptual summary: {summary}")
 
 # Global summary across all agents
-global_summary = await conceptual.global_summarize({"unary": mem})
+global_summary = await conceptual.summarize_global({"unary": mem})
 print(f"Global summary: {global_summary}")
 ```
 

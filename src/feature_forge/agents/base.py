@@ -118,6 +118,9 @@ class BaseFeatureAgent(Agent):
         positive = context.get("positive_features", [])
         negative = context.get("negative_features", [])
 
+        if not description:
+            description = self._infer_column_descriptions(X)
+
         parts: list[str] = []
         parts.append(f"Task: {task}")
         parts.append(f"Dataset columns ({len(X.columns)}):")
@@ -131,6 +134,30 @@ class BaseFeatureAgent(Agent):
             parts.append(f"\nKnown ineffective features: {negative}")
 
         return "\n\n".join(parts)
+
+    @staticmethod
+    def _infer_column_descriptions(X: pd.DataFrame) -> dict[str, dict[str, Any]]:
+        """Generate column descriptions from DataFrame statistics."""
+        import numpy as np
+
+        desc: dict[str, dict[str, Any]] = {}
+        for col in X.columns:
+            col_data = X[col]
+            info: dict[str, Any] = {"name": col}
+            if pd.api.types.is_numeric_dtype(col_data):
+                info["type"] = "numerical"
+                info["mean"] = round(float(col_data.mean()), 4)
+                info["std"] = round(float(col_data.std()), 4)
+                info["min"] = round(float(col_data.min()), 4)
+                info["max"] = round(float(col_data.max()), 4)
+                info["missing"] = int(col_data.isna().sum())
+            else:
+                info["type"] = "categorical"
+                info["unique"] = int(col_data.nunique())
+                info["top"] = str(col_data.mode().iloc[0]) if len(col_data) > 0 else ""
+                info["missing"] = int(col_data.isna().sum())
+            desc[col] = info
+        return desc
 
     async def generate(
         self,

@@ -227,3 +227,71 @@ class TestAllAgentsInstantiate:
     def test_local_pattern(self):
         agent = LocalPatternAgent(config=Settings(), llm_client=FakeLLM())
         assert agent.name == "local_pattern"
+
+
+class TestInferColumnDescriptions:
+    def test_numerical_columns(self):
+        from feature_forge.agents.base import BaseFeatureAgent
+
+        df = pd.DataFrame({"a": [1.0, 2.0, 3.0], "b": [4.0, 5.0, 6.0]})
+        desc = BaseFeatureAgent._infer_column_descriptions(df)
+        assert "a" in desc
+        assert desc["a"]["type"] == "numerical"
+        assert desc["a"]["mean"] == 2.0
+        assert desc["a"]["min"] == 1.0
+        assert desc["a"]["max"] == 3.0
+
+    def test_categorical_columns(self):
+        from feature_forge.agents.base import BaseFeatureAgent
+
+        df = pd.DataFrame({"cat": ["x", "y", "x", "z"]})
+        desc = BaseFeatureAgent._infer_column_descriptions(df)
+        assert "cat" in desc
+        assert desc["cat"]["type"] == "categorical"
+        assert desc["cat"]["unique"] == 3
+
+    def test_missing_values(self):
+        from feature_forge.agents.base import BaseFeatureAgent
+
+        df = pd.DataFrame({"a": [1.0, None, 3.0]})
+        desc = BaseFeatureAgent._infer_column_descriptions(df)
+        assert desc["a"]["missing"] == 1
+
+    def test_empty_dataframe(self):
+        from feature_forge.agents.base import BaseFeatureAgent
+
+        df = pd.DataFrame()
+        desc = BaseFeatureAgent._infer_column_descriptions(df)
+        assert desc == {}
+
+
+class TestBuildUserPromptAutoEnrichment:
+    def test_empty_description_auto_enriched(self):
+        from feature_forge.agents.base import BaseFeatureAgent
+
+        class DummyAgent(BaseFeatureAgent):
+            prompt_filename = "unary.txt"
+            agent_name = "dummy"
+
+        agent = DummyAgent(config=Settings(), llm_client=FakeLLM())
+        df = pd.DataFrame({"a": [1.0, 2.0, 3.0]})
+        y = pd.Series([0, 1, 0])
+        prompt = agent._build_user_prompt(df, y, context={"description": {}})
+        assert "numerical" in prompt
+        assert "mean" in prompt
+        assert "a" in prompt
+
+    def test_provided_description_not_overwritten(self):
+        from feature_forge.agents.base import BaseFeatureAgent
+
+        class DummyAgent(BaseFeatureAgent):
+            prompt_filename = "unary.txt"
+            agent_name = "dummy"
+
+        agent = DummyAgent(config=Settings(), llm_client=FakeLLM())
+        df = pd.DataFrame({"a": [1.0, 2.0, 3.0]})
+        y = pd.Series([0, 1, 0])
+        provided = {"a": {"name": "a", "type": "special", "info": "hand-crafted"}}
+        prompt = agent._build_user_prompt(df, y, context={"description": provided})
+        assert "hand-crafted" in prompt
+        assert "special" in prompt

@@ -21,6 +21,7 @@ from feature_forge.exceptions import PipelineError
 from feature_forge.llm.base import LLMClient
 from feature_forge.observability.structlog_config import get_logger
 from feature_forge.types import FeatureSpec
+from feature_forge.utils import strip_markdown_fences
 
 logger = get_logger(__name__)
 
@@ -46,7 +47,7 @@ class CodeGenerator:
             temperature=0.2,
             max_tokens=4096,
         )
-        return response.content
+        return strip_markdown_fences(response.content)
 
 
 class CorePipeline:
