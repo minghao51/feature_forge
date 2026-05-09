@@ -52,30 +52,109 @@ for c in configs[:3]:
     print(f"  {c}")
 ```
 
-## Dummy Experiment Function
+## Real Experiment with MALMASFeatureEngineer
 
 ```{python}
-#| label: dummy-experiment
+#| label: real-experiment
+#| error: true
+#| cache: true
 
-def run_experiment(config: dict):
-    """Dummy experiment that simulates feature engineering + CV."""
+from feature_forge.api import MALMASFeatureEngineer
+from feature_forge.config import Settings
+from feature_forge.llm.providers.deepseek import DeepSeekProvider
+from sklearn.metrics import roc_auc_score
+
+def run_real_experiment(config: dict) -> dict:
+    """Run a real feature engineering experiment using MALMASFeatureEngineer."""
     seed = config.get("seed", 42)
     n_rounds = config.get("n_rounds", 1)
-    method = config.get("method", "unknown")
+    method_variant = config.get("method", "full")
 
-    # Simulate synthetic data
-    X, y = make_classification(n_samples=200, n_features=5, random_state=seed)
+    X, y = make_classification(
+        n_samples=200, n_features=5, n_informative=3, random_state=seed
+    )
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.3, random_state=seed
     )
 
-    # Simulate baseline and enhanced scores
+    mode_map = {"full": "full", "no_memory": "no_memory", "openfe": "full"}
+    mode = mode_map.get(method_variant, "full")
+
+    llm = DeepSeekProvider(
+        model="deepseek-chat",
+        api_key=os.environ.get("FF_LLM__API_KEY", ""),
+    )
+    settings = Settings(
+        task="classification",
+        metric="auc",
+        n_rounds=n_rounds,
+        random_state=seed,
+        llm__model="deepseek-chat",
+        llm__api_key=os.environ.get("FF_LLM__API_KEY", ""),
+    )
+
+    fe = MALMASFeatureEngineer(config=settings, llm_client=llm, mode=mode)
+
+    from sklearn.ensemble import GradientBoostingClassifier
+    from sklearn.model_selection import cross_val_score
+
+    baseline_scores = cross_val_score(
+        GradientBoostingClassifier(random_state=seed),
+        X_train, y_train, cv=3, scoring="roc_auc"
+    )
+    baseline_auc = float(baseline_scores.mean())
+
+    fe.fit(pd.DataFrame(X_train), pd.Series(y_train))
+    X_train_enhanced = fe.transform(pd.DataFrame(X_train))
+    X_test_enhanced = fe.transform(pd.DataFrame(X_test))
+
+    n_new_features = len([c for c in X_train_enhanced.columns if c.startswith("feat_")])
+
+    enhanced_scores = cross_val_score(
+        GradientBoostingClassifier(random_state=seed),
+        X_train_enhanced, y_train, cv=3, scoring="roc_auc"
+    )
+    enhanced_auc = float(enhanced_scores.mean())
+
+    return {
+        "dataset": config.get("dataset", "unknown"),
+        "method": method_variant,
+        "seed": seed,
+        "n_rounds": n_rounds,
+        "model": config.get("model", "xgboost"),
+        "baseline_auc": round(baseline_auc, 4),
+        "enhanced_auc": round(enhanced_auc, 4),
+        "gain": round(enhanced_auc - baseline_auc, 4),
+        "n_features": n_new_features,
+    }
+
+first_config = configs[0]
+real_result = run_real_experiment(first_config)
+print(f"Real experiment result: {real_result}")
+```
+
+## Simulated Experiment Function (Fallback)
+
+```{python}
+#| label: simulated-experiment
+
+def run_simulated_experiment(config: dict):
+    """Simulated experiment for quick demos without LLM calls."""
+    seed = config.get("seed", 42)
+    n_rounds = config.get("n_rounds", 1)
+    method = config.get("method", "unknown")
+
     np.random.seed(seed)
     baseline = np.random.uniform(0.70, 0.78)
     gain = np.random.uniform(0.01, 0.06) * n_rounds if method == "malmas" else np.random.uniform(0.01, 0.03)
     enhanced = baseline + gain
 
     return {
+        "dataset": config.get("dataset", "unknown"),
+        "method": method,
+        "seed": seed,
+        "n_rounds": n_rounds,
+        "model": config.get("model", "xgboost"),
         "baseline_auc": round(baseline, 4),
         "enhanced_auc": round(enhanced, 4),
         "gain": round(gain, 4),
@@ -83,18 +162,44 @@ def run_experiment(config: dict):
     }
 ```
 
-## Run Experiments
+## Run All Experiments
 
 ```{python}
 #| label: run-experiments
 from feature_forge.experiment import ExperimentRunner
 
 runner = ExperimentRunner(max_workers=1)
-results = runner.run(configs, run_experiment)
+
+use_real = bool(os.environ.get("FF_LLM__API_KEY"))
+experiment_fn = run_real_experiment if use_real else run_simulated_experiment
+label = "MALMASFeatureEngineer" if use_real else "simulated"
+
+results = runner.run(configs, experiment_fn)
 
 results_df = pd.DataFrame(results)
-print(f"Completed {len(results_df)} runs")
+print(f"Completed {len(results_df)} runs using {label} experiments")
 results_df.head()
+```
+
+## Real Dataset: Titanic (Optional)
+
+```{python}
+#| label: real-dataset
+#| error: true
+
+from feature_forge.data.registry import DatasetRegistry
+
+registry = DatasetRegistry()
+print(f"Available datasets: {registry.list()}")
+
+try:
+    ds = registry.load("titanic")
+    titanic_train = ds["train"]
+    target_col = ds["target"]
+    print(f"Titanic train: {titanic_train.shape}, target: {target_col}")
+    titanic_train.head()
+except Exception as exc:
+    print(f"Titanic dataset unavailable (needs Kaggle API): {exc}")
 ```
 
 ## Reporter
@@ -167,5 +272,6 @@ if not results_df.empty and "gain" in results_df.columns:
 
 - `ExperimentMatrix` builds a Cartesian product of datasets, methods, seeds, models, and rounds
 - `ExperimentRunner` executes configs sequentially or in parallel
+- Real experiments use `MALMASFeatureEngineer` with actual LLM calls; simulated fallback works without an API key
 - `Reporter` generates markdown tables for papers/presentations
 - `WandBTracker` and `MLflowTracker` integrate with external experiment platforms

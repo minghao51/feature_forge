@@ -50,6 +50,27 @@ X_train, X_test, y_train, y_test = train_test_split(
 print(f"Train: {X_train.shape}, Test: {X_test.shape}")
 ```
 
+## Real Dataset: Titanic (Optional)
+
+```{python}
+#| label: load-real-data
+#| error: true
+
+from feature_forge.data.registry import DatasetRegistry
+
+registry = DatasetRegistry()
+print(f"Available datasets: {registry.list()}")
+
+try:
+    ds = registry.load("titanic")
+    titanic_train = ds["train"]
+    target_col = ds["target"]
+    print(f"Titanic train: {titanic_train.shape}, target: {target_col}")
+    titanic_train.head()
+except Exception as exc:
+    print(f"Titanic dataset unavailable (needs Kaggle API): {exc}")
+```
+
 ## Discover Baselines
 
 ```{python}
@@ -62,36 +83,66 @@ for name, cls in baselines.items():
     print(f"  - {name}: {cls.__name__}")
 ```
 
-## Run Each Baseline
+## Instantiate Each Baseline
 
 ```{python}
-#| label: run-baselines
+#| label: instantiate-baselines
 #| error: true
-#| cache: true
 
-from feature_forge.config import Settings
 from feature_forge.llm.providers.deepseek import DeepSeekProvider
 
-settings = Settings(
-    task="classification",
-    llm__model="deepseek-chat",
-    llm__api_key=os.environ.get("FF_LLM__API_KEY", ""),
-)
-
 llm = DeepSeekProvider(
-    model=settings.llm.model,
-    api_key=settings.llm.api_key.get_secret_value() if settings.llm.api_key else None,
+    model="deepseek-chat",
+    api_key=os.environ.get("FF_LLM__API_KEY", ""),
 )
 
 baseline_instances = {}
-for name, cls in baselines.items():
-    try:
-        inst = cls(config=settings, llm_client=llm)
-        baseline_instances[name] = inst
-    except Exception as exc:
-        print(f"Skipping {name}: {exc}")
 
-print(f"Instantiated: {list(baseline_instances.keys())}")
+# OpenFE: non-LLM baseline (requires `pip install openfe`)
+try:
+    from feature_forge.baselines.openfe import OpenFEBaseline
+    baseline_instances["openfe"] = OpenFEBaseline(n_jobs=1, metric="auc")
+    print("OpenFE: instantiated")
+except Exception as exc:
+    print(f"OpenFE: skipped — {exc}")
+
+# CAAFE: LLM-based, unified variant (no external dep for unified)
+try:
+    from feature_forge.baselines.caafe import CAAFEBaseline
+    baseline_instances["caafe"] = CAAFEBaseline(
+        llm_client=llm,
+        iterations=2,
+        variant="unified",
+    )
+    print("CAAFE: instantiated")
+except Exception as exc:
+    print(f"CAAFE: skipped — {exc}")
+
+# LLM-FE: LLM-based, single-shot
+try:
+    from feature_forge.baselines.llmfe import LLMFEBaseline
+    baseline_instances["llmfe"] = LLMFEBaseline(
+        llm_client=llm,
+        n_features=5,
+        mode="single_shot",
+    )
+    print("LLM-FE: instantiated")
+except Exception as exc:
+    print(f"LLM-FE: skipped — {exc}")
+
+# Malmus: structured JSON output
+try:
+    from feature_forge.baselines.malmus import MalmusBaseline
+    baseline_instances["malmus"] = MalmusBaseline(
+        llm_client=llm,
+        n_features=5,
+        mode="single_shot",
+    )
+    print("Malmus: instantiated")
+except Exception as exc:
+    print(f"Malmus: skipped — {exc}")
+
+print(f"\nInstantiated: {list(baseline_instances.keys())}")
 ```
 
 ## Compare Methods
@@ -99,6 +150,7 @@ print(f"Instantiated: {list(baseline_instances.keys())}")
 ```{python}
 #| label: compare-methods
 #| error: true
+#| cache: true
 
 from feature_forge.artifacts import compare_methods
 
@@ -111,10 +163,10 @@ results = compare_methods(
 
 for name, artifacts in results.items():
     if "error" in artifacts:
-        print(f"{name}: ERROR — {artifacts['error'][:80]}")
+        print(f"{name}: ERROR — {artifacts['error'][:120]}")
     else:
         scripts = artifacts.get("generated_scripts", [])
-        print(f"{name}: {len(scripts)} scripts")
+        print(f"{name}: {len(scripts)} scripts generated")
 ```
 
 ## Inspect Artifacts
@@ -130,6 +182,9 @@ for name, artifacts in results.items():
     scripts = artifacts.get("generated_scripts", [])
     if scripts:
         print(f"First script (truncated):\n{scripts[0][:300]}")
+    else:
+        meta = artifacts.get("feature_metadata", [])
+        print(f"No code scripts, but {len(meta)} metadata entries")
 ```
 
 ## Artifact Dashboard
@@ -145,13 +200,16 @@ bundles = {}
 for name, artifacts in results.items():
     if "error" not in artifacts:
         try:
-            bundles[name] = ArtifactBundle.from_dict(artifacts)
+            bundles[name] = ArtifactBundle(method_name=name, **{
+                k: v for k, v in artifacts.items()
+                if k in ("generated_scripts", "feature_metadata", "iteration_records", "provenance_records", "custom")
+                and v is not None
+            })
         except Exception as exc:
             print(f"Could not bundle {name}: {exc}")
 
 if bundles:
     dash = ArtifactDashboard(bundles)
-    # Save to temp file and show a snippet
     report_path = "/tmp/feature_forge_dashboard.html"
     dash.save(report_path)
     print(f"Dashboard saved to {report_path}")
@@ -169,7 +227,8 @@ import matplotlib.pyplot as plt
 counts = {}
 for name, artifacts in results.items():
     if "error" not in artifacts:
-        counts[name] = len(artifacts.get("generated_scripts", []))
+        scripts = artifacts.get("generated_scripts", [])
+        counts[name] = len(scripts) if scripts else 0
 
 if counts:
     fig, ax = plt.subplots(figsize=(7, 4))
@@ -179,11 +238,14 @@ if counts:
     ax.tick_params(axis="x", rotation=30)
     plt.tight_layout()
     plt.show()
+else:
+    print("No successful baselines to plot")
 ```
 
 ## Summary
 
 - 4 baselines ship with Feature Forge: OpenFE, CAAFE, LLM-FE, Malmus
-- `BaselineRegistry` discovers them via entry points
+- Each has different constructor requirements — OpenFE is non-LLM; the others accept an `llm_client`
+- Optional dependencies (`openfe`, `caafe`) are handled with per-baseline try/except
 - `compare_methods()` runs all baselines uniformly and returns artifact dicts
 - `ArtifactDashboard` generates an offline HTML report for side-by-side comparison

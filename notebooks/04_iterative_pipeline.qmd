@@ -58,6 +58,28 @@ print(f"Train: {X_train.shape}, Test: {X_test.shape}")
 X_train.head()
 ```
 
+## Real Dataset: Titanic (Optional)
+
+```{python}
+#| label: load-real-data
+#| error: true
+
+from feature_forge.data.registry import DatasetRegistry
+
+registry = DatasetRegistry()
+print(f"Available datasets: {registry.list()}")
+
+try:
+    ds = registry.load("titanic")
+    titanic_train = ds["train"]
+    target_col = ds["target"]
+    print(f"Titanic train: {titanic_train.shape}, target: {target_col}")
+    titanic_train.head()
+except Exception as exc:
+    print(f"Titanic dataset unavailable (needs Kaggle API): {exc}")
+    titanic_train = None
+```
+
 ## Run Iterative Pipeline
 
 ```{python}
@@ -99,7 +121,8 @@ print(f"Round summaries: {len(result.get('round_summaries', []))}")
 for i, summary in enumerate(result.get("round_summaries", [])):
     print(f"\n--- Round {i} ---")
     print(f"  Agents: {summary.get('agents', [])}")
-    print(f"  Features: {summary.get('num_features', 0)}")
+    print(f"  Features generated: {summary.get('num_features_generated', 0)}")
+    print(f"  Features selected: {summary.get('num_features_selected', 0)}")
     print(f"  Baseline: {summary.get('baseline_score', 0):.4f}")
 ```
 
@@ -174,15 +197,25 @@ import matplotlib.pyplot as plt
 rounds = result.get("round_summaries", [])
 if rounds:
     df_rounds = pd.DataFrame([
-        {"round": i, "features": r.get("num_features", 0), "baseline": r.get("baseline_score", 0)}
+        {
+            "round": i,
+            "generated": r.get("num_features_generated", 0),
+            "selected": r.get("num_features_selected", 0),
+            "baseline": r.get("baseline_score", 0),
+        }
         for i, r in enumerate(rounds)
     ])
-    fig, ax1 = plt.subplots(figsize=(7, 4))
-    ax1.bar(df_rounds["round"], df_rounds["features"], color="steelblue", label="Features")
+    fig, ax1 = plt.subplots(figsize=(8, 4))
+    x = np.arange(len(df_rounds))
+    width = 0.35
+    ax1.bar(x - width/2, df_rounds["generated"], width, color="steelblue", label="Generated")
+    ax1.bar(x + width/2, df_rounds["selected"], width, color="coral", label="Selected")
     ax1.set_xlabel("Round")
-    ax1.set_ylabel("Features Generated", color="steelblue")
-    ax1.tick_params(axis="y", labelcolor="steelblue")
+    ax1.set_ylabel("Feature Count")
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(df_rounds["round"])
     plt.title("Iterative Pipeline: Features per Round")
+    plt.legend()
     plt.tight_layout()
     plt.show()
 ```
