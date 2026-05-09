@@ -1,0 +1,52 @@
+site_name: Feature Forge
+site_url: https://your-org.github.io/feature-forge/
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          options:
+            show_source: true
+            show_root_heading: true
+            docstring_style: google
+markdown_extensions:
+  - pymdownx.blocks.caption
+  - md_in_html
+  - pymdownx.superfences
+  - admonition
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+extra:
+  version:
+    provider: mike
+nav:
+  - Home: index.md
+  - Quick Start: quick_start.md
+  - Methods: methods.md
+  - API Reference: api_reference.md
+  - Migration Guide: migration_guide.md
+  - Notebooks:
+      - Overview: notebooks/index.md
+      - 01 Quick Start: notebooks/01-quick-start.md
+      - 02 Agents: notebooks/02-agents.md
+      - 03 Router & Modes: notebooks/03-router.md
+      - 04 Iterative Pipeline: notebooks/04-iterative-pipeline.md
+      - 05 Experiment Matrix: notebooks/05-experiment-matrix.md
+      - 06 Baselines: notebooks/06-baselines.md
+      - 07 Evaluation: notebooks/07-evaluation.md
+      - 08 Artifacts: notebooks/08-artifacts.md
+      - 09 Configuration: notebooks/09-configuration.md

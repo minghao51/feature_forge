@@ -1,0 +1,20 @@
+project:
+  type: default
+  output-dir: ../docs/notebooks/html
+  render:
+    - "*.qmd"
+execute:
+  freeze: auto
+format:
+  html:
+    self-contained: true
+    embed-resources: true
+    code-fold: true
+    code-tools: true
+    theme: cosmo
+    toc: true
+    number-sections: false
+    fig-width: 8
+    fig-height: 5
+    dpi: 150
+    css: styles.css
