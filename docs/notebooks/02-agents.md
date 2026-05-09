@@ -1,0 +1,24 @@
+# Agents: The 6 Specialized Feature Generators
+
+Explore all 6 built-in agents, the AgentRegistry, and how to build a custom agent.
+
+## Notebook
+
+<div style="margin: 0 -0.8rem">
+  <iframe src="/feature-forge/notebooks/html/02_agents.html"
+    style="width:100%; height:700px; border:1px solid var(--md-default-fg-color--lightest); border-radius:4px;"
+    loading="lazy"></iframe>
+</div>
+
+## Run Locally
+
+```bash
+# Ensure your DeepSeek API key is set
+export FF_LLM__API_KEY=sk-...
+
+# Render this notebook
+uv run quarto render notebooks/02_agents.qmd
+
+# Or render all notebooks
+uv run quarto render notebooks/
+```
