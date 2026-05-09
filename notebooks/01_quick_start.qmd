@@ -1,0 +1,215 @@
+---
+title: "Quick Start: Sklearn API"
+description: "Get started with MALMASFeatureEngineer — fit, transform, and integrate into sklearn pipelines."
+date: today
+format:
+  html:
+    self-contained: true
+    embed-resources: true
+    code-fold: true
+    code-tools: true
+---
+
+## Introduction
+
+`MALMASFeatureEngineer` is the primary user-facing API for Feature Forge. It implements the standard sklearn `BaseEstimator` + `TransformerMixin` interface, so it drops into any `Pipeline` seamlessly. This notebook walks through the basic usage: fitting on training data, transforming test data, inspecting generated features, and using different pipeline modes.
+
+## Setup
+
+```{python}
+#| label: setup
+import os
+import warnings
+warnings.filterwarnings("ignore")
+
+import numpy as np
+import pandas as pd
+from sklearn.datasets import make_classification
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import roc_auc_score
+from xgboost import XGBClassifier
+
+import feature_forge
+print(f"feature_forge version: {feature_forge.__version__ if hasattr(feature_forge, '__version__') else 'dev'}")
+```
+
+## Load Data
+
+We use a synthetic classification dataset with 5 informative features and some noise. This ensures reproducibility without requiring external data downloads.
+
+```{python}
+#| label: load-data
+#| cache: true
+
+X, y = make_classification(
+    n_samples=300,
+    n_features=8,
+    n_informative=5,
+    n_redundant=2,
+    n_classes=2,
+    random_state=42,
+)
+
+feature_names = [f"feat_{i+1}" for i in range(X.shape[1])]
+df = pd.DataFrame(X, columns=feature_names)
+df["target"] = y
+
+X_train, X_test, y_train, y_test = train_test_split(
+    df.drop(columns=["target"]),
+    df["target"],
+    test_size=0.3,
+    random_state=42,
+    stratify=df["target"],
+)
+
+print(f"Train shape: {X_train.shape}")
+print(f"Test shape:  {X_test.shape}")
+X_train.head()
+```
+
+## Train: Fit MALMASFeatureEngineer
+
+```{python}
+#| label: fit-engineer
+#| error: true
+#| cache: true
+
+from feature_forge.api import MALMASFeatureEngineer
+from feature_forge.config import Settings
+
+# Use minimal rounds for speed in this demo
+config = Settings(
+    task="classification",
+    metric="auc",
+    n_rounds=1,
+    llm__model="deepseek-chat",
+    llm__api_key=os.environ.get("FF_LLM__API_KEY", ""),
+    llm__max_concurrent_calls=2,
+)
+
+fe = MALMASFeatureEngineer(config=config, mode="full")
+fe.fit(X_train, y_train)
+```
+
+## Inspect Generated Features
+
+```{python}
+#| label: inspect-features
+#| error: true
+
+print(f"Original features: {list(X_train.columns)}")
+print(f"Generated features ({len(fe.selected_features)}): {fe.selected_features}")
+print(f"Feature codes generated: {len(fe.feature_codes)}")
+
+# Show first generated code block
+if fe.feature_codes:
+    print("\n--- First generated feature code ---")
+    print(fe.feature_codes[0][:500])
+```
+
+## Transform Test Data
+
+```{python}
+#| label: transform-test
+#| error: true
+
+X_test_enhanced = fe.transform(X_test)
+print(f"Test shape before:  {X_test.shape}")
+print(f"Test shape after:   {X_test_enhanced.shape}")
+print(f"New columns: {list(X_test_enhanced.columns.difference(X_test.columns))}")
+```
+
+## Predict + Evaluate: Pipeline Integration
+
+```{python}
+#| label: pipeline-eval
+#| error: true
+
+# Baseline model (original features only)
+baseline_clf = XGBClassifier(n_estimators=100, max_depth=4, random_state=42, eval_metric="logloss")
+baseline_clf.fit(X_train, y_train)
+baseline_pred = baseline_clf.predict_proba(X_test)[:, 1]
+baseline_auc = roc_auc_score(y_test, baseline_pred)
+
+# Enhanced model (original + generated features)
+enhanced_clf = XGBClassifier(n_estimators=100, max_depth=4, random_state=42, eval_metric="logloss")
+enhanced_clf.fit(X_test_enhanced, y_train)  # Use enhanced train data
+enhanced_pred = enhanced_clf.predict_proba(X_test_enhanced)[:, 1]
+enhanced_auc = roc_auc_score(y_test, enhanced_pred)
+
+print(f"Baseline AUC:  {baseline_auc:.4f}")
+print(f"Enhanced AUC:  {enhanced_auc:.4f}")
+print(f"Improvement:   {enhanced_auc - baseline_auc:+.4f}")
+```
+
+## Using Pipeline Modes
+
+Feature Forge supports several ablation modes for research:
+
+```{python}
+#| label: pipeline-modes
+#| error: true
+
+modes = ["full", "no_memory", "no_router", "unary", "cross_compositional"]
+mode_results = {}
+
+for mode in modes:
+    try:
+        fe_mode = MALMASFeatureEngineer(config=config, mode=mode)
+        fe_mode.fit(X_train, y_train)
+        mode_results[mode] = {
+            "features": len(fe_mode.selected_features),
+            "codes": len(fe_mode.feature_codes),
+        }
+    except Exception as exc:
+        mode_results[mode] = {"error": str(exc)}
+
+pd.DataFrame.from_dict(mode_results, orient="index")
+```
+
+## Provenance and Artifacts
+
+```{python}
+#| label: provenance
+#| error: true
+
+if fe.pipeline_result:
+    print("Feature provenance records:")
+    prov = fe.provenance_records
+    print(f"Total records: {len(prov)}")
+    if prov:
+        print(pd.DataFrame(prov)[["feature_name", "source_agent", "round_index"]].head(10))
+
+    print("\nArtifacts:")
+    artifacts = fe.get_artifacts()
+    print(f"Keys: {list(artifacts.keys())[:10]}")
+```
+
+## Plot: Feature Count by Mode
+
+```{python}
+#| label: plot-modes
+#| error: true
+
+import matplotlib.pyplot as plt
+
+mode_df = pd.DataFrame.from_dict(mode_results, orient="index")
+if "features" in mode_df.columns:
+    mode_df = mode_df.dropna(subset=["features"])
+    fig, ax = plt.subplots(figsize=(8, 4))
+    mode_df["features"].plot(kind="bar", ax=ax, color="steelblue")
+    ax.set_title("Generated Features by Pipeline Mode")
+    ax.set_ylabel("Number of Features")
+    ax.set_xlabel("Mode")
+    ax.tick_params(axis="x", rotation=45)
+    plt.tight_layout()
+    plt.show()
+```
+
+## Summary
+
+- `MALMASFeatureEngineer` fits like any sklearn transformer
+- Use `.transform()` to apply generated features to new data
+- Pipeline modes (`full`, `no_memory`, `no_router`, agent names) let you ablate components
+- Provenance records track which agent created each feature

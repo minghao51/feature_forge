@@ -1,0 +1,234 @@
+---
+title: "Artifacts & Dashboard"
+description: "Unified artifact access, comparison, diff, and offline HTML dashboards."
+date: today
+format:
+  html:
+    self-contained: true
+    embed-resources: true
+    code-fold: true
+    code-tools: true
+---
+
+## Introduction
+
+Every feature engineering method in Feature Forge implements `ArtifactExporter`, providing a uniform interface to scripts, DataFrames, and metadata. This notebook demonstrates artifact schemas, comparison, diff, and dashboard generation.
+
+## Setup
+
+```{python}
+#| label: setup
+import os
+import warnings
+warnings.filterwarnings("ignore")
+
+import numpy as np
+import pandas as pd
+from sklearn.datasets import make_classification
+
+print("Artifacts & Dashboard Demo")
+```
+
+## Load Data
+
+```{python}
+#| label: load-data
+#| cache: true
+
+X, y = make_classification(
+    n_samples=200, n_features=5, n_informative=3, random_state=42
+)
+df = pd.DataFrame(X, columns=[f"c{i+1}" for i in range(X.shape[1])])
+df["target"] = y
+
+X_train = df.drop(columns=["target"])
+y_train = df["target"]
+```
+
+## ArtifactConfig
+
+```{python}
+#| label: artifact-config
+from feature_forge.artifacts import ArtifactConfig
+
+# In-memory mode (default)
+mem_cfg = ArtifactConfig(storage_mode="memory")
+print(f"Memory config: {mem_cfg}")
+
+# Disk mode
+disk_cfg = ArtifactConfig(storage_mode="disk", storage_format="parquet")
+print(f"Disk config: {disk_cfg}")
+```
+
+## ArtifactExporter Interface
+
+```{python}
+#| label: exporter-interface
+#| error: true
+
+from feature_forge.api import MALMASFeatureEngineer
+from feature_forge.config import Settings
+
+config = Settings(
+    task="classification",
+    n_rounds=1,
+    llm__model="deepseek-chat",
+    llm__api_key=os.environ.get("FF_LLM__API_KEY", ""),
+)
+
+fe = MALMASFeatureEngineer(config=config, artifact_config=ArtifactConfig())
+fe.fit(X_train, y_train)
+
+print(f"Generated scripts: {len(fe.generated_scripts)}")
+print(f"Feature metadata records: {len(fe.feature_metadata)}")
+print(f"Provenance records: {len(fe.provenance_records)}")
+```
+
+## Schema
+
+```{python}
+#| label: schema
+from feature_forge.artifacts.schema import ArtifactBundle, FeatureMetadata, ProvenanceRecord
+
+# Build a bundle manually
+meta = FeatureMetadata(
+    name="test_feat",
+    source_method="malmas",
+    source_agent="unary",
+    generated_code="df['test'] = df['c1'] * 2",
+)
+print(f"FeatureMetadata: {meta}")
+
+prov = ProvenanceRecord(
+    feature_name="test_feat",
+    source_method="malmas",
+    source_agent="unary",
+    round_index=0,
+)
+print(f"ProvenanceRecord: {prov}")
+```
+
+## Artifact Diff
+
+```{python}
+#| label: diff
+from feature_forge.artifacts.diff import ArtifactDiff
+from feature_forge.artifacts.schema import ArtifactBundle
+
+bundle_a = ArtifactBundle(
+    method_name="method_a",
+    generated_scripts=["code_a", "code_b"],
+    feature_metadata=[meta],
+)
+bundle_b = ArtifactBundle(
+    method_name="method_b",
+    generated_scripts=["code_b", "code_c"],
+    feature_metadata=[meta],
+)
+
+diff = ArtifactDiff({"a": bundle_a, "b": bundle_b})
+print("Summary:", diff.summary())
+print("\nOverlap matrix:")
+print(diff.overlap_matrix())
+```
+
+## Comparison Utility
+
+```{python}
+#| label: compare
+from feature_forge.artifacts import compare_methods
+
+# Create two dummy exporters
+fe_a = MALMASFeatureEngineer(config=config, mode="unary")
+fe_b = MALMASFeatureEngineer(config=config, mode="cross_compositional")
+
+try:
+    fe_a.fit(X_train, y_train)
+    fe_b.fit(X_train, y_train)
+
+    comparison = compare_methods(
+        methods={"unary": fe_a, "cross": fe_b},
+        X_train=X_train,
+        y_train=y_train,
+    )
+    for name, artifacts in comparison.items():
+        if "error" not in artifacts:
+            print(f"{name}: {len(artifacts.get('feature_codes', []))} codes")
+except Exception as exc:
+    print(f"Comparison skipped: {exc}")
+```
+
+## Dashboard Generation
+
+```{python}
+#| label: dashboard
+#| error: true
+
+from feature_forge.artifacts import ArtifactDashboard
+
+bundles = {}
+for name in ["a", "b"]:
+    try:
+        fe_mode = MALMASFeatureEngineer(config=config, mode="unary")
+        fe_mode.fit(X_train, y_train)
+        arts = fe_mode.get_artifacts()
+        bundles[name] = ArtifactBundle.from_dict(arts)
+    except Exception as exc:
+        print(f"Skipping {name}: {exc}")
+
+if bundles:
+    dash = ArtifactDashboard(bundles)
+    report_path = "/tmp/ff_artifact_report.html"
+    dash.save(report_path)
+    print(f"Dashboard: {report_path}")
+    # Show HTML head
+    html = Path(report_path).read_text()
+    print(f"HTML size: {len(html):,} bytes")
+else:
+    print("No bundles for dashboard")
+```
+
+## Storage Backends
+
+```{python}
+#| label: storage
+from feature_forge.artifacts.storage import DataFrameStorage, LazyDataFrameRef
+
+# In-memory storage
+storage = DataFrameStorage(config=ArtifactConfig(storage_mode="memory"))
+ref = storage.store("train_data", X_train)
+print(f"Stored as: {type(ref)}")
+
+if isinstance(ref, LazyDataFrameRef):
+    print(f"Lazy ref path: {ref.path}")
+else:
+    print(f"DataFrame shape: {ref.shape}")
+```
+
+## Plot: Artifact Metrics
+
+```{python}
+#| label: plot-artifacts
+import matplotlib.pyplot as plt
+
+metrics = {
+    "scripts": len(fe.generated_scripts) if hasattr(fe, "generated_scripts") else 0,
+    "metadata": len(fe.feature_metadata) if hasattr(fe, "feature_metadata") else 0,
+    "provenance": len(fe.provenance_records) if hasattr(fe, "provenance_records") else 0,
+}
+
+fig, ax = plt.subplots(figsize=(6, 4))
+ax.bar(metrics.keys(), metrics.values(), color=["steelblue", "teal", "coral"])
+ax.set_title("Artifact Counts from MALMASFeatureEngineer")
+ax.set_ylabel("Count")
+plt.tight_layout()
+plt.show()
+```
+
+## Summary
+
+- `ArtifactExporter` provides uniform access to scripts, DataFrames, and metadata
+- `ArtifactConfig` controls storage mode: `memory`, `disk`, or `hybrid`
+- `ArtifactDiff` computes overlap matrices and shared-feature counts
+- `ArtifactDashboard` generates self-contained HTML reports
+- `DataFrameStorage` abstracts away parquet/csv/feather backends
