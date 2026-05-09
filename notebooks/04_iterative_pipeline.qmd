@@ -106,7 +106,12 @@ llm = DeepSeekProvider(
 )
 
 pipeline = IterativePipeline(config=config, llm_client=llm)
-result = await pipeline.run(X_train, y_train, X_test, task_description="binary classification")
+result = {}
+try:
+    result = await pipeline.run(X_train, y_train, X_test, task_description="binary classification")
+    print(f"Pipeline complete: {len(result.get('selected_features', []))} features selected")
+except Exception as exc:
+    print(f"Pipeline error: {exc}")
 ```
 
 ## Inspect Round Results
