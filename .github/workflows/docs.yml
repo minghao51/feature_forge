@@ -32,6 +32,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra docs
 
+      - uses: quarto-dev/quarto-actions/setup@v2
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
