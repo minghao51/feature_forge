@@ -37,12 +37,12 @@ def get_base_path() -> str:
     """Extract base path from mkdocs.yml site_url for absolute iframe src."""
     mkdocs_path = REPO_ROOT / "mkdocs.yml"
     if not mkdocs_path.exists():
-        return "/feature-forge"
+        return "/feature_forge"
     mkdocs = yaml.safe_load(mkdocs_path.read_text(encoding="utf-8"))
     site_url = mkdocs.get("site_url", "")
     from urllib.parse import urlparse
     parsed = urlparse(site_url)
-    return parsed.path.rstrip("/") or "/feature-forge"
+    return parsed.path.rstrip("/") or "/feature_forge"
 
 
 def generate_stub(qmd_path: Path, base_path: str) -> str:

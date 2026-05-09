@@ -5,7 +5,7 @@ Dynamic agent selection with data-driven, performance-driven, hybrid, and LLM-ba
 ## Notebook
 
 <div style="margin: 0 -0.8rem">
-  <iframe src="/feature-forge/notebooks/html/03_router.html"
+  <iframe src="/feature_forge/notebooks/html/03_router.html"
     style="width:100%; height:700px; border:1px solid var(--md-default-fg-color--lightest); border-radius:4px;"
     loading="lazy"></iframe>
 </div>
