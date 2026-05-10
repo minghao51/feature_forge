@@ -86,6 +86,17 @@ class SandboxedExecutor:
         "hasattr",
         "type",
         "__import__",
+        "ValueError",
+        "TypeError",
+        "KeyError",
+        "IndexError",
+        "AttributeError",
+        "RuntimeError",
+        "ZeroDivisionError",
+        "OverflowError",
+        "Exception",
+        "NotImplementedError",
+        "StopIteration",
     }
     ALLOWED_IMPORTS: ClassVar[set[str]] = {"pandas", "numpy", "math"}
 
