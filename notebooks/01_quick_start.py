@@ -1,0 +1,188 @@
+"""Quick Start: Sklearn API — MALMASFeatureEngineer fit, transform, and pipeline integration."""
+
+import os
+import warnings
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from sklearn.datasets import make_classification
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import train_test_split
+from xgboost import XGBClassifier
+
+import feature_forge
+
+warnings.filterwarnings("ignore")
+
+print(f"feature_forge version: {feature_forge.__version__}")
+
+
+def main():
+    X, y = make_classification(
+        n_samples=300,
+        n_features=8,
+        n_informative=5,
+        n_redundant=2,
+        n_classes=2,
+        random_state=42,
+    )
+
+    feature_names = [f"feat_{i+1}" for i in range(X.shape[1])]
+    df = pd.DataFrame(X, columns=feature_names)
+    df["target"] = y
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        df.drop(columns=["target"]),
+        df["target"],
+        test_size=0.3,
+        random_state=42,
+        stratify=df["target"],
+    )
+
+    print(f"Train shape: {X_train.shape}")
+    print(f"Test shape:  {X_test.shape}")
+
+    from feature_forge.api import MALMASFeatureEngineer
+    from feature_forge.config import LLMConfig, Settings
+
+    config = Settings(
+        task="classification",
+        metric="auc",
+        n_rounds=1,
+        llm=LLMConfig(
+            model="deepseek-chat",
+            api_key=os.environ.get("FF_LLM__API_KEY", ""),
+            max_concurrent_calls=2,
+        ),
+    )
+
+    fe = MALMASFeatureEngineer(config=config, mode="full")
+    for attempt in range(3):
+        try:
+            fe.fit(X_train, y_train)
+            break
+        except Exception as exc:
+            if attempt < 2:
+                print(f"fit attempt {attempt + 1} failed: {exc}. Retrying...")
+                fe = MALMASFeatureEngineer(config=config, mode="full")
+            else:
+                raise
+
+    print(f"Original features: {list(X_train.columns)}")
+    print(f"Generated features ({len(fe.selected_features)}): {fe.selected_features}")
+    print(f"Feature codes generated: {len(fe.feature_codes)}")
+
+    if fe.feature_codes:
+        print("\n--- First generated feature code ---")
+        print(fe.feature_codes[0][:500])
+
+    X_test_enhanced = fe.transform(X_test)
+    print(f"Test shape before:  {X_test.shape}")
+    print(f"Test shape after:   {X_test_enhanced.shape}")
+    print(f"New columns: {list(X_test_enhanced.columns.difference(X_test.columns))}")
+
+    baseline_clf = XGBClassifier(n_estimators=100, max_depth=4, random_state=42, eval_metric="logloss")
+    baseline_clf.fit(X_train, y_train)
+    baseline_pred = baseline_clf.predict_proba(X_test)[:, 1]
+    baseline_auc = roc_auc_score(y_test, baseline_pred)
+
+    X_train_enhanced = fe.transform(X_train)
+    enhanced_clf = XGBClassifier(n_estimators=100, max_depth=4, random_state=42, eval_metric="logloss")
+    enhanced_clf.fit(X_train_enhanced, y_train)
+    enhanced_pred = enhanced_clf.predict_proba(X_test_enhanced)[:, 1]
+    enhanced_auc = roc_auc_score(y_test, enhanced_pred)
+
+    print(f"Baseline AUC:  {baseline_auc:.4f}")
+    print(f"Enhanced AUC:  {enhanced_auc:.4f}")
+    print(f"Improvement:   {enhanced_auc - baseline_auc:+.4f}")
+
+    modes = ["full", "no_memory", "unary"]
+    mode_results = {}
+
+    for mode in modes:
+        try:
+            fe_mode = MALMASFeatureEngineer(config=config, mode=mode)
+            fe_mode.fit(X_train, y_train)
+            mode_results[mode] = {
+                "features": len(fe_mode.selected_features),
+                "codes": len(fe_mode.feature_codes),
+            }
+        except Exception as exc:
+            mode_results[mode] = {"error": str(exc)}
+
+    mode_df = pd.DataFrame.from_dict(mode_results, orient="index")
+    print("\nMode results:")
+    print(mode_df)
+
+    if fe.pipeline_result:
+        print("Feature provenance records:")
+        prov = fe.provenance_records
+        print(f"Total records: {len(prov)}")
+        if prov:
+            print(pd.DataFrame(prov)[["feature_name", "source_agent", "round_index"]].head(10))
+
+        print("\nArtifacts:")
+        artifacts = fe.get_artifacts()
+        print(f"Keys: {list(artifacts.keys())[:10]}")
+
+    mode_df_plot = pd.DataFrame.from_dict(mode_results, orient="index")
+    if "features" in mode_df_plot.columns:
+        mode_df_plot = mode_df_plot.dropna(subset=["features"])
+        fig, ax = plt.subplots(figsize=(8, 4))
+        mode_df_plot["features"].plot(kind="bar", ax=ax, color="steelblue")
+        ax.set_title("Generated Features by Pipeline Mode")
+        ax.set_ylabel("Number of Features")
+        ax.set_xlabel("Mode")
+        ax.tick_params(axis="x", rotation=45)
+        plt.tight_layout()
+        plt.savefig("/tmp/01_quick_start_modes.png", dpi=100)
+        plt.close()
+        print("Plot saved to /tmp/01_quick_start_modes.png")
+
+    print("\n--- Feature Importance (Top 15) ---")
+    importance = enhanced_clf.feature_importances_
+    feat_names = X_train_enhanced.columns.tolist()
+    imp_df = pd.DataFrame({"feature": feat_names, "importance": importance})
+    imp_df = imp_df.sort_values("importance", ascending=False).head(15)
+    print(imp_df.to_string(index=False))
+
+    new_feat_imp = imp_df[imp_df["feature"].isin(fe.selected_features)]
+    if not new_feat_imp.empty:
+        print(f"\nGenerated features in top 15: {len(new_feat_imp)}/{len(fe.selected_features)}")
+        print(new_feat_imp[["feature", "importance"]].to_string(index=False))
+    else:
+        print("\nNo generated features in top 15 by importance")
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    ax = axes[0]
+    colors = ["coral" if f in fe.selected_features else "steelblue" for f in imp_df["feature"]]
+    ax.barh(range(len(imp_df)), imp_df["importance"].values, color=colors)
+    ax.set_yticks(range(len(imp_df)))
+    ax.set_yticklabels(imp_df["feature"].values)
+    ax.invert_yaxis()
+    ax.set_xlabel("XGBoost Importance")
+    ax.set_title("Top 15 Features (coral = generated)")
+    ax.legend(handles=[
+        plt.Rectangle((0, 0), 1, 1, color="coral", label="Generated"),
+        plt.Rectangle((0, 0), 1, 1, color="steelblue", label="Original"),
+    ])
+
+    ax = axes[1]
+    auc_comparison = pd.Series({"Baseline": baseline_auc, "Enhanced": enhanced_auc})
+    bars = auc_comparison.plot(kind="bar", ax=ax, color=["gray", "steelblue"], edgecolor="black")
+    ax.set_ylabel("AUC")
+    ax.set_title("AUC: Baseline vs Enhanced")
+    ax.tick_params(axis="x", rotation=0)
+    for i, val in enumerate(auc_comparison):
+        ax.text(i, val + 0.003, f"{val:.4f}", ha="center", fontsize=10)
+
+    plt.tight_layout()
+    plt.savefig("/tmp/01_feature_importance.png", dpi=120)
+    plt.close()
+    print("\nFeature importance plot saved to /tmp/01_feature_importance.png")
+
+
+if __name__ == "__main__":
+    main()
