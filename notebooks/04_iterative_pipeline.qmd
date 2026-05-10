@@ -87,7 +87,7 @@ except Exception as exc:
 #| error: true
 #| cache: true
 
-from feature_forge.config import Settings
+from feature_forge.config import LLMConfig, Settings
 from feature_forge.pipeline.iterative import IterativePipeline
 from feature_forge.llm.providers.deepseek import DeepSeekProvider
 
@@ -95,9 +95,11 @@ config = Settings(
     task="classification",
     metric="auc",
     n_rounds=2,
-    llm__model="deepseek-chat",
-    llm__api_key=os.environ.get("FF_LLM__API_KEY", ""),
-    llm__max_concurrent_calls=2,
+    llm=LLMConfig(
+        model="deepseek-chat",
+        api_key=os.environ.get("FF_LLM__API_KEY", ""),
+        max_concurrent_calls=2,
+    ),
 )
 
 llm = DeepSeekProvider(

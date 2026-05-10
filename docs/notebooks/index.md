@@ -14,6 +14,7 @@ All notebooks are rendered with [Quarto](https://quarto.org) and embedded below.
 | [Evaluation & Sandboxed Execution](07-evaluation.md) | Cross-validation feature evaluation, sandboxed code execution, and model factory. |
 | [Artifacts & Dashboard](08-artifacts.md) | Unified artifact access, comparison, diff, and offline HTML dashboards. |
 | [Configuration & Tracking](09-configuration.md) | Pydantic settings, environment overrides, and experiment tracking with WandB and MLflow. |
+| [Method Comparison](10-method-comparison.md) | Head-to-head benchmark of MALMAS, CAAFE, LLM-FE, and Malmus on the same dataset with side-by-side metrics. |
 
 ## Prerequisites
 

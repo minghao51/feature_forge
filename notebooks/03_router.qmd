@@ -51,13 +51,15 @@ df.head()
 #| cache: true
 
 from feature_forge.agents.router import RouterAgent
-from feature_forge.config import Settings
+from feature_forge.config import LLMConfig, RouterConfig, Settings
 
 settings = Settings(
     task="classification",
-    router__strategy="hybrid",
-    llm__model="deepseek-chat",
-    llm__api_key=os.environ.get("FF_LLM__API_KEY", ""),
+    router=RouterConfig(strategy="hybrid"),
+    llm=LLMConfig(
+        model="deepseek-chat",
+        api_key=os.environ.get("FF_LLM__API_KEY", ""),
+    ),
 )
 
 router = RouterAgent(settings)
@@ -78,7 +80,7 @@ for k, v in characteristics.items():
 #| label: data-driven
 #| error: true
 
-router_dd = RouterAgent(Settings(router__strategy="data_driven"))
+router_dd = RouterAgent(Settings(router=RouterConfig(strategy="data_driven")))
 selected_dd = router_dd.select_agents_data_driven(characteristics)
 print(f"Data-driven selected: {selected_dd}")
 ```
@@ -90,7 +92,7 @@ print(f"Data-driven selected: {selected_dd}")
 #| error: true
 
 # Simulate some historical performance data
-router_perf = RouterAgent(Settings(router__strategy="performance_driven"))
+router_perf = RouterAgent(Settings(router=RouterConfig(strategy="performance_driven")))
 for agent in router_perf.agent_names:
     router_perf.agent_performance[agent] = [np.random.uniform(0.01, 0.05) for _ in range(3)]
 
@@ -105,7 +107,7 @@ print(f"Performance-driven selected: {selected_perf}")
 #| error: true
 
 router_llm = RouterAgent(
-    Settings(router__strategy="llm"),
+    Settings(router=RouterConfig(strategy="llm")),
     llm_client=None,  # Will be set by pipeline
 )
 print(f"LLM router strategy: {router_llm.strategy}")
@@ -124,8 +126,10 @@ from feature_forge.api import MALMASFeatureEngineer
 config = Settings(
     task="classification",
     n_rounds=1,
-    llm__model="deepseek-chat",
-    llm__api_key=os.environ.get("FF_LLM__API_KEY", ""),
+    llm=LLMConfig(
+        model="deepseek-chat",
+        api_key=os.environ.get("FF_LLM__API_KEY", ""),
+    ),
 )
 
 X = df.drop(columns=["target"])

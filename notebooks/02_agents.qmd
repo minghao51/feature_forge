@@ -78,15 +78,17 @@ df.head()
 #| error: true
 #| cache: true
 
-from feature_forge.config import Settings
+from feature_forge.config import LLMConfig, Settings
 from feature_forge.llm.base import LLMClient
 from feature_forge.llm.providers.deepseek import DeepSeekProvider
 
 settings = Settings(
     task="classification",
-    llm__model="deepseek-chat",
-    llm__api_key=os.environ.get("FF_LLM__API_KEY", ""),
-    llm__max_concurrent_calls=2,
+    llm=LLMConfig(
+        model="deepseek-chat",
+        api_key=os.environ.get("FF_LLM__API_KEY", ""),
+        max_concurrent_calls=2,
+    ),
 )
 
 llm = DeepSeekProvider(

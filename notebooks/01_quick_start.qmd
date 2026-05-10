@@ -12,7 +12,7 @@ format:
 
 ## Introduction
 
-`MALMASFeatureEngineer` is the primary user-facing API for Feature Forge. It implements the standard sklearn `BaseEstimator` + `TransformerMixin` interface, so it drops into any `Pipeline` seamlessly. This notebook walks through the basic usage: fitting on training data, transforming test data, inspecting generated features, and using different pipeline modes.
+`MALMASFeatureEngineer` is the primary user-facing API for Feature Forge. It implements the standard sklearn `BaseEstimator` + `TransformerMixin` interface, so it drops into any `Pipeline` seamlessly. This notebook walks through the basic usage: fitting on training data, transforming test data, inspecting generated features, evaluating downstream model performance, and exploring feature importance.
 
 ## Setup
 
@@ -26,12 +26,11 @@ import numpy as np
 import pandas as pd
 from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split
-from sklearn.pipeline import Pipeline
 from sklearn.metrics import roc_auc_score
 from xgboost import XGBClassifier
 
 import feature_forge
-print(f"feature_forge version: {feature_forge.__version__ if hasattr(feature_forge, '__version__') else 'dev'}")
+print(f"feature_forge version: {feature_forge.__version__}")
 ```
 
 ## Load Data
@@ -76,20 +75,30 @@ X_train.head()
 #| cache: true
 
 from feature_forge.api import MALMASFeatureEngineer
-from feature_forge.config import Settings
+from feature_forge.config import LLMConfig, Settings
 
-# Use minimal rounds for speed in this demo
 config = Settings(
     task="classification",
     metric="auc",
     n_rounds=1,
-    llm__model="deepseek-chat",
-    llm__api_key=os.environ.get("FF_LLM__API_KEY", ""),
-    llm__max_concurrent_calls=2,
+    llm=LLMConfig(
+        model="deepseek-chat",
+        api_key=os.environ.get("FF_LLM__API_KEY", ""),
+        max_concurrent_calls=2,
+    ),
 )
 
 fe = MALMASFeatureEngineer(config=config, mode="full")
-fe.fit(X_train, y_train)
+for attempt in range(3):
+    try:
+        fe.fit(X_train, y_train)
+        break
+    except Exception as exc:
+        if attempt < 2:
+            print(f"fit attempt {attempt + 1} failed: {exc}. Retrying...")
+            fe = MALMASFeatureEngineer(config=config, mode="full")
+        else:
+            raise
 ```
 
 ## Inspect Generated Features
@@ -102,7 +111,6 @@ print(f"Original features: {list(X_train.columns)}")
 print(f"Generated features ({len(fe.selected_features)}): {fe.selected_features}")
 print(f"Feature codes generated: {len(fe.feature_codes)}")
 
-# Show first generated code block
 if fe.feature_codes:
     print("\n--- First generated feature code ---")
     print(fe.feature_codes[0][:500])
@@ -120,21 +128,20 @@ print(f"Test shape after:   {X_test_enhanced.shape}")
 print(f"New columns: {list(X_test_enhanced.columns.difference(X_test.columns))}")
 ```
 
-## Predict + Evaluate: Pipeline Integration
+## Predict + Evaluate
 
 ```{python}
-#| label: pipeline-eval
+#| label: evaluate
 #| error: true
 
-# Baseline model (original features only)
 baseline_clf = XGBClassifier(n_estimators=100, max_depth=4, random_state=42, eval_metric="logloss")
 baseline_clf.fit(X_train, y_train)
 baseline_pred = baseline_clf.predict_proba(X_test)[:, 1]
 baseline_auc = roc_auc_score(y_test, baseline_pred)
 
-# Enhanced model (original + generated features)
+X_train_enhanced = fe.transform(X_train)
 enhanced_clf = XGBClassifier(n_estimators=100, max_depth=4, random_state=42, eval_metric="logloss")
-enhanced_clf.fit(X_test_enhanced, y_train)  # Use enhanced train data
+enhanced_clf.fit(X_train_enhanced, y_train)
 enhanced_pred = enhanced_clf.predict_proba(X_test_enhanced)[:, 1]
 enhanced_auc = roc_auc_score(y_test, enhanced_pred)
 
@@ -151,7 +158,7 @@ Feature Forge supports several ablation modes for research:
 #| label: pipeline-modes
 #| error: true
 
-modes = ["full", "no_memory", "no_router", "unary", "cross_compositional"]
+modes = ["full", "no_memory", "unary"]
 mode_results = {}
 
 for mode in modes:
@@ -165,7 +172,8 @@ for mode in modes:
     except Exception as exc:
         mode_results[mode] = {"error": str(exc)}
 
-pd.DataFrame.from_dict(mode_results, orient="index")
+mode_df = pd.DataFrame.from_dict(mode_results, orient="index")
+mode_df
 ```
 
 ## Provenance and Artifacts
@@ -194,11 +202,11 @@ if fe.pipeline_result:
 
 import matplotlib.pyplot as plt
 
-mode_df = pd.DataFrame.from_dict(mode_results, orient="index")
-if "features" in mode_df.columns:
-    mode_df = mode_df.dropna(subset=["features"])
+mode_df_plot = pd.DataFrame.from_dict(mode_results, orient="index")
+if "features" in mode_df_plot.columns:
+    mode_df_plot = mode_df_plot.dropna(subset=["features"])
     fig, ax = plt.subplots(figsize=(8, 4))
-    mode_df["features"].plot(kind="bar", ax=ax, color="steelblue")
+    mode_df_plot["features"].plot(kind="bar", ax=ax, color="steelblue")
     ax.set_title("Generated Features by Pipeline Mode")
     ax.set_ylabel("Number of Features")
     ax.set_xlabel("Mode")
@@ -207,9 +215,63 @@ if "features" in mode_df.columns:
     plt.show()
 ```
 
+## Feature Importance
+
+```{python}
+#| label: feature-importance
+#| error: true
+
+importance = enhanced_clf.feature_importances_
+feat_names = X_train_enhanced.columns.tolist()
+imp_df = pd.DataFrame({"feature": feat_names, "importance": importance})
+imp_df = imp_df.sort_values("importance", ascending=False).head(15)
+print("Top 15 features by XGBoost importance:")
+imp_df
+```
+
+```{python}
+#| label: plot-importance
+#| error: true
+
+new_feat_imp = imp_df[imp_df["feature"].isin(fe.selected_features)]
+if not new_feat_imp.empty:
+    print(f"Generated features in top 15: {len(new_feat_imp)}/{len(fe.selected_features)}")
+    print(new_feat_imp[["feature", "importance"]].to_string(index=False))
+else:
+    print("No generated features in top 15 by importance")
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+ax = axes[0]
+colors = ["coral" if f in fe.selected_features else "steelblue" for f in imp_df["feature"]]
+ax.barh(range(len(imp_df)), imp_df["importance"].values, color=colors)
+ax.set_yticks(range(len(imp_df)))
+ax.set_yticklabels(imp_df["feature"].values)
+ax.invert_yaxis()
+ax.set_xlabel("XGBoost Importance")
+ax.set_title("Top 15 Features (coral = generated)")
+ax.legend(handles=[
+    plt.Rectangle((0, 0), 1, 1, color="coral", label="Generated"),
+    plt.Rectangle((0, 0), 1, 1, color="steelblue", label="Original"),
+])
+
+ax = axes[1]
+auc_comparison = pd.Series({"Baseline": baseline_auc, "Enhanced": enhanced_auc})
+auc_comparison.plot(kind="bar", ax=ax, color=["gray", "steelblue"], edgecolor="black")
+ax.set_ylabel("AUC")
+ax.set_title("AUC: Baseline vs Enhanced")
+ax.tick_params(axis="x", rotation=0)
+for i, val in enumerate(auc_comparison):
+    ax.text(i, val + 0.003, f"{val:.4f}", ha="center", fontsize=10)
+
+plt.tight_layout()
+plt.show()
+```
+
 ## Summary
 
 - `MALMASFeatureEngineer` fits like any sklearn transformer
 - Use `.transform()` to apply generated features to new data
 - Pipeline modes (`full`, `no_memory`, `no_router`, agent names) let you ablate components
 - Provenance records track which agent created each feature
+- Feature importance analysis reveals which generated features matter most for downstream performance

@@ -60,12 +60,11 @@ for c in configs[:3]:
 #| cache: true
 
 from feature_forge.api import MALMASFeatureEngineer
-from feature_forge.config import Settings
+from feature_forge.config import LLMConfig, Settings
 from feature_forge.llm.providers.deepseek import DeepSeekProvider
 from sklearn.metrics import roc_auc_score
 
 def run_real_experiment(config: dict) -> dict:
-    """Run a real feature engineering experiment using MALMASFeatureEngineer."""
     seed = config.get("seed", 42)
     n_rounds = config.get("n_rounds", 1)
     method_variant = config.get("method", "full")
@@ -80,17 +79,19 @@ def run_real_experiment(config: dict) -> dict:
     mode_map = {"full": "full", "no_memory": "no_memory", "openfe": "full"}
     mode = mode_map.get(method_variant, "full")
 
-    llm = DeepSeekProvider(
-        model="deepseek-chat",
-        api_key=os.environ.get("FF_LLM__API_KEY", ""),
-    )
     settings = Settings(
         task="classification",
         metric="auc",
         n_rounds=n_rounds,
         random_state=seed,
-        llm__model="deepseek-chat",
-        llm__api_key=os.environ.get("FF_LLM__API_KEY", ""),
+        llm=LLMConfig(
+            model="deepseek-chat",
+            api_key=os.environ.get("FF_LLM__API_KEY", ""),
+        ),
+    )
+    llm = DeepSeekProvider(
+        model=settings.llm.model,
+        api_key=settings.llm.api_key.get_secret_value() if settings.llm.api_key else None,
     )
 
     fe = MALMASFeatureEngineer(config=settings, llm_client=llm, mode=mode)

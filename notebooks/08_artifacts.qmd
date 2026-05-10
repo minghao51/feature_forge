@@ -12,7 +12,7 @@ format:
 
 ## Introduction
 
-Every feature engineering method in Feature Forge implements `ArtifactExporter`, providing a uniform interface to scripts, DataFrames, and metadata. This notebook demonstrates artifact schemas, comparison, diff, and dashboard generation.
+Every feature engineering method in Feature Forge implements `ArtifactExporter`, providing a uniform interface to scripts, DataFrames, and metadata. This notebook demonstrates artifact schemas, comparison, diff, dashboard generation, and cross-method gain analysis.
 
 ## Setup
 
@@ -21,6 +21,8 @@ Every feature engineering method in Feature Forge implements `ArtifactExporter`,
 import os
 import warnings
 warnings.filterwarnings("ignore")
+
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -51,11 +53,9 @@ y_train = df["target"]
 #| label: artifact-config
 from feature_forge.artifacts import ArtifactConfig
 
-# In-memory mode (default)
 mem_cfg = ArtifactConfig(storage_mode="memory")
 print(f"Memory config: {mem_cfg}")
 
-# Disk mode
 disk_cfg = ArtifactConfig(storage_mode="disk", storage_format="parquet")
 print(f"Disk config: {disk_cfg}")
 ```
@@ -67,13 +67,15 @@ print(f"Disk config: {disk_cfg}")
 #| error: true
 
 from feature_forge.api import MALMASFeatureEngineer
-from feature_forge.config import Settings
+from feature_forge.config import LLMConfig, Settings
 
 config = Settings(
     task="classification",
     n_rounds=1,
-    llm__model="deepseek-chat",
-    llm__api_key=os.environ.get("FF_LLM__API_KEY", ""),
+    llm=LLMConfig(
+        model="deepseek-chat",
+        api_key=os.environ.get("FF_LLM__API_KEY", ""),
+    ),
 )
 
 fe = MALMASFeatureEngineer(config=config, artifact_config=ArtifactConfig())
@@ -90,12 +92,11 @@ print(f"Provenance records: {len(fe.provenance_records)}")
 #| label: schema
 from feature_forge.artifacts.schema import ArtifactBundle, FeatureMetadata, ProvenanceRecord
 
-# Build a bundle manually
 meta = FeatureMetadata(
     name="test_feat",
-    source_method="malmas",
-    source_agent="unary",
-    generated_code="df['test'] = df['c1'] * 2",
+    method="malmas",
+    agent="unary",
+    code="df['test'] = df['c1'] * 2",
 )
 print(f"FeatureMetadata: {meta}")
 
@@ -113,7 +114,6 @@ print(f"ProvenanceRecord: {prov}")
 ```{python}
 #| label: diff
 from feature_forge.artifacts.diff import ArtifactDiff
-from feature_forge.artifacts.schema import ArtifactBundle
 
 bundle_a = ArtifactBundle(
     method_name="method_a",
@@ -127,7 +127,7 @@ bundle_b = ArtifactBundle(
 )
 
 diff = ArtifactDiff({"a": bundle_a, "b": bundle_b})
-print("Summary:", diff.summary())
+print(f"Summary: {diff.summary()}")
 print("\nOverlap matrix:")
 print(diff.overlap_matrix())
 ```
@@ -136,9 +136,10 @@ print(diff.overlap_matrix())
 
 ```{python}
 #| label: compare
+#| error: true
+
 from feature_forge.artifacts import compare_methods
 
-# Create two dummy exporters
 fe_a = MALMASFeatureEngineer(config=config, mode="unary")
 fe_b = MALMASFeatureEngineer(config=config, mode="cross_compositional")
 
@@ -172,7 +173,11 @@ for name in ["a", "b"]:
         fe_mode = MALMASFeatureEngineer(config=config, mode="unary")
         fe_mode.fit(X_train, y_train)
         arts = fe_mode.get_artifacts()
-        bundles[name] = ArtifactBundle.from_dict(arts)
+        bundles[name] = ArtifactBundle(
+            method_name=name,
+            generated_scripts=arts.get("feature_codes", []),
+            provenance_records=arts.get("provenance", []),
+        )
     except Exception as exc:
         print(f"Skipping {name}: {exc}")
 
@@ -181,7 +186,6 @@ if bundles:
     report_path = "/tmp/ff_artifact_report.html"
     dash.save(report_path)
     print(f"Dashboard: {report_path}")
-    # Show HTML head
     html = Path(report_path).read_text()
     print(f"HTML size: {len(html):,} bytes")
 else:
@@ -194,7 +198,6 @@ else:
 #| label: storage
 from feature_forge.artifacts.storage import DataFrameStorage, LazyDataFrameRef
 
-# In-memory storage
 storage = DataFrameStorage(config=ArtifactConfig(storage_mode="memory"))
 ref = storage.store("train_data", X_train)
 print(f"Stored as: {type(ref)}")
@@ -205,10 +208,45 @@ else:
     print(f"DataFrame shape: {ref.shape}")
 ```
 
+## Per-Bundle DataFrame Export
+
+```{python}
+#| label: dataframe-export
+#| error: true
+
+if bundles:
+    for method, bundle in bundles.items():
+        feat_df = bundle.to_feature_dataframe()
+        prov_df = bundle.to_provenance_dataframe()
+        print(f"\n{method}:")
+        print(f"  Feature metadata DataFrame: {feat_df.shape}")
+        print(f"  Provenance DataFrame: {prov_df.shape}")
+        if not feat_df.empty:
+            print(f"  Columns: {list(feat_df.columns)}")
+        if not prov_df.empty:
+            print(f"  Columns: {list(prov_df.columns)}")
+```
+
+## Cross-Method Gain Comparison
+
+```{python}
+#| label: gain-comparison
+#| error: true
+
+if len(bundles) >= 2:
+    diff_full = ArtifactDiff(bundles)
+    gain_df = diff_full.gain_comparison()
+    if not gain_df.empty:
+        print("Gain comparison across methods:")
+        print(gain_df)
+```
+
 ## Plot: Artifact Metrics
 
 ```{python}
 #| label: plot-artifacts
+#| error: true
+
 import matplotlib.pyplot as plt
 
 metrics = {
@@ -217,12 +255,52 @@ metrics = {
     "provenance": len(fe.provenance_records) if hasattr(fe, "provenance_records") else 0,
 }
 
-fig, ax = plt.subplots(figsize=(6, 4))
+fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+
+ax = axes[0]
 ax.bar(metrics.keys(), metrics.values(), color=["steelblue", "teal", "coral"])
 ax.set_title("Artifact Counts from MALMASFeatureEngineer")
 ax.set_ylabel("Count")
+
+ax = axes[1]
+if not diff.overlap_matrix().empty:
+    overlap = diff.overlap_matrix()
+    im = ax.imshow(overlap.values, cmap="YlGn", aspect="auto")
+    ax.set_xticks(range(len(overlap.columns)))
+    ax.set_xticklabels(overlap.columns)
+    ax.set_yticks(range(len(overlap.index)))
+    ax.set_yticklabels(overlap.index)
+    ax.set_title("Feature Overlap Matrix")
+    for i in range(len(overlap.index)):
+        for j in range(len(overlap.columns)):
+            ax.text(j, i, str(int(overlap.values[i, j])), ha="center", va="center")
+else:
+    ax.text(0.5, 0.5, "No overlap data", ha="center", va="center")
+    ax.set_title("Feature Overlap Matrix")
+
 plt.tight_layout()
 plt.show()
+```
+
+## Plot: Gain Comparison
+
+```{python}
+#| label: plot-gains
+#| error: true
+
+if len(bundles) >= 2:
+    diff_full = ArtifactDiff(bundles)
+    gain_df = diff_full.gain_comparison()
+    if not gain_df.empty:
+        fig, ax = plt.subplots(figsize=(max(8, len(gain_df) * 0.6), 5))
+        gain_df.plot(kind="bar", ax=ax, width=0.8)
+        ax.set_title("Feature Gain Comparison Across Methods")
+        ax.set_ylabel("CV Gain")
+        ax.axhline(y=0, color="black", linewidth=0.5)
+        ax.tick_params(axis="x", rotation=45)
+        ax.legend(title="Method")
+        plt.tight_layout()
+        plt.show()
 ```
 
 ## Summary
@@ -232,3 +310,4 @@ plt.show()
 - `ArtifactDiff` computes overlap matrices and shared-feature counts
 - `ArtifactDashboard` generates self-contained HTML reports
 - `DataFrameStorage` abstracts away parquet/csv/feather backends
+- Cross-method gain comparison reveals which features matter across different approaches

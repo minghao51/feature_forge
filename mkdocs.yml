@@ -50,3 +50,4 @@ nav:
       - 07 Evaluation: notebooks/07-evaluation.md
       - 08 Artifacts: notebooks/08-artifacts.md
       - 09 Configuration: notebooks/09-configuration.md
+      - 10 Method Comparison: notebooks/10-method-comparison.md
