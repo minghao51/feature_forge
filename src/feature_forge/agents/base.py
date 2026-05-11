@@ -138,7 +138,6 @@ class BaseFeatureAgent(Agent):
     @staticmethod
     def _infer_column_descriptions(X: pd.DataFrame) -> dict[str, dict[str, Any]]:
         """Generate column descriptions from DataFrame statistics."""
-        import numpy as np
 
         desc: dict[str, dict[str, Any]] = {}
         for col in X.columns:

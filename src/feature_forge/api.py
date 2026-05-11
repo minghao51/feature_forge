@@ -25,10 +25,16 @@ from feature_forge.utils import run_coro_sync
 
 logger = get_logger(__name__)
 
-_SINGLE_AGENT_MODES = frozenset({
-    "unary", "cross_compositional", "aggregation",
-    "temporal", "local_transform", "local_pattern",
-})
+_SINGLE_AGENT_MODES = frozenset(
+    {
+        "unary",
+        "cross_compositional",
+        "aggregation",
+        "temporal",
+        "local_transform",
+        "local_pattern",
+    }
+)
 
 
 class MALMASFeatureEngineer(BaseEstimator, TransformerMixin, ArtifactExporter):
@@ -55,6 +61,7 @@ class MALMASFeatureEngineer(BaseEstimator, TransformerMixin, ArtifactExporter):
     ) -> None:
         if isinstance(config, dict):
             from feature_forge.config import Settings
+
             config = Settings(**config)
         self.config = config or get_settings()
         self.llm_client = llm_client or self._default_llm_client()
@@ -81,35 +88,46 @@ class MALMASFeatureEngineer(BaseEstimator, TransformerMixin, ArtifactExporter):
         """
         if self.mode == "full":
             from feature_forge.pipeline.iterative import IterativePipeline
+
             return IterativePipeline(
-                self.config, self.llm_client,
+                self.config,
+                self.llm_client,
                 sandbox=self.sandbox,
             )
 
         if self.mode == "no_memory":
             from feature_forge.pipeline.ablations import NoMemoryPipeline
+
             return NoMemoryPipeline(
-                self.config, self.llm_client,
+                self.config,
+                self.llm_client,
                 sandbox=self.sandbox,
             )
 
         if self.mode == "no_router":
             from feature_forge.pipeline.ablations import NoRouterPipeline
+
             return NoRouterPipeline(
-                self.config, self.llm_client,
+                self.config,
+                self.llm_client,
                 sandbox=self.sandbox,
             )
 
         if self.mode in _SINGLE_AGENT_MODES:
             from feature_forge.pipeline.ablations import SingleAgentPipeline
+
             return SingleAgentPipeline(
-                self.mode, self.config, self.llm_client,
+                self.mode,
+                self.config,
+                self.llm_client,
                 sandbox=self.sandbox,
             )
 
         from feature_forge.pipeline.iterative import IterativePipeline
+
         return IterativePipeline(
-            self.config, self.llm_client,
+            self.config,
+            self.llm_client,
             sandbox=self.sandbox,
         )
 
