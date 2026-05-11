@@ -19,17 +19,16 @@ from feature_forge.artifacts.base import ArtifactConfig, ArtifactExporter
 from feature_forge.config import Settings, get_settings
 from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.llm.base import LLMClient
-from feature_forge.llm.providers.deepseek import DeepSeekProvider
+from feature_forge.llm.factory import create_llm_client
 from feature_forge.observability.structlog_config import get_logger
-from feature_forge.pipeline.ablations import (
-    NoMemoryPipeline,
-    NoRouterPipeline,
-    SingleAgentPipeline,
-)
-from feature_forge.pipeline.iterative import IterativePipeline
 from feature_forge.utils import run_coro_sync
 
 logger = get_logger(__name__)
+
+_SINGLE_AGENT_MODES = frozenset({
+    "unary", "cross_compositional", "aggregation",
+    "temporal", "local_transform", "local_pattern",
+})
 
 
 class MALMASFeatureEngineer(BaseEstimator, TransformerMixin, ArtifactExporter):
@@ -49,11 +48,14 @@ class MALMASFeatureEngineer(BaseEstimator, TransformerMixin, ArtifactExporter):
 
     def __init__(
         self,
-        config: Settings | None = None,
+        config: Settings | dict | None = None,
         llm_client: LLMClient | None = None,
         mode: str = "full",
         artifact_config: ArtifactConfig | None = None,
     ) -> None:
+        if isinstance(config, dict):
+            from feature_forge.config import Settings
+            config = Settings(**config)
         self.config = config or get_settings()
         self.llm_client = llm_client or self._default_llm_client()
         self.mode = mode
@@ -68,30 +70,48 @@ class MALMASFeatureEngineer(BaseEstimator, TransformerMixin, ArtifactExporter):
         ArtifactExporter.__init__(self, artifact_config=artifact_config)
 
     def _default_llm_client(self) -> LLMClient:
-        """Create default LLM client from settings."""
+        """Create default LLM client from settings using the provider factory."""
         cfg = self.config or get_settings()
-        return DeepSeekProvider(
-            model=cfg.llm.model,
-            api_key=cfg.llm.api_key.get_secret_value() if cfg.llm.api_key else None,
-            base_url=cfg.llm.base_url,
-        )
+        return create_llm_client(cfg.llm)
 
-    def _get_pipeline(self) -> IterativePipeline:
-        """Get the appropriate pipeline based on mode."""
+    def _get_pipeline(self):
+        """Get the appropriate pipeline based on mode.
+
+        Imports are lazy — only the needed pipeline variant is loaded.
+        """
+        if self.mode == "full":
+            from feature_forge.pipeline.iterative import IterativePipeline
+            return IterativePipeline(
+                self.config, self.llm_client,
+                sandbox=self.sandbox,
+            )
+
         if self.mode == "no_memory":
-            return NoMemoryPipeline(self.config, self.llm_client)
+            from feature_forge.pipeline.ablations import NoMemoryPipeline
+            return NoMemoryPipeline(
+                self.config, self.llm_client,
+                sandbox=self.sandbox,
+            )
+
         if self.mode == "no_router":
-            return NoRouterPipeline(self.config, self.llm_client)
-        if self.mode in (
-            "unary",
-            "cross_compositional",
-            "aggregation",
-            "temporal",
-            "local_transform",
-            "local_pattern",
-        ):
-            return SingleAgentPipeline(self.mode, self.config, self.llm_client)
-        return IterativePipeline(self.config, self.llm_client)
+            from feature_forge.pipeline.ablations import NoRouterPipeline
+            return NoRouterPipeline(
+                self.config, self.llm_client,
+                sandbox=self.sandbox,
+            )
+
+        if self.mode in _SINGLE_AGENT_MODES:
+            from feature_forge.pipeline.ablations import SingleAgentPipeline
+            return SingleAgentPipeline(
+                self.mode, self.config, self.llm_client,
+                sandbox=self.sandbox,
+            )
+
+        from feature_forge.pipeline.iterative import IterativePipeline
+        return IterativePipeline(
+            self.config, self.llm_client,
+            sandbox=self.sandbox,
+        )
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> MALMASFeatureEngineer:
         fit_t0 = time.perf_counter()

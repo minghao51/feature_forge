@@ -48,16 +48,24 @@ class LLMConfig(BaseModel):
     """
 
     model: str = "deepseek-chat"
+    provider: Literal["auto", "deepseek", "openai", "anthropic", "litellm"] = "auto"
     api_key: SecretStr | None = None
-    base_url: str = "https://api.deepseek.com"
+    base_url: str | None = None
     temperature: float = 0.2
     max_tokens: int = 4096
     cache_responses: bool = True
     max_concurrent_calls: int = 3
 
-    @field_validator("api_key", mode="before")
+    @field_validator("base_url", mode="before")
     @classmethod
     def _empty_string_to_none(cls, v: object) -> object:
+        if v == "":
+            return None
+        return v
+
+    @field_validator("api_key", mode="before")
+    @classmethod
+    def _validate_api_key_empty(cls, v: object) -> object:
         if v == "":
             return None
         return v

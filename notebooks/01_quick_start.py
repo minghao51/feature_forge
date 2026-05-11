@@ -14,6 +14,7 @@ from xgboost import XGBClassifier
 import feature_forge
 
 warnings.filterwarnings("ignore")
+os.environ.setdefault("FF_LOG_LEVEL", "warning")
 
 print(f"feature_forge version: {feature_forge.__version__}")
 

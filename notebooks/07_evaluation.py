@@ -1,5 +1,6 @@
 """Evaluation & Sandboxed Execution — cross-validation feature evaluation, sandboxed code execution, and model factory."""
 
+import os
 import warnings
 
 import matplotlib.pyplot as plt

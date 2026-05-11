@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
@@ -14,43 +14,71 @@ from feature_forge.evaluation.cv import CVEvaluator
 from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.llm.base import LLMClient
 from feature_forge.memory.base import AgentMemory
-from feature_forge.memory.conceptual import ConceptualMemory
 from feature_forge.observability.structlog_config import get_logger
 from feature_forge.pipeline.core import CodeGenerator, CorePipeline
+
+if TYPE_CHECKING:
+    from feature_forge.memory.conceptual import ConceptualMemory
+    from feature_forge.types import AgentName
 
 logger = get_logger(__name__)
 
 
-class IterativePipeline:
-    """N-round feature engineering pipeline with router and memory.
+class BaseIterativePipeline:
+    """Lightweight N-round pipeline without router or memory.
+
+    Subclasses add routing and memory. This base only handles
+    round iteration, core pipeline execution, and result collection.
 
     Each round:
-    1. Router selects agents
-    2. Agent memory provides context
+    1. Subclass selects agents via _select_agents()
+    2. Subclass builds per-agent context via _build_agent_context()
     3. CorePipeline generates and evaluates features
-    4. Memory is updated with results
-    5. Router performance is updated
+    4. Subclass handles post-round via _post_round()
+    5. Results are collected
     """
 
     def __init__(
         self,
         config: Settings,
         llm_client: LLMClient,
-        router: RouterAgent | None = None,
         evaluator: CVEvaluator | None = None,
         sandbox: SandboxedExecutor | None = None,
         code_generator: CodeGenerator | None = None,
-        memory_dir: str = "memory_files/agent_memories",
     ) -> None:
         self.config = config
         self.llm_client = llm_client
-        self.router = router or RouterAgent(config, llm_client)
         self.core = CorePipeline(config, llm_client, evaluator, sandbox, code_generator)
-        self.memory_dir = memory_dir
-        self.memories: dict[str, AgentMemory] = {}
-        self.conceptual_memory = ConceptualMemory(llm_client)
         self.all_feature_codes: list[str] = []
         self.round_artifacts: list[dict[str, Any]] = []
+
+    async def _select_agents(
+        self,
+        round_idx: int,
+        X_train: pd.DataFrame,
+        description: dict[str, Any],
+        task_description: str,
+    ) -> list[str]:
+        raise NotImplementedError
+
+    async def _build_agent_context(
+        self,
+        agent: Agent,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        return context
+
+    async def _post_round(
+        self,
+        agents: list[Agent],
+        core_results: dict[str, Any],
+        round_idx: int,
+    ) -> None:
+        pass
+
+    @property
+    def _strategy_label(self) -> str:
+        return "base"
 
     async def run(
         self,
@@ -60,16 +88,6 @@ class IterativePipeline:
         description: dict[str, Any] | None = None,
         task_description: str = "",
     ) -> dict[str, Any]:
-        """Run iterative feature engineering for N rounds.
-
-        Returns:
-            Dict with keys:
-            - X_train_enhanced: Training data with all generated features
-            - X_test_enhanced: Test data with all generated features
-            - selected_features: List of selected feature names
-            - round_summaries: List of per-round summaries
-            - agent_gains: Dict of per-agent gain DataFrames
-        """
         self.round_artifacts = []
         self.all_feature_codes = []
 
@@ -78,7 +96,7 @@ class IterativePipeline:
             "iterative_pipeline_start",
             n_rounds=self.config.n_rounds,
             task=self.config.task,
-            strategy=self.router.strategy,
+            strategy=self._strategy_label,
         )
 
         X_train_enhanced = X_train.copy()
@@ -90,102 +108,58 @@ class IterativePipeline:
             round_t0 = time.perf_counter()
             logger.info("round_start", round_idx=round_idx, total_rounds=self.config.n_rounds)
 
-            # 1. Router selects agents
-            selected_names = await self.router.select_agents(
-                round_idx=round_idx,
-                df=X_train_enhanced,
-                description=description or {},
-                task_description=task_description,
+            selected_names = await self._select_agents(
+                round_idx,
+                X_train_enhanced,
+                description or {},
+                task_description,
             )
 
-            # 2. Instantiate selected agents
-            agent_classes = AgentRegistry.get_builtin_agents()
             agents: list[Agent] = []
             for name in selected_names:
-                if name in agent_classes:
-                    agents.append(agent_classes[name](self.config, self.llm_client))
+                try:
+                    agent_cls = AgentRegistry.get_agent(name)
+                    agents.append(agent_cls(self.config, self.llm_client))
+                except ValueError:
+                    logger.warning("unknown_agent_skipped", agent=name)
 
-            logger.info("agents_selected", round_idx=round_idx, agents=[a.name for a in agents], strategy=self.router.strategy)
+            logger.info(
+                "agents_selected",
+                round_idx=round_idx,
+                agents=[a.name for a in agents],
+                strategy=self._strategy_label,
+            )
 
-            # 3. Build memory context for each agent
-            context: dict[str, Any] = {
+            base_context: dict[str, Any] = {
                 "description": description or {},
                 "task": self.config.task,
                 "round_idx": round_idx,
             }
-            agent_contexts = {}
-            for agent in agents:
-                memory = self._get_memory(agent.name)
-                pos, neg = memory.get_positive_negative_features()
-                agent_contexts[agent.name] = {
-                    **context,
-                    "memory": memory.generate_prompt_section(use_feedback=True),
-                    "positive_features": pos,
-                    "negative_features": neg,
-                }
 
-            # 4. Run core pipeline with per-agent contexts
+            agent_contexts = []
+            for agent in agents:
+                ctx = await self._build_agent_context(agent, base_context)
+                agent_contexts.append(ctx)
+
             core_results = await self.core.run(
                 agents=agents,
                 X_train=X_train_enhanced,
                 y_train=y_train,
                 X_test=X_test_enhanced,
-                context=[agent_contexts.get(a.name, context) for a in agents],
+                context=agent_contexts,
             )
 
-            # 5. Update memories
+            await self._post_round(agents, core_results, round_idx)
+
             for agent in agents:
-                memory = self._get_memory(agent.name)
                 agent_gain_df = core_results["agent_gains"].get(agent.name, pd.DataFrame())
-                for _, row in agent_gain_df.iterrows():
-                    fname = row["feature"]
-                    gain = row["gain"]
-                    spec = next((s for s in core_results["specs"] if s["name"] == fname), None)
-                    if spec:
-                        memory.record_procedure(
-                            base_columns=spec.get("base_columns", []),
-                            transform=spec.get("transform", ""),
-                            feature_name=fname,
-                            ty=spec.get("type", "unknown"),
-                            description=spec.get("logic", ""),
-                            round_idx=round_idx,
-                        )
-                        effective = gain > 0
-                        memory.record_feedback(
-                            feature_name=fname,
-                            metric=self.config.metric,
-                            value=gain,
-                            effective=effective,
-                            round_idx=round_idx,
-                            base=spec.get("base_columns", []),
-                            ty=spec.get("type", "unknown"),
-                        )
-                        if not effective:
-                            memory.record_unused_procedure(
-                                base_columns=spec.get("base_columns", []),
-                                transform=spec.get("transform", ""),
-                                feature_name=fname,
-                                ty=spec.get("type", "unknown"),
-                                description=spec.get("logic", ""),
-                                round_idx=round_idx,
-                            )
-                memory.save()
-
-                # Update router performance
-                if not agent_gain_df.empty:
-                    avg_gain = agent_gain_df["gain"].mean()
-                    self.router.update_performance(agent.name, avg_gain)
-
-                # Track gains
                 if agent.name not in all_agent_gains:
                     all_agent_gains[agent.name] = []
                 all_agent_gains[agent.name].append(agent_gain_df)
 
-            # 6. Collect generated code for transform()
             if core_results.get("generated_code"):
                 self.all_feature_codes.append(core_results["generated_code"])
 
-            # 7. Append top features to enhanced datasets
             top_train = core_results["top_features_train"]
             top_test = core_results.get("top_features_test", pd.DataFrame())
             if not top_train.empty:
@@ -235,9 +209,6 @@ class IterativePipeline:
                 latency_ms=round_latency_ms,
             )
 
-        # Optionally generate conceptual summaries
-        # (skipped by default to avoid extra LLM calls)
-
         total_latency_ms = round((time.perf_counter() - iterative_t0) * 1000, 1)
         selected_features = [c for c in X_train_enhanced.columns if c not in X_train.columns]
         logger.info(
@@ -250,15 +221,132 @@ class IterativePipeline:
         return {
             "X_train_enhanced": X_train_enhanced,
             "X_test_enhanced": X_test_enhanced,
-            "selected_features": [c for c in X_train_enhanced.columns if c not in X_train.columns],
+            "selected_features": selected_features,
             "round_summaries": round_summaries,
             "round_artifacts": self.round_artifacts,
             "agent_gains": all_agent_gains,
             "feature_codes": self.all_feature_codes,
         }
 
+
+class IterativePipeline(BaseIterativePipeline):
+    """N-round feature engineering pipeline with router and memory.
+
+    Each round:
+    1. Router selects agents
+    2. Agent memory provides context
+    3. CorePipeline generates and evaluates features
+    4. Memory is updated with results
+    5. Router performance is updated
+    """
+
+    def __init__(
+        self,
+        config: Settings,
+        llm_client: LLMClient,
+        router: RouterAgent | None = None,
+        evaluator: CVEvaluator | None = None,
+        sandbox: SandboxedExecutor | None = None,
+        code_generator: CodeGenerator | None = None,
+        memory_dir: str = "memory_files/agent_memories",
+    ) -> None:
+        super().__init__(config, llm_client, evaluator, sandbox, code_generator)
+        self.router = router or RouterAgent(config, llm_client)
+        self.memory_dir = memory_dir
+        self.memories: dict[str, AgentMemory] = {}
+        self._conceptual_memory: ConceptualMemory | None = None
+
+    @property
+    def _strategy_label(self) -> str:
+        return self.router.strategy
+
+    @property
+    def conceptual_memory(self) -> ConceptualMemory:
+        if self._conceptual_memory is None:
+            from feature_forge.memory.conceptual import ConceptualMemory
+
+            self._conceptual_memory = ConceptualMemory(self.llm_client)
+        return self._conceptual_memory
+
+    async def _select_agents(
+        self,
+        round_idx: int,
+        X_train: pd.DataFrame,
+        description: dict[str, Any],
+        task_description: str,
+    ) -> list[AgentName]:
+        from feature_forge.types import AgentName
+
+        selected = await self.router.select_agents(
+            round_idx=round_idx,
+            df=X_train,
+            description=description,
+            task_description=task_description,
+        )
+        return [AgentName(n) if isinstance(n, str) else n for n in selected]
+
+    async def _build_agent_context(
+        self,
+        agent: Agent,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        memory = self._get_memory(agent.name)
+        pos, neg = memory.get_positive_negative_features()
+        return {
+            **context,
+            "memory": memory.generate_prompt_section(use_feedback=True),
+            "positive_features": pos,
+            "negative_features": neg,
+        }
+
+    async def _post_round(
+        self,
+        agents: list[Agent],
+        core_results: dict[str, Any],
+        round_idx: int,
+    ) -> None:
+        for agent in agents:
+            memory = self._get_memory(agent.name)
+            agent_gain_df = core_results["agent_gains"].get(agent.name, pd.DataFrame())
+            for _, row in agent_gain_df.iterrows():
+                fname = row["feature"]
+                gain = row["gain"]
+                spec = next((s for s in core_results["specs"] if s["name"] == fname), None)
+                if spec:
+                    memory.record_procedure(
+                        base_columns=spec.get("base_columns", []),
+                        transform=spec.get("transform", ""),
+                        feature_name=fname,
+                        ty=spec.get("type", "unknown"),
+                        description=spec.get("logic", ""),
+                        round_idx=round_idx,
+                    )
+                    effective = gain > 0
+                    memory.record_feedback(
+                        feature_name=fname,
+                        metric=self.config.metric,
+                        value=gain,
+                        effective=effective,
+                        round_idx=round_idx,
+                        base=spec.get("base_columns", []),
+                        ty=spec.get("type", "unknown"),
+                    )
+                    if not effective:
+                        memory.record_unused_procedure(
+                            base_columns=spec.get("base_columns", []),
+                            transform=spec.get("transform", ""),
+                            feature_name=fname,
+                            ty=spec.get("type", "unknown"),
+                            description=spec.get("logic", ""),
+                            round_idx=round_idx,
+                        )
+            memory.save()
+
+            if not agent_gain_df.empty:
+                avg_gain = agent_gain_df["gain"].mean()
+                self.router.update_performance(agent.name, avg_gain)
+
     def _get_memory(self, agent_name: str) -> AgentMemory:
-        """Get or create agent memory."""
         if agent_name not in self.memories:
             import os
 

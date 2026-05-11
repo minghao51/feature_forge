@@ -6,36 +6,45 @@ from typing import Any
 
 import pandas as pd
 
-from feature_forge.agents.base import AgentRegistry
+from feature_forge.agents.base import Agent, AgentRegistry
 from feature_forge.config import Settings
 from feature_forge.llm.base import LLMClient
-from feature_forge.pipeline.iterative import IterativePipeline
+from feature_forge.pipeline.iterative import BaseIterativePipeline, IterativePipeline
 
 
 class NoMemoryPipeline(IterativePipeline):
     """Ablated pipeline without memory context.
 
     Agents receive no feedback or procedural memory in prompts.
+    Inherits from IterativePipeline so router still works,
+    but overrides memory to be empty.
     """
 
-    async def run(
+    async def _build_agent_context(
         self,
-        X_train: pd.DataFrame,
-        y_train: pd.Series,
-        X_test: pd.DataFrame | None = None,
-        description: dict[str, Any] | None = None,
-        task_description: str = "",
+        agent: Agent,
+        context: dict[str, Any],
     ) -> dict[str, Any]:
-        """Run without memory context."""
-        self.memories = {}
-        result = await super().run(X_train, y_train, X_test, description, task_description)
-        return result
+        return context
+
+    async def _post_round(
+        self,
+        agents: list[Agent],
+        core_results: dict[str, Any],
+        round_idx: int,
+    ) -> None:
+        for agent in agents:
+            agent_gain_df = core_results["agent_gains"].get(agent.name, pd.DataFrame())
+            if not agent_gain_df.empty:
+                avg_gain = agent_gain_df["gain"].mean()
+                self.router.update_performance(agent.name, avg_gain)
 
 
-class SingleAgentPipeline(IterativePipeline):
+class SingleAgentPipeline(BaseIterativePipeline):
     """Ablated pipeline using only a single agent type.
 
-    Bypasses router and always uses the specified agent.
+    Inherits from BaseIterativePipeline — no router, no memory.
+    Only the specified agent module is imported.
     """
 
     def __init__(
@@ -47,59 +56,32 @@ class SingleAgentPipeline(IterativePipeline):
     ) -> None:
         super().__init__(config, llm_client, **kwargs)
         self.fixed_agent_name = agent_name
+        self._agent_cls = AgentRegistry.get_agent(agent_name)
 
-    async def run(
-        self,
-        X_train: pd.DataFrame,
-        y_train: pd.Series,
-        X_test: pd.DataFrame | None = None,
-        description: dict[str, Any] | None = None,
-        task_description: str = "",
-    ) -> dict[str, Any]:
-        """Run with a fixed single agent, bypassing router."""
-        # Override router to always return the fixed agent
-        agent_classes = AgentRegistry.get_builtin_agents()
-        if self.fixed_agent_name not in agent_classes:
-            raise ValueError(f"Unknown agent: {self.fixed_agent_name}")
+    @property
+    def _strategy_label(self) -> str:
+        return f"single:{self.fixed_agent_name}"
 
-        # Temporarily replace router
-        original_select = self.router.select_agents
+    async def _select_agents(self, *args, **kwargs) -> list[str]:
+        return [self.fixed_agent_name]
 
-        async def _fixed_select(*args, **kwargs):
-            from feature_forge.types import AgentName
-
-            return [AgentName(self.fixed_agent_name)]
-
-        self.router.select_agents = _fixed_select
-        try:
-            result = await super().run(X_train, y_train, X_test, description, task_description)
-        finally:
-            self.router.select_agents = original_select
-        return result
+    async def _build_agent_context(self, agent, context):
+        return context
 
 
-class NoRouterPipeline(IterativePipeline):
-    """Ablated pipeline without router — uses all agents every round."""
+class NoRouterPipeline(BaseIterativePipeline):
+    """Ablated pipeline without router — uses all agents every round.
 
-    async def run(
-        self,
-        X_train: pd.DataFrame,
-        y_train: pd.Series,
-        X_test: pd.DataFrame | None = None,
-        description: dict[str, Any] | None = None,
-        task_description: str = "",
-    ) -> dict[str, Any]:
-        """Run with all agents every round."""
+    Inherits from BaseIterativePipeline — no memory overhead.
+    All built-in agents are used every round.
+    """
 
-        async def _all_agents(*args, **kwargs):
-            from feature_forge.types import AgentName
+    @property
+    def _strategy_label(self) -> str:
+        return "no_router"
 
-            return [AgentName(name) for name in self.router.agent_names]
+    async def _select_agents(self, *args, **kwargs) -> list[str]:
+        return AgentRegistry.builtin_agent_names()
 
-        original_select = self.router.select_agents
-        self.router.select_agents = _all_agents
-        try:
-            result = await super().run(X_train, y_train, X_test, description, task_description)
-        finally:
-            self.router.select_agents = original_select
-        return result
+    async def _build_agent_context(self, agent, context):
+        return context

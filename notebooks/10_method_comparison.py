@@ -21,6 +21,7 @@ from sklearn.model_selection import train_test_split
 from xgboost import XGBClassifier
 
 warnings.filterwarnings("ignore")
+os.environ.setdefault("FF_LOG_LEVEL", "warning")
 
 print("Method Comparison: MALMAS vs CAAFE vs LLM-FE vs Malmus")
 

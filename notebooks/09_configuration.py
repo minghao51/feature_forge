@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 warnings.filterwarnings("ignore")
+os.environ.setdefault("FF_LOG_LEVEL", "warning")
 
 print("Configuration & Tracking Demo")
 

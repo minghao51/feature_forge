@@ -10,6 +10,7 @@ from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split
 
 warnings.filterwarnings("ignore")
+os.environ.setdefault("FF_LOG_LEVEL", "warning")
 
 print("Baselines Comparison Demo")
 

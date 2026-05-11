@@ -22,6 +22,9 @@ import os
 import warnings
 warnings.filterwarnings("ignore")
 
+# Suppress verbose structlog output in notebooks
+os.environ.setdefault("FF_LOG_LEVEL", "warning")
+
 import numpy as np
 import pandas as pd
 from sklearn.datasets import make_classification
@@ -75,30 +78,12 @@ X_train.head()
 #| cache: true
 
 from feature_forge.api import MALMASFeatureEngineer
-from feature_forge.config import LLMConfig, Settings
 
-config = Settings(
-    task="classification",
-    metric="auc",
-    n_rounds=1,
-    llm=LLMConfig(
-        model="deepseek-chat",
-        api_key=os.environ.get("FF_LLM__API_KEY", ""),
-        max_concurrent_calls=2,
-    ),
+fe = MALMASFeatureEngineer(
+    mode="full",
+    config={"task": "classification", "metric": "auc", "n_rounds": 1, "llm": {"max_concurrent_calls": 2}},
 )
-
-fe = MALMASFeatureEngineer(config=config, mode="full")
-for attempt in range(3):
-    try:
-        fe.fit(X_train, y_train)
-        break
-    except Exception as exc:
-        if attempt < 2:
-            print(f"fit attempt {attempt + 1} failed: {exc}. Retrying...")
-            fe = MALMASFeatureEngineer(config=config, mode="full")
-        else:
-            raise
+fe.fit(X_train, y_train)
 ```
 
 ## Inspect Generated Features
@@ -163,7 +148,7 @@ mode_results = {}
 
 for mode in modes:
     try:
-        fe_mode = MALMASFeatureEngineer(config=config, mode=mode)
+        fe_mode = MALMASFeatureEngineer(mode=mode, config={"n_rounds": 1})
         fe_mode.fit(X_train, y_train)
         mode_results[mode] = {
             "features": len(fe_mode.selected_features),

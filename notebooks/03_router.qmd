@@ -22,6 +22,8 @@ import os
 import warnings
 warnings.filterwarnings("ignore")
 
+os.environ.setdefault("FF_LOG_LEVEL", "warning")
+
 import numpy as np
 import pandas as pd
 from sklearn.datasets import make_classification

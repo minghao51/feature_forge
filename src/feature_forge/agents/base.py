@@ -251,24 +251,43 @@ class AgentRegistry:
             agents[ep.name] = ep.load()
         return agents
 
+    _BUILTIN_AGENT_MODULES: dict[str, str] = {
+        "unary": "feature_forge.agents.unary:UnaryFeatureAgent",
+        "cross_compositional": "feature_forge.agents.cross_compositional:CrossCompositionalAgent",
+        "aggregation": "feature_forge.agents.aggregation:AggregationConstructAgent",
+        "temporal": "feature_forge.agents.temporal:TemporalFeatureAgent",
+        "local_transform": "feature_forge.agents.local_transform:LocalTransformAgent",
+        "local_pattern": "feature_forge.agents.local_pattern:LocalPatternAgent",
+    }
+
     @classmethod
     def get_builtin_agents(cls) -> dict[str, type[Agent]]:
         """Return built-in agents without entry point discovery."""
-        from feature_forge.agents.aggregation import AggregationConstructAgent
-        from feature_forge.agents.cross_compositional import CrossCompositionalAgent
-        from feature_forge.agents.local_pattern import LocalPatternAgent
-        from feature_forge.agents.local_transform import LocalTransformAgent
-        from feature_forge.agents.temporal import TemporalFeatureAgent
-        from feature_forge.agents.unary import UnaryFeatureAgent
+        import importlib
 
-        return {
-            "unary": UnaryFeatureAgent,
-            "cross_compositional": CrossCompositionalAgent,
-            "aggregation": AggregationConstructAgent,
-            "temporal": TemporalFeatureAgent,
-            "local_transform": LocalTransformAgent,
-            "local_pattern": LocalPatternAgent,
-        }
+        result: dict[str, type[Agent]] = {}
+        for name, qualified in cls._BUILTIN_AGENT_MODULES.items():
+            module_path, attr = qualified.rsplit(":", 1)
+            mod = importlib.import_module(module_path)
+            result[name] = getattr(mod, attr)
+        return result
+
+    @classmethod
+    def get_agent(cls, name: str) -> type[Agent]:
+        """Load a single built-in agent by name without importing the rest."""
+        import importlib
+
+        qualified = cls._BUILTIN_AGENT_MODULES.get(name)
+        if qualified is None:
+            raise ValueError(f"Unknown built-in agent: {name}")
+        module_path, attr = qualified.rsplit(":", 1)
+        mod = importlib.import_module(module_path)
+        return getattr(mod, attr)
+
+    @classmethod
+    def builtin_agent_names(cls) -> list[str]:
+        """Return names of available built-in agents without importing them."""
+        return list(cls._BUILTIN_AGENT_MODULES.keys())
 
     @classmethod
     def get_all_agents(cls) -> dict[str, type[Agent]]:

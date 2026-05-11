@@ -12,6 +12,7 @@ from sklearn.datasets import make_classification
 import feature_forge
 
 warnings.filterwarnings("ignore")
+os.environ.setdefault("FF_LOG_LEVEL", "warning")
 
 print(f"feature_forge: {feature_forge.__spec__.origin}")
 

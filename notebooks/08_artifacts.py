@@ -10,6 +10,7 @@ import pandas as pd
 from sklearn.datasets import make_classification
 
 warnings.filterwarnings("ignore")
+os.environ.setdefault("FF_LOG_LEVEL", "warning")
 
 print("Artifacts & Dashboard Demo")
 

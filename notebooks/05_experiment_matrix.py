@@ -12,6 +12,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import cross_val_score, train_test_split
 
 warnings.filterwarnings("ignore")
+os.environ.setdefault("FF_LOG_LEVEL", "warning")
 
 print("Experiment Matrix & Tracking Demo")
 
