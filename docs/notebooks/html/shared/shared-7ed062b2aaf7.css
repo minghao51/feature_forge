@@ -1,0 +1,25 @@
+
+.cell-output pre {
+background: #f8f9fa;
+border-radius: 4px;
+padding: 0.75rem;
+}
+table.dataframe {
+font-size: 0.85rem;
+border-collapse: collapse;
+}
+table.dataframe th, table.dataframe td {
+padding: 0.4rem 0.6rem;
+border: 1px solid #dee2e6;
+}
+table.dataframe th {
+background: #e9ecef;
+font-weight: 600;
+}
+.metric-card {
+background: #f8f9fa;
+border-left: 4px solid #0d6efd;
+padding: 1rem;
+margin: 0.5rem 0;
+border-radius: 0 4px 4px 0;
+}

@@ -40,11 +40,17 @@ jobs:
       - name: Render notebooks from freeze cache
         run: uv run quarto render notebooks/
 
+      - name: Extract shared notebook assets
+        run: uv run python scripts/extract_shared_notebook_assets.py
+
       - name: Generate MkDocs stubs
         run: uv run python scripts/generate_notebook_docs.py
 
+      - name: Validate notebook embeds and targets
+        run: uv run python scripts/validate_notebook_embeds.py
+
       - name: Build MkDocs site
-        run: uv run mkdocs build
+        run: uv run mkdocs build --strict
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

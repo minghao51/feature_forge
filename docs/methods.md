@@ -15,7 +15,7 @@ This document describes every method and pipeline implemented in Feature Forge, 
 3. [Agent Architecture](#3-agent-architecture)
 4. [Memory System](#4-memory-system)
 5. [Router Strategies](#5-router-strategies)
-6. [Evaluation & Sandboxing](#6-evaluation--sandboxing)
+6. [Evaluation & Sandboxing](#6-evaluation-sandboxing)
 7. [Full Reference List](#7-full-reference-list)
 
 ---

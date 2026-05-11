@@ -2,7 +2,7 @@
 
 ## Performance Ranking (2026)
 
-Based on the MALMAS paper and comparative studies [1][2][3]:
+Based on the MALMAS paper and comparative studies (Refs 1-3 below):
 
 | Rank | Method | Type | Avg AUC Gain | Why Selected |
 |------|--------|------|-------------|--------------|

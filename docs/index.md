@@ -144,12 +144,12 @@ pre-commit run --all-files
 
 ## Documentation
 
-- [Methods & References](docs/methods.md) — Full documentation of all methods, pipelines, and academic sources
-- [Implementation Plan](docs/plan/)
-- [API Reference](docs/api_reference.md)
-- [Migration Guide](docs/migration_guide.md)
-- [Quick Start](docs/quick_start.md)
-- [MALMAS Technical Roadmap](docs/MALMAS_Technical_Roadmap.md)
+- [Methods & References](methods.md) — Full documentation of all methods, pipelines, and academic sources
+- [Implementation Plan](plan/00_index.md)
+- [API Reference](api_reference.md)
+- [Migration Guide](migration_guide.md)
+- [Quick Start](quick_start.md)
+- [MALMAS Technical Roadmap](MALMAS_Technical_Roadmap.md)
 
 ## References
 

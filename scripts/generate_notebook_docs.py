@@ -2,21 +2,20 @@
 """Generate MkDocs notebook stubs from .qmd frontmatter.
 
 Reads notebooks/*.qmd files, extracts YAML frontmatter, and generates
-docs/notebooks/*.md stubs with iframe embeds pointing to rendered HTML.
+hardened docs/notebooks/*.md stubs with shared iframe controls.
 """
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yaml
-
 
 REPO_ROOT = Path(__file__).parent.parent
 NOTEBOOKS_DIR = REPO_ROOT / "notebooks"
 DOCS_NOTEBOOKS_DIR = REPO_ROOT / "docs" / "notebooks"
-HTML_OUTPUT_DIR = DOCS_NOTEBOOKS_DIR / "html"
 
 
 def parse_frontmatter(qmd_path: Path) -> dict:
@@ -40,7 +39,6 @@ def get_base_path() -> str:
         return "/feature_forge"
     mkdocs = yaml.safe_load(mkdocs_path.read_text(encoding="utf-8"))
     site_url = mkdocs.get("site_url", "")
-    from urllib.parse import urlparse
     parsed = urlparse(site_url)
     return parsed.path.rstrip("/") or "/feature_forge"
 
@@ -52,31 +50,37 @@ def generate_stub(qmd_path: Path, base_path: str) -> str:
     description = front.get("description", "")
     html_name = f"{qmd_path.stem}.html"
     iframe_src = f"{base_path}/notebooks/html/{html_name}"
+    slug = slugify(qmd_path.stem)
 
     lines = [
+        "---",
+        "hide:",
+        "  - navigation",
+        "  - toc",
+        "---",
+        "",
         f"# {title}",
         "",
-        f"{description}",
+        description,
         "",
-        "## Notebook",
-        "",
-        '<div style="margin: 0 -0.8rem">',
-        f'  <iframe src="{iframe_src}"',
-        '    style="width:100%; height:700px; border:1px solid var(--md-default-fg-color--lightest); border-radius:4px;"',
-        '    loading="lazy"></iframe>',
+        f'<div class="iframe-container" id="iframe-wrapper-{slug}">',
+        '  <div class="iframe-controls">',
+        '    <button type="button" data-notebook-toggle class="md-button" aria-expanded="false">Expand</button>',
+        f'    <a href="{iframe_src}" target="_blank" rel="noopener noreferrer" class="md-button">Open in New Tab</a>',
+        "  </div>",
+        (
+            f'  <iframe src="{iframe_src}" loading="lazy" '
+            'sandbox="allow-scripts allow-same-origin" '
+            'referrerpolicy="no-referrer" '
+            'title="Notebook: ' + title.replace('"', '\\"') + '"></iframe>'
+        ),
         "</div>",
         "",
         "## Run Locally",
         "",
         "```bash",
-        "# Ensure your DeepSeek API key is set",
         "export FF_LLM__API_KEY=sk-...",
-        "",
-        "# Render this notebook",
-        f'uv run quarto render notebooks/{qmd_path.name}',
-        "",
-        "# Or render all notebooks",
-        "uv run quarto render notebooks/",
+        f"uv run quarto render notebooks/{qmd_path.name}",
         "```",
     ]
     return "\n".join(lines)
@@ -95,15 +99,17 @@ def generate_index(stubs: list[tuple[str, str, str]]) -> str:
     ]
     for slug, title, description in stubs:
         lines.append(f"| [{title}]({slug}.md) | {description} |")
-    lines.extend([
-        "",
-        "## Prerequisites",
-        "",
-        "```bash",
-        "export FF_LLM__API_KEY=sk-your-deepseek-key",
-        "uv sync --extra docs",
-        "```",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Prerequisites",
+            "",
+            "```bash",
+            "export FF_LLM__API_KEY=sk-your-deepseek-key",
+            "uv sync --extra docs",
+            "```",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -128,13 +134,14 @@ def main() -> None:
         stubs.append((slug, title, description))
         print(f"  generated docs/notebooks/{slug}.md")
 
-    # Generate index
     index_path = DOCS_NOTEBOOKS_DIR / "index.md"
     index_path.write_text(generate_index(stubs), encoding="utf-8")
-    print(f"  generated docs/notebooks/index.md")
+    print("  generated docs/notebooks/index.md")
 
     print(f"\nDone. {len(stubs)} notebook stubs generated.")
-    print("Next: uv run quarto render notebooks/ && uv run mkdocs build")
+    print(
+        "Next: uv run quarto render notebooks/ && uv run python scripts/validate_notebook_embeds.py && uv run mkdocs build --strict"
+    )
 
 
 if __name__ == "__main__":

@@ -30,15 +30,32 @@ markdown_extensions:
       anchor_linenums: true
   - pymdownx.inlinehilite
   - pymdownx.snippets
+extra_css:
+  - stylesheets/notebooks.css
+extra_javascript:
+  - javascripts/notebooks.js
 extra:
   version:
     provider: mike
 nav:
   - Home: index.md
   - Quick Start: quick_start.md
+  - API Key Setup: API_KEY_SETUP.md
   - Methods: methods.md
   - API Reference: api_reference.md
   - Migration Guide: migration_guide.md
+  - MALMAS Technical Roadmap: MALMAS_Technical_Roadmap.md
+  - Implementation Plan:
+      - Overview: plan/00_index.md
+      - 01 Architecture: plan/01_architecture.md
+      - 02 Directory Structure: plan/02_directory_structure.md
+      - 03 Key Design Decisions: plan/03_key_design_decisions.md
+      - 04 Implementation Phases: plan/04_implementation_phases.md
+      - 05 Dependencies: plan/05_dependencies.md
+      - 06 Data Strategy: plan/06_data_strategy.md
+      - 07 Observability: plan/07_observability.md
+      - 08 Experiment Tracking: plan/08_experiment_tracking.md
+      - 09 Baseline Selection: plan/09_baseline_selection.md
   - Notebooks:
       - Overview: notebooks/index.md
       - 01 Quick Start: notebooks/01-quick-start.md

@@ -56,3 +56,13 @@ jobs:
           enable-cache: true
       - run: uv sync --group dev
       - run: uv run pip-audit
+
+  hygiene:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --group dev
+      - run: uv run python scripts/check_repo_hygiene.py
