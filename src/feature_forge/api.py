@@ -249,3 +249,7 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
         artifacts["provenance"] = self.provenance_records
         artifacts["transform_failures"] = self.transform_failures
         return artifacts
+
+
+MALMASFeatureEngineer = FeatureForge
+"""Backwards-compatible alias. Use :class:`FeatureForge` in new code."""
