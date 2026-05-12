@@ -7,7 +7,7 @@ from typing import Any
 try:
     from anthropic import AsyncAnthropic
 except ImportError:
-    AsyncAnthropic = None
+    AsyncAnthropic = None  # type: ignore[assignment,misc]
 
 from feature_forge.exceptions import LLMError
 from feature_forge.llm.base import LLMClient
@@ -58,7 +58,7 @@ class AnthropicProvider(LLMClient):
             max_tokens=max_tokens,
             temperature=temperature,
             system=system_msg or "You are a helpful assistant.",
-            messages=conversation,
+            messages=conversation,  # type: ignore[arg-type]
             **kwargs,
         )
 

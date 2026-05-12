@@ -10,10 +10,12 @@ Provides decorators and utilities for automatic tracing of:
 from __future__ import annotations
 
 from collections.abc import Callable
-
-from langfuse import Langfuse, observe
+from typing import TYPE_CHECKING, Any
 
 from feature_forge.config import Settings
+
+if TYPE_CHECKING:
+    from langfuse import Langfuse
 
 # Global Langfuse client (lazy initialization)
 _langfuse: Langfuse | None = None
@@ -25,12 +27,26 @@ def get_langfuse(settings: Settings | None = None) -> Langfuse:
     if _langfuse is None:
         import os
 
+        try:
+            from langfuse import Langfuse
+        except ImportError as exc:
+            raise ImportError("langfuse not installed. Run: uv pip install langfuse") from exc
+
         host = os.environ.get("LANGFUSE_HOST") or os.environ.get("LANGFUSE_BASE_URL")
         _langfuse = Langfuse(host=host) if host else Langfuse()
     return _langfuse
 
 
-def trace_agent(name: str | None = None) -> Callable:
+def _get_langfuse_observe() -> Callable[..., Any]:
+    """Lazy import of langfuse.observe."""
+    try:
+        from langfuse import observe
+    except ImportError as exc:
+        raise ImportError("langfuse not installed. Run: uv pip install langfuse") from exc
+    return observe  # type: ignore[no-any-return]
+
+
+def trace_agent(name: str | None = None) -> Callable[..., Any]:
     """Decorator to trace agent execution.
 
     Usage:
@@ -38,7 +54,8 @@ def trace_agent(name: str | None = None) -> Callable:
         async def generate_features(self, X, y, context):
             ...
     """
-    return observe(
+    observe = _get_langfuse_observe()
+    return observe(  # type: ignore[no-any-return]
         name=name or "agent",
         as_type="agent",
         capture_input=True,
@@ -46,7 +63,7 @@ def trace_agent(name: str | None = None) -> Callable:
     )
 
 
-def trace_generation(name: str | None = None) -> Callable:
+def trace_generation(name: str | None = None) -> Callable[..., Any]:
     """Decorator to trace LLM generation calls.
 
     Usage:
@@ -54,7 +71,8 @@ def trace_generation(name: str | None = None) -> Callable:
         async def generate_plan(self, prompt):
             ...
     """
-    return observe(
+    observe = _get_langfuse_observe()
+    return observe(  # type: ignore[no-any-return]
         name=name or "generation",
         as_type="generation",
         capture_input=True,
@@ -62,7 +80,7 @@ def trace_generation(name: str | None = None) -> Callable:
     )
 
 
-def trace_tool(name: str | None = None) -> Callable:
+def trace_tool(name: str | None = None) -> Callable[..., Any]:
     """Decorator to trace tool / sandbox execution.
 
     Usage:
@@ -70,7 +88,8 @@ def trace_tool(name: str | None = None) -> Callable:
         def execute_code(self, code):
             ...
     """
-    return observe(
+    observe = _get_langfuse_observe()
+    return observe(  # type: ignore[no-any-return]
         name=name or "tool",
         as_type="tool",
         capture_input=True,
@@ -78,13 +97,14 @@ def trace_tool(name: str | None = None) -> Callable:
     )
 
 
-def trace_pipeline(name: str = "pipeline") -> Callable:
+def trace_pipeline(name: str = "pipeline") -> Callable[..., Any]:
     """Decorator to trace the full pipeline execution.
 
     This creates the root trace that all agent and generation spans
     attach to.
     """
-    return observe(
+    observe = _get_langfuse_observe()
+    return observe(  # type: ignore[no-any-return]
         name=name,
         as_type="span",
         capture_input=True,

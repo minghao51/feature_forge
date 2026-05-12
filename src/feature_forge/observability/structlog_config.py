@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Callable
+from typing import Any
 
 import structlog
-from opentelemetry import trace
 
 _LOG_LEVELS = {"debug": 0, "info": 10, "warning": 20, "error": 30, "critical": 40}
 
@@ -23,6 +24,11 @@ def add_open_telemetry_spans(
 
     This allows correlating logs with distributed traces.
     """
+    try:
+        from opentelemetry import trace
+    except ImportError:
+        return event_dict
+
     span = trace.get_current_span()
     if not span.is_recording():
         event_dict["span"] = None
@@ -36,7 +42,7 @@ def add_open_telemetry_spans(
     return event_dict
 
 
-def _drop_below_level(min_level: str):
+def _drop_below_level(min_level: str) -> Callable[..., Any]:
     """Return a processor that drops log events below *min_level*."""
     threshold = _LOG_LEVELS.get(min_level.lower(), 0)
 
@@ -68,7 +74,7 @@ def configure_logging(level: str | None = None) -> None:
     if level is None:
         level = os.environ.get("FF_LOG_LEVEL", "info" if is_tty else "warning")
 
-    shared_processors: list[structlog.types.Processor] = [
+    shared_processors: list[Callable[..., Any]] = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
         _drop_below_level(level),
@@ -76,6 +82,7 @@ def configure_logging(level: str | None = None) -> None:
         add_open_telemetry_spans,
     ]
 
+    processors: list[Any]
     if is_tty:
         processors = [*shared_processors, structlog.dev.ConsoleRenderer(colors=True)]
     else:
@@ -95,4 +102,4 @@ def configure_logging(level: str | None = None) -> None:
 
 def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
     """Get a structured logger instance."""
-    return structlog.get_logger(name)
+    return structlog.get_logger(name)  # type: ignore[no-any-return]

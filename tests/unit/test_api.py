@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pandas as pd
-import pytest
 from sklearn.base import BaseEstimator, TransformerMixin
 
 from feature_forge.api import FeatureForge

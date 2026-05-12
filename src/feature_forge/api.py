@@ -37,7 +37,7 @@ _SINGLE_AGENT_MODES = frozenset(
 )
 
 
-class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):
+class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: ignore[misc]
     """Sklearn-compatible automated feature engineering transformer.
 
     Runs the iterative multi-agent pipeline during fit() and
@@ -54,7 +54,7 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):
 
     def __init__(
         self,
-        config: Settings | dict | None = None,
+        config: Settings | dict[str, Any] | None = None,
         llm_client: LLMClient | None = None,
         mode: str = "full",
         artifact_config: ArtifactConfig | None = None,
@@ -79,7 +79,7 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):
         cfg = self.config or get_settings()
         return create_llm_client(cfg.llm, retry_config=cfg.retry)
 
-    def _get_pipeline(self):
+    def _get_pipeline(self) -> Any:
         """Get the appropriate pipeline based on mode.
 
         Imports are lazy — only the needed pipeline variant is loaded.
@@ -103,7 +103,10 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):
             from feature_forge.pipeline.ablations import SingleAgentPipeline
 
             return SingleAgentPipeline(
-                self.mode, self.config, self.llm_client, sandbox=self.sandbox,
+                self.mode,
+                self.config,
+                self.llm_client,
+                sandbox=self.sandbox,
             )
 
         from feature_forge.pipeline.iterative import IterativePipeline

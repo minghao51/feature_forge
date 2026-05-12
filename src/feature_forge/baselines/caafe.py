@@ -58,7 +58,7 @@ class CAAFEBaseline(Baseline):
             timeout_seconds=eval_cfg.sandbox_timeout_seconds if eval_cfg else 5.0,
             max_memory_mb=eval_cfg.sandbox_max_memory_mb if eval_cfg else 512,
         )
-        self._caafe = None
+        self._caafe: Any = None
         self._iteration_codes: list[str] = []
 
     def fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> CAAFEBaseline:
@@ -197,7 +197,7 @@ class CAAFEBaseline(Baseline):
             raise EvaluationError("CAAFEBaseline not fitted yet")
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            return self._caafe.transform_pandas(X)
+            return self._caafe.transform_pandas(X)  # type: ignore[no-any-return]
 
     def _transform_unified(self, X: pd.DataFrame) -> pd.DataFrame:
         if not self._iteration_codes:

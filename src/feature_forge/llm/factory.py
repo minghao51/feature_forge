@@ -17,7 +17,11 @@ _OPENAI_PREFIXES = ("gpt-", "o1-", "o3-", "o4-")
 _ANTHROPIC_PREFIXES = ("claude",)
 
 _PROVIDER_REGISTRY: dict[str, tuple[str, str, str | None]] = {
-    "deepseek": ("feature_forge.llm.providers.deepseek", "DeepSeekProvider", "https://api.deepseek.com"),
+    "deepseek": (
+        "feature_forge.llm.providers.deepseek",
+        "DeepSeekProvider",
+        "https://api.deepseek.com",
+    ),
     "openai": ("feature_forge.llm.providers.openai", "OpenAIProvider", "https://api.openai.com/v1"),
     "anthropic": ("feature_forge.llm.providers.anthropic", "AnthropicProvider", None),
     "litellm": ("feature_forge.llm.providers.litellm_provider", "LiteLLMProvider", None),
@@ -49,7 +53,8 @@ def create_llm_client(config: LLMConfig, retry_config: RetryConfig | None = None
         provider = _infer_provider(config.model)
 
     module_path, class_name, default_url = _PROVIDER_REGISTRY.get(
-        provider, _PROVIDER_REGISTRY["litellm"],
+        provider,
+        _PROVIDER_REGISTRY["litellm"],
     )
     mod = importlib.import_module(module_path)
     provider_cls = getattr(mod, class_name)
@@ -64,4 +69,4 @@ def create_llm_client(config: LLMConfig, retry_config: RetryConfig | None = None
     if retry_config is not None:
         client.set_retry_config(retry_config)
 
-    return client
+    return client  # type: ignore[no-any-return]

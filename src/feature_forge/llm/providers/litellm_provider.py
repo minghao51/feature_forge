@@ -14,7 +14,7 @@ from typing import Any
 try:
     import litellm
 except ImportError:
-    litellm = None  # type: ignore[assignment]
+    litellm = None
 
 from feature_forge.exceptions import LLMError
 from feature_forge.llm.base import LLMClient

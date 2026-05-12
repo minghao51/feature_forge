@@ -137,7 +137,7 @@ class ArtifactBundle(BaseModel):
     @field_validator("generated_scripts")
     @classmethod
     def _dedup_scripts(cls, v: list[str]) -> list[str]:
-        seen: set[str] = set()
+        seen: set[int] = set()
         out: list[str] = []
         for s in v:
             h = hash(s)

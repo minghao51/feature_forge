@@ -266,7 +266,7 @@ class AgentRegistry:
 
         module_path, attr = qualified.rsplit(":", 1)
         mod = importlib.import_module(module_path)
-        return getattr(mod, attr)
+        return getattr(mod, attr)  # type: ignore[no-any-return]
 
     @classmethod
     def get_builtin_agents(cls) -> dict[str, type[Agent]]:

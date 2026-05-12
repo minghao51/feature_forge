@@ -7,6 +7,7 @@ features and measuring the cross-validated performance change.
 from __future__ import annotations
 
 import warnings
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -38,7 +39,7 @@ class CVEvaluator:
         self.metric_fn = get_metric(self.config.metric)
         self.cv_folds = self.config.evaluation.cv_folds
 
-    def _get_cv_splitter(self, y: pd.Series):
+    def _get_cv_splitter(self, y: pd.Series) -> Any:
         """Return appropriate CV splitter for task type."""
         rs = self.config.random_state
         if self.config.task == "classification":
@@ -117,7 +118,7 @@ class CVEvaluator:
 
             # Simple preprocessing: fillna for numerical, ordinal encode categoricals
             X_train_proc, train_state = self._preprocess(X_train, fit=True)
-            X_val_proc = self._preprocess(X_val, fit=False, ref_state=train_state)
+            X_val_proc = self._preprocess(X_val, fit=False, ref_state=train_state)  # type: ignore[arg-type]
 
             try:
                 with warnings.catch_warnings():
@@ -140,8 +141,8 @@ class CVEvaluator:
         self,
         X: pd.DataFrame,
         fit: bool = True,
-        ref_state: dict | None = None,
-    ) -> tuple[pd.DataFrame, dict] | pd.DataFrame:
+        ref_state: dict[str, Any] | None = None,
+    ) -> tuple[pd.DataFrame, dict[str, Any]] | pd.DataFrame:
         """Minimal preprocessing: fill NA, encode categoricals.
 
         When ``fit=True``, computes medians and category mappings from ``X``
@@ -152,7 +153,7 @@ class CVEvaluator:
         Returns only the processed DataFrame.
         """
         X = X.copy()
-        state: dict = {}
+        state: dict[str, Any] = {}
         for col in X.columns:
             if X[col].dtype == "object" or X[col].dtype.name == "category":
                 if fit:

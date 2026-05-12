@@ -1,8 +1,8 @@
 """Feature Forge: Modular experimentation platform for LLM-based multi-agent automated feature engineering."""
 
 import os as _os
-from importlib.metadata import version as _version
 from importlib.metadata import PackageNotFoundError as _PackageNotFoundError
+from importlib.metadata import version as _version
 
 _os.environ.setdefault("FF_LOG_LEVEL", "warning")
 

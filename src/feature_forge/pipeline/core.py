@@ -123,7 +123,7 @@ class CorePipeline:
 
         all_specs: list[FeatureSpec] = []
         for agent, specs in zip(agents, agent_specs_list, strict=False):
-            if isinstance(specs, Exception):
+            if isinstance(specs, BaseException):
                 logger.warning(
                     "agent_generation_failed",
                     agent=agent.name,

@@ -5,6 +5,9 @@ Supports both classification (AUC, ACC, F1) and regression (RMSE, MAE, R2).
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 import numpy as np
 from sklearn.metrics import (
     accuracy_score,
@@ -74,7 +77,7 @@ def nrmse_score(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return rmse / y_range
 
 
-METRIC_REGISTRY: dict[str, callable] = {
+METRIC_REGISTRY: dict[str, Callable[..., Any]] = {
     "auc": auc_score,
     "acc": acc_score,
     "f1": f1_score_metric,
@@ -85,7 +88,7 @@ METRIC_REGISTRY: dict[str, callable] = {
 }
 
 
-def get_metric(name: str) -> callable:
+def get_metric(name: str) -> Callable[..., Any]:
     """Get metric function by name."""
     if name not in METRIC_REGISTRY:
         raise EvaluationError(f"Unknown metric: {name}. Available: {list(METRIC_REGISTRY.keys())}")

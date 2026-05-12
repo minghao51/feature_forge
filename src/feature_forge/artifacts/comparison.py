@@ -14,7 +14,7 @@ from feature_forge.artifacts.base import ArtifactConfig, ArtifactExporter
 
 
 def compare_methods(
-    methods: dict[str, ArtifactExporter],
+    methods: dict[str, Any],
     X_train: pd.DataFrame,
     y_train: pd.Series,
     X_test: pd.DataFrame | None = None,

@@ -19,7 +19,6 @@ from feature_forge.pipeline.core import CodeGenerator, CorePipeline
 
 if TYPE_CHECKING:
     from feature_forge.memory.conceptual import ConceptualMemory
-    from feature_forge.types import AgentName
 
 logger = get_logger(__name__)
 
@@ -119,7 +118,7 @@ class BaseIterativePipeline:
             for name in selected_names:
                 try:
                     agent_cls = AgentRegistry.get_agent(name)
-                    agents.append(agent_cls(self.config, self.llm_client))
+                    agents.append(agent_cls(self.config, self.llm_client))  # type: ignore[call-arg,arg-type]
                 except ValueError:
                     logger.warning("unknown_agent_skipped", agent=name)
 
@@ -274,16 +273,14 @@ class IterativePipeline(BaseIterativePipeline):
         X_train: pd.DataFrame,
         description: dict[str, Any],
         task_description: str,
-    ) -> list[AgentName]:
-        from feature_forge.types import AgentName
-
+    ) -> list[str]:
         selected = await self.router.select_agents(
             round_idx=round_idx,
             df=X_train,
             description=description,
             task_description=task_description,
         )
-        return [AgentName(n) if isinstance(n, str) else n for n in selected]
+        return [str(n) for n in selected]
 
     async def _build_agent_context(
         self,

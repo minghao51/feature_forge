@@ -20,7 +20,7 @@ Example:
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, SecretStr, field_validator
 from pydantic_settings import (
@@ -286,7 +286,7 @@ class Settings(BaseSettings):
         )
 
 
-def get_settings(**overrides) -> Settings:
+def get_settings(**overrides: Any) -> Settings:
     """Get settings with optional overrides.
 
     This is the primary way to obtain configuration in the codebase.

@@ -111,9 +111,10 @@ class ArtifactDiff:
             ]
             unique = self.unique_features(method)
             gains = [
-                self._feature_index[f][method].gain
+                g
                 for f in method_features
-                if self._feature_index[f][method].gain is not None
+                for g in [self._feature_index[f][method].gain]
+                if g is not None
             ]
             summary["per_method"][method] = {
                 "total_features": len(method_features),

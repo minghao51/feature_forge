@@ -9,12 +9,13 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
-
-from diskcache import Cache
+from typing import TYPE_CHECKING, Any
 
 from feature_forge.exceptions import LLMError
 from feature_forge.observability.structlog_config import get_logger
+
+if TYPE_CHECKING:
+    from diskcache import Cache
 
 logger = get_logger(__name__)
 
@@ -38,8 +39,12 @@ class DiskCache:
     def _get_cache(self) -> Cache:
         """Lazy-init the diskcache instance."""
         if self._cache is None:
+            try:
+                from diskcache import Cache as DiskCache
+            except ImportError as exc:
+                raise LLMError("diskcache not installed. Run: uv pip install diskcache") from exc
             self.cache_dir.mkdir(parents=True, exist_ok=True)
-            self._cache = Cache(str(self.cache_dir))
+            self._cache = DiskCache(str(self.cache_dir))
         return self._cache
 
     def get_key(
@@ -69,7 +74,7 @@ class DiskCache:
         try:
             result = self._get_cache().get(key)
             logger.debug("cache_get", key=key[:16], hit=result is not None)
-            return result
+            return result  # type: ignore[no-any-return]
         except Exception as exc:
             raise LLMError(f"Cache read failed for key {key[:16]}...: {exc}") from exc
 

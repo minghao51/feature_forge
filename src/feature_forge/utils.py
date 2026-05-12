@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import atexit
 import threading
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from concurrent.futures import Future
-from typing import TypeVar
+from typing import Any, TypeVar
 
 T = TypeVar("T")
 
@@ -91,7 +91,7 @@ def strip_markdown_fences(code: str) -> str:
     return code
 
 
-def _create_lazy_getattr(lazy_map: dict[str, str], module_name: str):
+def _create_lazy_getattr(lazy_map: dict[str, str], module_name: str) -> Callable[[str], Any]:
     """Return a ``__getattr__`` for module-level lazy imports.
 
     Each key maps an attribute name to a ``"pkg.module"`` path whose
@@ -99,7 +99,7 @@ def _create_lazy_getattr(lazy_map: dict[str, str], module_name: str):
     """
     import importlib
 
-    def __getattr__(name: str):
+    def __getattr__(name: str) -> Any:
         if name in lazy_map:
             mod = importlib.import_module(lazy_map[name])
             return getattr(mod, name)

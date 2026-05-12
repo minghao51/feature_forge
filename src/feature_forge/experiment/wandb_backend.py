@@ -37,7 +37,7 @@ class WandBTracker(ExperimentTracker):
         except ImportError as exc:
             raise TrackingError("wandb not installed. Run: uv pip install wandb") from exc
 
-        self._run = wandb.init(
+        self._run = wandb.init(  # type: ignore[attr-defined]
             project=self.project,
             entity=self.entity,
             name=run_name,
@@ -76,7 +76,7 @@ class WandBTracker(ExperimentTracker):
         try:
             import wandb
 
-            table = wandb.Table(dataframe=df)
+            table = wandb.Table(dataframe=df)  # type: ignore[attr-defined]
             self._run.log({key: table})
         except ImportError:
             pass
@@ -98,13 +98,13 @@ class WandBTracker(ExperimentTracker):
                 ) as f:
                     f.write(code)
                     f.flush()
-                    art = wandb.Artifact(name=key, type="code")
+                    art = wandb.Artifact(name=key, type="code")  # type: ignore[attr-defined]
                     art.add_file(f.name, name=f"{key}.py")
                     self._run.log_artifact(art)
                     os.unlink(f.name)
 
             if self.log_code_to_table:
-                table = wandb.Table(
+                table = wandb.Table(  # type: ignore[attr-defined]
                     columns=["artifact_key", "code"],
                     data=[[key, code]],
                 )

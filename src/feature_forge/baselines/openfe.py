@@ -32,8 +32,8 @@ class OpenFEBaseline(Baseline):
         super().__init__("openfe", artifact_config=artifact_config)
         self.n_jobs = n_jobs
         self.metric = metric
-        self._ofe = None
-        self._features = None
+        self._ofe: Any = None
+        self._features: Any = None
 
     def fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> OpenFEBaseline:
         try:
@@ -63,7 +63,7 @@ class OpenFEBaseline(Baseline):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             _, X_transformed = transform(X, X, self._features, n_jobs=self.n_jobs)
-        return X_transformed
+        return X_transformed  # type: ignore[no-any-return]
 
     def _extract_artifacts(self) -> None:
         """Extract artifacts from the fitted OpenFE object.

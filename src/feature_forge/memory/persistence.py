@@ -28,6 +28,7 @@ class MemoryPersistence:
             logger.debug("memory_load", path=str(self.memory_path), exists=False)
             return None
         with open(self.memory_path, encoding="utf-8") as f:
-            data = json.load(f)
-        logger.debug("memory_load", path=str(self.memory_path), exists=True, num_keys=len(data))
+            data: dict[str, Any] | None = json.load(f)
+        num_keys = len(data) if data else 0
+        logger.debug("memory_load", path=str(self.memory_path), exists=True, num_keys=num_keys)
         return data
