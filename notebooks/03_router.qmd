@@ -123,7 +123,7 @@ print(f"LLM router prompt length: {len(router_llm.router_prompt)} chars")
 #| error: true
 #| cache: true
 
-from feature_forge.api import MALMASFeatureEngineer
+from feature_forge.api import FeatureForge
 
 config = Settings(
     task="classification",
@@ -147,7 +147,7 @@ ablations = {
 ablation_results = {}
 for name, mode in ablations.items():
     try:
-        fe = MALMASFeatureEngineer(config=config, mode=mode)
+        fe = FeatureForge(config=config, mode=mode)
         fe.fit(X, y)
         ablation_results[name] = {
             "features": len(fe.selected_features),

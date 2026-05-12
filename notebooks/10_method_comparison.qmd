@@ -1,6 +1,6 @@
 ---
 title: "Method Comparison"
-description: "Head-to-head benchmark of MALMAS, CAAFE, LLM-FE, and Malmus on the same dataset with side-by-side metrics."
+description: "Head-to-head benchmark of FeatureForge (MALMAS pipeline), CAAFE, LLM-FE, and Malmus on the same dataset with side-by-side metrics."
 date: today
 format:
   html:
@@ -12,7 +12,7 @@ format:
 
 ## Introduction
 
-This notebook runs all available feature engineering methods — **MALMAS** (full pipeline), **CAAFE**, **LLM-FE**, and **Malmus** — on the same synthetic classification dataset. It measures downstream model performance (AUC with XGBoost), feature counts, and latency, then produces a side-by-side comparison table, feature overlap analysis via `ArtifactDiff`, and a full HTML dashboard.
+This notebook runs all available feature engineering methods — **FeatureForge** (MALMAS multi-agent pipeline), **CAAFE**, **LLM-FE**, and **Malmus** — on the same synthetic classification dataset. It measures downstream model performance (AUC with XGBoost), feature counts, and latency, then produces a side-by-side comparison table, feature overlap analysis via `ArtifactDiff`, and a full HTML dashboard.
 
 This is the recommended starting point for understanding how the methods differ in practice.
 
@@ -34,7 +34,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import train_test_split
 from xgboost import XGBClassifier
 
-print("Method Comparison: MALMAS vs CAAFE vs LLM-FE vs Malmus")
+print("Method Comparison: FeatureForge vs CAAFE vs LLM-FE vs Malmus")
 ```
 
 ## Load Data
@@ -84,15 +84,15 @@ llm = DeepSeekProvider(
 
 methods = {}
 
-# MALMAS (full pipeline)
-from feature_forge.api import MALMASFeatureEngineer
+# FeatureForge (MALMAS multi-agent pipeline)
+from feature_forge.api import FeatureForge
 from feature_forge.config import LLMConfig, Settings
 
 config = Settings(
     task="classification", metric="auc", n_rounds=1,
     llm=LLMConfig(model="deepseek-chat", api_key=os.environ.get("FF_LLM__API_KEY", "")),
 )
-methods["malmas"] = MALMASFeatureEngineer(config=config, mode="full")
+methods["malmas"] = FeatureForge(config=config, mode="full")
 
 # CAAFE
 try:
@@ -160,6 +160,7 @@ for name, method in methods.items():
 
 ```{python}
 #| label: summary-table
+#| error: true
 
 rows = []
 for name, r in results.items():

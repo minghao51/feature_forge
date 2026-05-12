@@ -1,6 +1,6 @@
 ---
 title: "Quick Start: Sklearn API"
-description: "Get started with MALMASFeatureEngineer — fit, transform, and integrate into sklearn pipelines."
+description: "Get started with FeatureForge (MALMAS pipeline) — fit, transform, and integrate into sklearn pipelines."
 date: today
 format:
   html:
@@ -12,7 +12,7 @@ format:
 
 ## Introduction
 
-`MALMASFeatureEngineer` is the primary user-facing API for Feature Forge. It implements the standard sklearn `BaseEstimator` + `TransformerMixin` interface, so it drops into any `Pipeline` seamlessly. This notebook walks through the basic usage: fitting on training data, transforming test data, inspecting generated features, evaluating downstream model performance, and exploring feature importance.
+`FeatureForge` is the primary user-facing API for Feature Forge. It wraps the **MALMAS** multi-agent pipeline in a standard sklearn `BaseEstimator` + `TransformerMixin` interface, so it drops into any `Pipeline` seamlessly. This notebook walks through the basic usage: fitting on training data, transforming test data, inspecting generated features, evaluating downstream model performance, and exploring feature importance.
 
 ## Setup
 
@@ -70,16 +70,16 @@ print(f"Test shape:  {X_test.shape}")
 X_train.head()
 ```
 
-## Train: Fit MALMASFeatureEngineer
+## Train: Fit FeatureForge
 
 ```{python}
 #| label: fit-engineer
 #| error: true
 #| cache: true
 
-from feature_forge.api import MALMASFeatureEngineer
+from feature_forge.api import FeatureForge
 
-fe = MALMASFeatureEngineer(
+fe = FeatureForge(
     mode="full",
     config={"task": "classification", "metric": "auc", "n_rounds": 1, "llm": {"max_concurrent_calls": 2}},
 )
@@ -148,7 +148,7 @@ mode_results = {}
 
 for mode in modes:
     try:
-        fe_mode = MALMASFeatureEngineer(mode=mode, config={"n_rounds": 1})
+        fe_mode = FeatureForge(mode=mode, config={"n_rounds": 1})
         fe_mode.fit(X_train, y_train)
         mode_results[mode] = {
             "features": len(fe_mode.selected_features),
@@ -255,7 +255,7 @@ plt.show()
 
 ## Summary
 
-- `MALMASFeatureEngineer` fits like any sklearn transformer
+- `FeatureForge` (MALMAS pipeline) fits like any sklearn transformer
 - Use `.transform()` to apply generated features to new data
 - Pipeline modes (`full`, `no_memory`, `no_router`, agent names) let you ablate components
 - Provenance records track which agent created each feature
