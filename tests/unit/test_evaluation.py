@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from feature_forge.config import Settings
 from feature_forge.evaluation.cv import CVEvaluator
 from feature_forge.evaluation.metrics import (
     acc_score,
@@ -149,6 +150,17 @@ def generate_features(df):
         with pytest.raises(CodeExecutionError, match="Forbidden"):
             executor.execute(code, pd.DataFrame())
 
+    def test_import_not_in_allowed_builtins(self):
+        from feature_forge.evaluation.sandbox import SandboxedExecutor as SE
+
+        assert "__import__" not in SE.ALLOWED_BUILTINS
+
+    def test_direct_import_call_blocked(self):
+        executor = SandboxedExecutor()
+        code = "os = __import__('os')\ndef generate_features(df): return df"
+        with pytest.raises(CodeExecutionError, match="Forbidden"):
+            executor.execute(code, pd.DataFrame())
+
     def test_dunder_introspection_blocked(self):
         executor = SandboxedExecutor()
         code = "def generate_features(df):\n    return (1).__class__.__mro__"
@@ -234,10 +246,10 @@ class TestPrefilterCandidateColumns:
             def provider_name(self) -> str:
                 return "fake"
 
-            async def complete(self, messages, **kwargs):
+            async def _do_complete(self, messages, **kwargs):
                 return LLMResponse(content="[]", model="fake")
 
-            async def complete_json(self, messages, schema_description, **kwargs):
+            async def _do_complete_json(self, messages, schema_description, **kwargs):
                 return []
 
         config = Settings(task="classification", metric="auc")
@@ -308,10 +320,10 @@ class TestPrefilterCandidateColumns:
             def provider_name(self) -> str:
                 return "fake"
 
-            async def complete(self, messages, **kwargs):
+            async def _do_complete(self, messages, **kwargs):
                 return LLMResponse(content="[]", model="fake")
 
-            async def complete_json(self, messages, schema_description, **kwargs):
+            async def _do_complete_json(self, messages, schema_description, **kwargs):
                 return []
 
         config = Settings(
@@ -324,3 +336,29 @@ class TestPrefilterCandidateColumns:
         df = pd.DataFrame(cols)
         result = pipeline._prefilter_candidate_columns(df)
         assert len(result) == 5
+
+
+class TestCVPreprocessNoLeakage:
+    def test_fit_uses_own_medians(self):
+        evaluator = CVEvaluator(config=Settings(task="regression", metric="rmse"))
+        train = pd.DataFrame({"a": [1.0, 2.0, 3.0, np.nan]})
+        result, state = evaluator._preprocess(train, fit=True)
+        assert result["a"].isna().sum() == 0
+        assert result["a"].iloc[3] == 2.0
+
+    def test_transform_uses_ref_medians(self):
+        evaluator = CVEvaluator(config=Settings(task="regression", metric="rmse"))
+        train = pd.DataFrame({"a": [10.0, 20.0, 30.0]})
+        val = pd.DataFrame({"a": [1.0, np.nan]})
+        _, state = evaluator._preprocess(train, fit=True)
+        val_proc = evaluator._preprocess(val, fit=False, ref_state=state)
+        assert val_proc["a"].iloc[1] == 20.0
+
+    def test_transform_categorical_uses_ref_categories(self):
+        evaluator = CVEvaluator(config=Settings(task="classification", metric="auc"))
+        train = pd.DataFrame({"cat": ["a", "b", "c"]})
+        val = pd.DataFrame({"cat": ["a", "d"]})
+        train_proc, state = evaluator._preprocess(train, fit=True)
+        val_proc = evaluator._preprocess(val, fit=False, ref_state=state)
+        assert val_proc["cat"].iloc[0] == train_proc["cat"].iloc[0]
+        assert val_proc["cat"].iloc[1] == -1

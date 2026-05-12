@@ -28,24 +28,24 @@ def test_run_coro_sync_repeated_calls() -> None:
 
 class TestStripMarkdownFences:
     def test_removes_python_fence(self):
-        raw = '```python\ndef foo(): pass\n```'
-        assert strip_markdown_fences(raw) == 'def foo(): pass'
+        raw = "```python\ndef foo(): pass\n```"
+        assert strip_markdown_fences(raw) == "def foo(): pass"
 
     def test_removes_bare_fence(self):
-        raw = '```\ndef bar(): return 1\n```'
-        assert strip_markdown_fences(raw) == 'def bar(): return 1'
+        raw = "```\ndef bar(): return 1\n```"
+        assert strip_markdown_fences(raw) == "def bar(): return 1"
 
     def test_no_fences_passthrough(self):
-        code = 'def baz(): return 2'
+        code = "def baz(): return 2"
         assert strip_markdown_fences(code) == code
 
     def test_fence_with_leading_whitespace(self):
-        raw = '```python\nx = 1\n```'
-        assert strip_markdown_fences(raw) == 'x = 1'
+        raw = "```python\nx = 1\n```"
+        assert strip_markdown_fences(raw) == "x = 1"
 
     def test_only_opening_fence(self):
-        raw = '```python\nx = 1'
-        assert strip_markdown_fences(raw) == 'x = 1'
+        raw = "```python\nx = 1"
+        assert strip_markdown_fences(raw) == "x = 1"
 
 
 class TestSandboxMarkdownFenceHandling:

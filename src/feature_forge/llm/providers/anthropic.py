@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import json
-import time
 from typing import Any
 
 try:
     from anthropic import AsyncAnthropic
 except ImportError:
-    AsyncAnthropic = None  # type: ignore[misc,assignment]
+    AsyncAnthropic = None
 
 from feature_forge.exceptions import LLMError
-from feature_forge.llm.base import LLMClient, LLMResponse
+from feature_forge.llm.base import LLMClient
 from feature_forge.observability.structlog_config import get_logger
 
 logger = get_logger(__name__)
@@ -38,13 +36,16 @@ class AnthropicProvider(LLMClient):
             raise LLMError("Anthropic provider requires an API key")
         self._client = AsyncAnthropic(api_key=self.api_key, base_url=self.base_url)
 
-    async def complete(
+    def _json_mode_kwargs(self) -> dict[str, Any]:
+        return {}
+
+    async def _call_api(
         self,
         messages: list[dict[str, str]],
-        temperature: float = 0.2,
-        max_tokens: int = 4096,
+        temperature: float,
+        max_tokens: int,
         **kwargs: Any,
-    ) -> LLMResponse:
+    ) -> Any:
         system_msg = ""
         conversation: list[dict[str, str]] = []
         for msg in messages:
@@ -52,127 +53,25 @@ class AnthropicProvider(LLMClient):
                 system_msg = msg.get("content", "")
             else:
                 conversation.append(msg)
-
-        logger.info(
-            "llm_request",
-            provider=self.provider_name,
+        return await self._client.messages.create(
             model=self.model,
-            num_messages=len(conversation),
-            has_system_prompt=bool(system_msg),
-            temperature=temperature,
             max_tokens=max_tokens,
+            temperature=temperature,
+            system=system_msg or "You are a helpful assistant.",
+            messages=conversation,
+            **kwargs,
         )
-        t0 = time.perf_counter()
-        try:
-            response = await self._client.messages.create(
-                model=self.model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                system=system_msg or "You are a helpful assistant.",
-                messages=conversation,  # type: ignore[arg-type]
-                **kwargs,
-            )
-        except Exception as exc:
-            logger.error("llm_error", provider=self.provider_name, model=self.model, error=str(exc))
-            raise LLMError(f"Anthropic API error: {exc}") from exc
 
+    def _extract_content(self, raw_response: Any) -> str:
         content = ""
-        if response.content:
-            for block in response.content:
+        if raw_response.content:
+            for block in raw_response.content:
                 if getattr(block, "type", None) == "text":
                     content += block.text
+        return content
 
-        usage = response.usage
-        prompt_tokens = usage.input_tokens if usage else 0
-        completion_tokens = usage.output_tokens if usage else 0
-        total_tokens = (prompt_tokens + completion_tokens) if usage else 0
-        latency_ms = round((time.perf_counter() - t0) * 1000, 1)
-
-        logger.info(
-            "llm_response",
-            provider=self.provider_name,
-            model=self.model,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-            latency_ms=latency_ms,
-            response_preview=content[:200],
-        )
-
-        return LLMResponse(
-            content=content,
-            model=self.model,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-            raw_response=response,
-        )
-
-    async def complete_json(
-        self,
-        messages: list[dict[str, str]],
-        schema_description: str,
-        temperature: float = 0.2,
-        max_tokens: int = 4096,
-    ) -> dict[str, Any]:
-        enhanced = self._inject_json_schema(messages, schema_description)
-        system_msg = ""
-        conversation: list[dict[str, str]] = []
-        for msg in enhanced:
-            if msg.get("role") == "system":
-                system_msg = msg.get("content", "")
-            else:
-                conversation.append(msg)
-
-        logger.info(
-            "llm_request",
-            provider=self.provider_name,
-            model=self.model,
-            num_messages=len(conversation),
-            temperature=temperature,
-            max_tokens=max_tokens,
-            json_mode=True,
-        )
-        t0 = time.perf_counter()
-        try:
-            response = await self._client.messages.create(
-                model=self.model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                system=system_msg or "You are a helpful assistant.",
-                messages=conversation,  # type: ignore[arg-type]
-            )
-        except Exception as exc:
-            logger.error("llm_error", provider=self.provider_name, model=self.model, json_mode=True, error=str(exc))
-            raise LLMError(f"Anthropic JSON mode error: {exc}") from exc
-
-        content = ""
-        if response.content:
-            for block in response.content:
-                if getattr(block, "type", None) == "text":
-                    content += block.text
-
-        latency_ms = round((time.perf_counter() - t0) * 1000, 1)
-        usage = response.usage
-        logger.info(
-            "llm_response",
-            provider=self.provider_name,
-            model=self.model,
-            prompt_tokens=usage.input_tokens if usage else 0,
-            completion_tokens=usage.output_tokens if usage else 0,
-            total_tokens=(usage.input_tokens + usage.output_tokens) if usage else 0,
-            latency_ms=latency_ms,
-            json_mode=True,
-            response_preview=content[:200],
-        )
-
-        if not content.strip():
-            raise LLMError("Anthropic returned empty content in JSON mode.")
-
-        try:
-            return json.loads(content)  # type: ignore[no-any-return]
-        except json.JSONDecodeError as exc:
-            logger.error("llm_json_parse_error", provider=self.provider_name, model=self.model, response_preview=content[:200])
-            raise LLMError(
-                f"Anthropic returned invalid JSON: {content[:200]}... Parse error: {exc}"
-            ) from exc
+    def _extract_usage(self, raw_response: Any) -> tuple[int, int, int]:
+        usage = raw_response.usage
+        if usage is None:
+            return 0, 0, 0
+        return usage.input_tokens, usage.output_tokens, usage.input_tokens + usage.output_tokens

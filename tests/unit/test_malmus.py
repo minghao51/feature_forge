@@ -31,6 +31,14 @@ class FakeJsonLLM:
     ) -> dict[str, Any]:
         return self.json_response
 
+    async def _do_complete(self, messages, temperature=0.2, max_tokens=4096, **kwargs):
+        return await self.complete(messages, temperature, max_tokens, **kwargs)
+
+    async def _do_complete_json(
+        self, messages, schema_description, temperature=0.2, max_tokens=4096
+    ) -> dict[str, Any]:
+        return await self.complete_json(messages, schema_description, temperature, max_tokens)
+
     @property
     def provider_name(self) -> str:
         return "fake"

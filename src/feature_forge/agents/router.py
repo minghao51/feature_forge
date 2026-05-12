@@ -284,7 +284,12 @@ class RouterAgent:
             if self.agent_performance.get(agent_name)
             else 0.0
         )
-        logger.debug("router_performance_update", agent=agent_name, gain=round(gain, 6), avg_gain=round(avg_gain, 6))
+        logger.debug(
+            "router_performance_update",
+            agent=agent_name,
+            gain=round(gain, 6),
+            avg_gain=round(avg_gain, 6),
+        )
 
     def get_summary(self) -> dict[str, Any]:
         """Return router summary statistics."""

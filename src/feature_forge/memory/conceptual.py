@@ -25,7 +25,9 @@ class ConceptualMemory:
         min_effective: int = 1,
     ) -> str:
         num_effective = sum(1 for fb in memory.feedback if fb.get("effective", False))
-        logger.info("conceptual_summarize_start", agent=memory.agent_name, num_effective=num_effective)
+        logger.info(
+            "conceptual_summarize_start", agent=memory.agent_name, num_effective=num_effective
+        )
         summary_t0 = time.perf_counter()
         if num_effective < min_effective:
             memory.conceptual_summary = (

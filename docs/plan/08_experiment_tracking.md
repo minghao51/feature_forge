@@ -128,7 +128,7 @@ import wandb
 
 with wandb.init(project="feature-forge") as run:
     pipeline = Pipeline([
-        ("fe", MALMASFeatureEngineer(task="classification")),
+        ("fe", FeatureForge(task="classification")),
         ("clf", XGBClassifier()),
     ])
 
@@ -163,7 +163,7 @@ sweep_id = wandb.sweep(sweep_config, project="feature-forge")
 def train():
     with wandb.init() as run:
         config = run.config
-        fe = MALMASFeatureEngineer(
+        fe = FeatureForge(
             n_rounds=config.n_rounds,
             router_strategy=config.router_strategy,
         )

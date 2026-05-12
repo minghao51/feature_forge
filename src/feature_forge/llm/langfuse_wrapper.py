@@ -42,6 +42,29 @@ class LangfuseLLMWrapper(LLMClient):
     def provider_name(self) -> str:
         return self._client.provider_name
 
+    def _extract_content(self, raw_response: Any) -> str:
+        return self._client._extract_content(raw_response)
+
+    def _extract_usage(self, raw_response: Any) -> tuple[int, int, int]:
+        return self._client._extract_usage(raw_response)
+
+    def _json_mode_kwargs(self) -> dict[str, Any]:
+        return self._client._json_mode_kwargs()
+
+    async def _call_api(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        **kwargs: Any,
+    ) -> Any:
+        return await self._client._call_api(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
+
     async def complete(
         self,
         messages: list[dict[str, str]],
@@ -49,7 +72,7 @@ class LangfuseLLMWrapper(LLMClient):
         max_tokens: int = 4096,
         **kwargs: Any,
     ) -> LLMResponse:
-        """Complete with cache check and Langfuse tracing."""
+        """Complete with cache check, Langfuse tracing, and retry on inner client."""
         cache_key = self.build_cache_key(messages, temperature, max_tokens, **kwargs)
 
         if self._cache is not None:
@@ -76,7 +99,6 @@ class LangfuseLLMWrapper(LLMClient):
             cache_key=cache_key[:16],
         )
 
-        # Actual LLM call (traced)
         @trace_generation(name=f"{self.provider_name}-completion")
         async def _traced_complete() -> LLMResponse:
             return await self._client.complete(
@@ -88,7 +110,6 @@ class LangfuseLLMWrapper(LLMClient):
 
         response = await _traced_complete()
 
-        # Store in cache
         if self._cache is not None:
             self._cache.set(
                 cache_key,
@@ -101,7 +122,7 @@ class LangfuseLLMWrapper(LLMClient):
                 },
             )
 
-        return response
+        return response  # type: ignore[no-any-return]
 
     async def complete_json(
         self,

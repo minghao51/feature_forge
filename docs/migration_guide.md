@@ -86,9 +86,9 @@ memory = AgentMemory("unary", "memory_files/unary_memory.json")
 
 **After:**
 ```python
-from feature_forge.api import MALMASFeatureEngineer
+from feature_forge.api import FeatureForge
 
-fe = MALMASFeatureEngineer()
+fe = FeatureForge()
 fe.fit(X_train, y_train)
 X_test_enhanced = fe.transform(X_test)
 ```

@@ -62,7 +62,7 @@ MALMAS decomposes automated feature engineering into a multi-round, multi-agent 
 | Artifact Storage | Ad-hoc files | Schema-validated parquet with provenance |
 | Testing | None | 42 unit + integration tests |
 | CI/CD | None | GitHub Actions (ruff, mypy, pytest) |
-| Sklearn API | None | `MALMASFeatureEngineer(BaseEstimator, TransformerMixin)` |
+| Sklearn API | None | `FeatureForge(BaseEstimator, TransformerMixin)` |
 
 ### Implementation Files
 

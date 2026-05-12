@@ -55,14 +55,14 @@ def main():
 
     methods = {}
 
-    from feature_forge.api import MALMASFeatureEngineer
+    from feature_forge.api import FeatureForge
     from feature_forge.config import LLMConfig, Settings
 
     config = Settings(
         task="classification", metric="auc", n_rounds=1,
         llm=LLMConfig(model="deepseek-chat", api_key=os.environ.get("FF_LLM__API_KEY", "")),
     )
-    methods["malmas"] = MALMASFeatureEngineer(config=config, mode="full")
+    methods["malmas"] = FeatureForge(config=config, mode="full")
 
     try:
         from feature_forge.baselines.caafe import CAAFEBaseline
@@ -91,7 +91,7 @@ def main():
         for attempt in range(3):
             try:
                 if attempt > 0 and name == "malmas":
-                    methods[name] = MALMASFeatureEngineer(config=config, mode="full")
+                    methods[name] = FeatureForge(config=config, mode="full")
                     method = methods[name]
                 method.fit(X_train, y_train)
                 fit_ok = True

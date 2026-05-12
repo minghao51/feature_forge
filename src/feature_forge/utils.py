@@ -11,48 +11,73 @@ from typing import TypeVar
 
 T = TypeVar("T")
 
-_LOOP_THREAD: threading.Thread | None = None
-_LOOP: asyncio.AbstractEventLoop | None = None
-_LOOP_READY = threading.Event()
-_LOOP_LOCK = threading.Lock()
+
+class _AsyncBridge:
+    """Thread-safe async-to-sync bridge backed by a daemon event loop.
+
+    Lazily creates a background thread running an asyncio event loop
+    that survives the lifetime of the process. Thread-safe via a lock.
+    """
+
+    def __init__(self) -> None:
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._thread: threading.Thread | None = None
+        self._ready = threading.Event()
+        self._lock = threading.Lock()
+
+    def _start_loop(self) -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        self._loop = loop
+        self._ready.set()
+        loop.run_forever()
+        loop.close()
+
+    def _get_loop(self) -> asyncio.AbstractEventLoop:
+        if self._loop is not None:
+            return self._loop
+        with self._lock:
+            if self._loop is not None:
+                return self._loop
+            self._ready.clear()
+            self._thread = threading.Thread(
+                target=self._start_loop, name="feature-forge-async-runner", daemon=True
+            )
+            self._thread.start()
+            self._ready.wait(timeout=5.0)
+            if self._loop is None:
+                raise RuntimeError("Failed to initialize shared async runner loop")
+            return self._loop
+
+    def run_coro_sync(self, coro: Coroutine[object, object, T]) -> T:
+        """Run an async coroutine from synchronous code.
+
+        Handles both the case where no event loop is running (creates one
+        via asyncio.run) and the case where one already exists (uses the
+        shared background loop via run_coroutine_threadsafe).
+        """
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(coro)
+
+        loop = self._get_loop()
+        future: Future[T] = asyncio.run_coroutine_threadsafe(coro, loop)
+        return future.result()
+
+    def shutdown(self) -> None:
+        if self._loop is not None:
+            self._loop.call_soon_threadsafe(self._loop.stop)
+            self._loop = None
 
 
-def _loop_thread_main() -> None:
-    global _LOOP
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    _LOOP = loop
-    _LOOP_READY.set()
-    loop.run_forever()
-    loop.close()
+_bridge = _AsyncBridge()
+atexit.register(_bridge.shutdown)
 
 
-def _get_shared_event_loop() -> asyncio.AbstractEventLoop:
-    global _LOOP_THREAD
-    if _LOOP is not None:
-        return _LOOP
-    with _LOOP_LOCK:
-        if _LOOP is not None:
-            return _LOOP
-        _LOOP_READY.clear()
-        _LOOP_THREAD = threading.Thread(
-            target=_loop_thread_main, name="feature-forge-async-runner", daemon=True
-        )
-        _LOOP_THREAD.start()
-        _LOOP_READY.wait(timeout=5.0)
-        if _LOOP is None:
-            raise RuntimeError("Failed to initialize shared async runner loop")
-        return _LOOP
-
-
-def _shutdown_shared_event_loop() -> None:
-    global _LOOP
-    if _LOOP is not None:
-        _LOOP.call_soon_threadsafe(_LOOP.stop)
-        _LOOP = None
-
-
-atexit.register(_shutdown_shared_event_loop)
+def run_coro_sync(coro: Coroutine[object, object, T]) -> T:
+    """Run coroutine from sync code, including running-event-loop contexts."""
+    return _bridge.run_coro_sync(coro)
 
 
 def strip_markdown_fences(code: str) -> str:
@@ -66,13 +91,18 @@ def strip_markdown_fences(code: str) -> str:
     return code
 
 
-def run_coro_sync(coro: Coroutine[object, object, T]) -> T:
-    """Run coroutine from sync code, including running-event-loop contexts."""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
+def _create_lazy_getattr(lazy_map: dict[str, str], module_name: str):
+    """Return a ``__getattr__`` for module-level lazy imports.
 
-    loop = _get_shared_event_loop()
-    future: Future[T] = asyncio.run_coroutine_threadsafe(coro, loop)
-    return future.result()
+    Each key maps an attribute name to a ``"pkg.module"`` path whose
+    top-level namesake is imported on first access.
+    """
+    import importlib
+
+    def __getattr__(name: str):
+        if name in lazy_map:
+            mod = importlib.import_module(lazy_map[name])
+            return getattr(mod, name)
+        raise AttributeError(f"module {module_name!r} has no attribute {name!r}")
+
+    return __getattr__

@@ -19,7 +19,7 @@ Feature Forge is a production-ready refactoring of the MALMAS (Memory-Augmented 
 - **Baselines**: OpenFE [[2]](#ref-2), CAAFE [[3]](#ref-3), LLM-FE [[4]](#ref-4), Malmus (structured JSON)
 - **Observability**: structlog + Langfuse + OpenTelemetry
 - **Tracking**: WandB (default) + MLflow (optional)
-- **Sklearn Compatible**: `MALMASFeatureEngineer` inherits `BaseEstimator` + `TransformerMixin`
+- **Sklearn Compatible**: `FeatureForge` inherits `BaseEstimator` + `TransformerMixin`
 
 ## Installation
 
@@ -40,9 +40,9 @@ pip install -e ".[base,docs,opinion]"
 ### Sklearn API
 
 ```python
-from feature_forge.api import MALMASFeatureEngineer
+from feature_forge.api import FeatureForge
 
-fe = MALMASFeatureEngineer()
+fe = FeatureForge()
 fe.fit(X_train, y_train)
 X_test_enhanced = fe.transform(X_test)
 
@@ -51,7 +51,7 @@ from sklearn.pipeline import Pipeline
 from xgboost import XGBClassifier
 
 pipeline = Pipeline([
-    ("fe", MALMASFeatureEngineer()),
+    ("fe", FeatureForge()),
     ("clf", XGBClassifier()),
 ])
 pipeline.fit(X_train, y_train)
@@ -113,7 +113,7 @@ export FF_TRACKER__PROJECT=my-project
 
 ```
 Experiment Layer    → ExperimentMatrix, ExperimentRunner, Tracker, Reporter
-Pipeline Layer      → MALMASFeatureEngineer, CorePipeline, IterativePipeline
+Pipeline Layer      → FeatureForge, CorePipeline, IterativePipeline
 Agent Layer         → 6 Agents + Router + Registry
 Memory Layer        → Procedural, Feedback, Conceptual
 LLM Layer           → LLMClient, DiskCache, LangfuseWrapper

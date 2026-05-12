@@ -17,6 +17,12 @@ def _make_llm(code: str):
         async def complete(self, messages, temperature=0.2, max_tokens=4096, **kw):
             return LLMResponse(content=code, model="fake")
 
+        async def _do_complete(self, messages, temperature=0.2, max_tokens=4096, **kw):
+            return await self.complete(messages, temperature, max_tokens, **kw)
+
+        async def _do_complete_json(self, messages, schema_description, **kw):
+            return {}
+
     return FakeLLM()
 
 
@@ -218,9 +224,9 @@ def generate_features(df):
 
 class TestMALMASArtifacts:
     def _make_fe(self):
-        from feature_forge.api import MALMASFeatureEngineer
+        from feature_forge.api import FeatureForge
 
-        return MALMASFeatureEngineer(llm_client=_make_llm("pass"))
+        return FeatureForge(llm_client=_make_llm("pass"))
 
     def test_get_artifacts_empty_before_fit(self):
         fe = self._make_fe()

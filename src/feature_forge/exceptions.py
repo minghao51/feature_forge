@@ -42,7 +42,7 @@ class AgentError(FeatureForgeError):
     """Agent operation failed (e.g., router, memory update)."""
 
 
-class MemoryError(FeatureForgeError):
+class AgentMemoryError(FeatureForgeError):
     """Memory system operation failed."""
 
 

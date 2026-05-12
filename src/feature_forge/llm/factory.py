@@ -9,12 +9,19 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from feature_forge.config import LLMConfig
+    from feature_forge.config import LLMConfig, RetryConfig
     from feature_forge.llm.base import LLMClient
 
 _DEEPSEEK_PREFIXES = ("deepseek",)
 _OPENAI_PREFIXES = ("gpt-", "o1-", "o3-", "o4-")
 _ANTHROPIC_PREFIXES = ("claude",)
+
+_PROVIDER_REGISTRY: dict[str, tuple[str, str, str | None]] = {
+    "deepseek": ("feature_forge.llm.providers.deepseek", "DeepSeekProvider", "https://api.deepseek.com"),
+    "openai": ("feature_forge.llm.providers.openai", "OpenAIProvider", "https://api.openai.com/v1"),
+    "anthropic": ("feature_forge.llm.providers.anthropic", "AnthropicProvider", None),
+    "litellm": ("feature_forge.llm.providers.litellm_provider", "LiteLLMProvider", None),
+}
 
 
 def _infer_provider(model: str) -> str:
@@ -27,7 +34,7 @@ def _infer_provider(model: str) -> str:
     return "litellm"
 
 
-def create_llm_client(config: LLMConfig) -> LLMClient:
+def create_llm_client(config: LLMConfig, retry_config: RetryConfig | None = None) -> LLMClient:
     """Create an LLM client from configuration.
 
     When ``config.provider`` is ``"auto"`` (default), the provider is
@@ -35,43 +42,26 @@ def create_llm_client(config: LLMConfig) -> LLMClient:
 
     Only the required provider module is imported.
     """
+    import importlib
+
     provider: str = config.provider
     if provider == "auto":
         provider = _infer_provider(config.model)
 
+    module_path, class_name, default_url = _PROVIDER_REGISTRY.get(
+        provider, _PROVIDER_REGISTRY["litellm"],
+    )
+    mod = importlib.import_module(module_path)
+    provider_cls = getattr(mod, class_name)
+
     api_key = config.api_key.get_secret_value() if config.api_key else None
-
-    if provider == "deepseek":
-        from feature_forge.llm.providers.deepseek import DeepSeekProvider
-
-        return DeepSeekProvider(
-            model=config.model,
-            api_key=api_key,
-            base_url=config.base_url or "https://api.deepseek.com",
-        )
-
-    if provider == "openai":
-        from feature_forge.llm.providers.openai import OpenAIProvider
-
-        return OpenAIProvider(
-            model=config.model,
-            api_key=api_key,
-            base_url=config.base_url or "https://api.openai.com/v1",
-        )
-
-    if provider == "anthropic":
-        from feature_forge.llm.providers.anthropic import AnthropicProvider
-
-        return AnthropicProvider(
-            model=config.model,
-            api_key=api_key,
-            base_url=config.base_url,
-        )
-
-    from feature_forge.llm.providers.litellm_provider import LiteLLMProvider
-
-    return LiteLLMProvider(
+    client = provider_cls(
         model=config.model,
         api_key=api_key,
-        base_url=config.base_url,
+        base_url=config.base_url or default_url,
     )
+
+    if retry_config is not None:
+        client.set_retry_config(retry_config)
+
+    return client

@@ -58,7 +58,7 @@ No mutable global state. All configuration is instance-based, validated at start
 │  - Reporter (auto-generated markdown/HTML reports)          │
 ├─────────────────────────────────────────────────────────────┤
 │  PIPELINE LAYER                                             │
-│  - MALMASFeatureEngineer (sklearn-compatible API)           │
+│  - FeatureForge (sklearn-compatible API)           │
 │  - CorePipeline (single-round execution)                    │
 │  - IterativePipeline (N-round with memory + router)         │
 │  - AblationPipelines (no-memory, no-router, single-agent)   │

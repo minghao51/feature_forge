@@ -238,11 +238,11 @@ class TestArtifactDashboard:
 
 class TestProvenanceRecords:
     def test_malmas_provenance(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from feature_forge.api import MALMASFeatureEngineer
+        from feature_forge.api import FeatureForge
 
         # Mock LLM client to avoid API key requirement
-        monkeypatch.setattr(MALMASFeatureEngineer, "_default_llm_client", lambda self: object())
-        fe = MALMASFeatureEngineer()
+        monkeypatch.setattr(FeatureForge, "_default_llm_client", lambda self: object())
+        fe = FeatureForge()
         fe.pipeline_result = {
             "selected_features": ["f1"],
             "feature_codes": ["code"],
@@ -263,10 +263,10 @@ class TestProvenanceRecords:
         assert prov[0]["source_agent"] == "unary"
 
     def test_malmas_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from feature_forge.api import MALMASFeatureEngineer
+        from feature_forge.api import FeatureForge
 
-        monkeypatch.setattr(MALMASFeatureEngineer, "_default_llm_client", lambda self: object())
-        fe = MALMASFeatureEngineer()
+        monkeypatch.setattr(FeatureForge, "_default_llm_client", lambda self: object())
+        fe = FeatureForge()
         assert fe.provenance_records == []
 
 

@@ -86,13 +86,6 @@ class CorePipeline:
         X_test: pd.DataFrame | None = None,
         context: dict[str, Any] | list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        pipeline_t0 = time.perf_counter()
-        logger.info(
-            "pipeline_start",
-            agents=[a.name for a in agents],
-            num_agents=len(agents),
-            train_shape=X_train.shape,
-        )
         """Run one round of feature engineering.
 
         Returns:
@@ -104,6 +97,13 @@ class CorePipeline:
             - top_features: DataFrame of top-k effective features
             - generated_code: Python code string executed in sandbox
         """
+        pipeline_t0 = time.perf_counter()
+        logger.info(
+            "pipeline_start",
+            agents=[a.name for a in agents],
+            num_agents=len(agents),
+            train_shape=X_train.shape,
+        )
         if isinstance(context, list):
             per_agent_contexts = context
         else:
@@ -138,7 +138,9 @@ class CorePipeline:
             logger.info("agent_specs_generated", agent=agent.name, num_specs=len(specs))
 
         if not all_specs:
-            logger.info("pipeline_complete", num_specs=0, num_selected=0, reason="no_specs_generated")
+            logger.info(
+                "pipeline_complete", num_specs=0, num_selected=0, reason="no_specs_generated"
+            )
             empty_train = pd.DataFrame(index=X_train.index)
             empty_test = pd.DataFrame(index=X_test.index if X_test is not None else X_train.index)
             return {
@@ -194,7 +196,9 @@ class CorePipeline:
 
         # Step 4: Evaluate each feature
         baseline_score = self.evaluator.evaluate_baseline(X_train, y_train)
-        logger.info("evaluation_baseline", score=round(baseline_score, 6), metric=self.config.metric)
+        logger.info(
+            "evaluation_baseline", score=round(baseline_score, 6), metric=self.config.metric
+        )
         gains: dict[str, float] = {}
         candidate_columns = self._prefilter_candidate_columns(features_train)
         for col in candidate_columns:
@@ -203,7 +207,9 @@ class CorePipeline:
                     X_train, y_train, features_train[[col]], baseline_score=baseline_score
                 )
                 gains[col] = gain
-                logger.debug("feature_evaluated", feature=col, gain=round(gain, 6), effective=gain > 0)
+                logger.debug(
+                    "feature_evaluated", feature=col, gain=round(gain, 6), effective=gain > 0
+                )
             except Exception as exc:
                 logger.warning("feature_evaluation_failed", feature=col, error=str(exc))
                 if self.config.evaluation.fail_on_feature_error:

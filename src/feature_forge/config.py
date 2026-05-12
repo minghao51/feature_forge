@@ -56,19 +56,11 @@ class LLMConfig(BaseModel):
     cache_responses: bool = True
     max_concurrent_calls: int = 3
 
-    @field_validator("base_url", mode="before")
+    @field_validator("base_url", "api_key", mode="before")
     @classmethod
     def _empty_string_to_none(cls, v: object) -> object:
-        if v == "":
-            return None
-        return v
-
-    @field_validator("api_key", mode="before")
-    @classmethod
-    def _validate_api_key_empty(cls, v: object) -> object:
-        if v == "":
-            return None
-        return v
+        """Coerce empty strings to None for optional fields."""
+        return None if v == "" else v
 
     @field_validator("temperature")
     @classmethod
@@ -130,6 +122,43 @@ class MemoryConfig(BaseModel):
 
     max_size: int = 100
     persistence_dir: str = "memory_files/agent_memories"
+
+
+class RetryConfig(BaseModel):
+    """LLM call retry configuration.
+
+    Attributes:
+        max_retries: Maximum number of retry attempts.
+        backoff_base: Base delay in seconds for exponential backoff.
+        backoff_max: Maximum delay in seconds between retries.
+        backoff_exponent: Exponent for backoff calculation.
+    """
+
+    max_retries: int = 3
+    backoff_base: float = 1.0
+    backoff_max: float = 30.0
+    backoff_exponent: float = 2.0
+
+    @field_validator("max_retries")
+    @classmethod
+    def _validate_max_retries(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError(f"max_retries must be >= 0, got {v}")
+        return v
+
+    @field_validator("backoff_base")
+    @classmethod
+    def _validate_backoff_base(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError(f"backoff_base must be > 0, got {v}")
+        return v
+
+    @field_validator("backoff_max")
+    @classmethod
+    def _validate_backoff_max(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError(f"backoff_max must be > 0, got {v}")
+        return v
 
 
 class EvaluationConfig(BaseModel):
@@ -221,6 +250,7 @@ class Settings(BaseSettings):
     tracker: TrackerConfig = Field(default_factory=TrackerConfig)
     router: RouterConfig = Field(default_factory=RouterConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    retry: RetryConfig = Field(default_factory=RetryConfig)
     evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
 
     @field_validator("n_rounds")

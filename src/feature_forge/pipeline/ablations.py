@@ -62,10 +62,20 @@ class SingleAgentPipeline(BaseIterativePipeline):
     def _strategy_label(self) -> str:
         return f"single:{self.fixed_agent_name}"
 
-    async def _select_agents(self, *args, **kwargs) -> list[str]:
+    async def _select_agents(
+        self,
+        round_idx: int,
+        X_train: pd.DataFrame,
+        description: dict[str, Any],
+        task_description: str,
+    ) -> list[str]:
         return [self.fixed_agent_name]
 
-    async def _build_agent_context(self, agent, context):
+    async def _build_agent_context(
+        self,
+        agent: Agent,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
         return context
 
 
@@ -80,8 +90,18 @@ class NoRouterPipeline(BaseIterativePipeline):
     def _strategy_label(self) -> str:
         return "no_router"
 
-    async def _select_agents(self, *args, **kwargs) -> list[str]:
+    async def _select_agents(
+        self,
+        round_idx: int,
+        X_train: pd.DataFrame,
+        description: dict[str, Any],
+        task_description: str,
+    ) -> list[str]:
         return AgentRegistry.builtin_agent_names()
 
-    async def _build_agent_context(self, agent, context):
+    async def _build_agent_context(
+        self,
+        agent: Agent,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
         return context

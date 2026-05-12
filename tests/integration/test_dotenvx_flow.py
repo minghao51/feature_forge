@@ -13,12 +13,11 @@ Tests the configuration priority chain:
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import pytest
 import yaml
 
-from feature_forge.config import EvaluationConfig, LLMConfig, Settings
+from feature_forge.config import Settings
 
 
 class TestDotenvxFlow:
@@ -255,8 +254,6 @@ class TestDotenvxFlow:
 
     def test_secret_str_not_logged(self, clean_env, monkeypatch, caplog):
         """Test that SecretStr values are not accidentally logged."""
-        import logging
-
         monkeypatch.setenv("FF_LLM__API_KEY", "sk-secret-key")
 
         settings = Settings()

@@ -155,7 +155,7 @@
 | 20 | Implement `CorePipeline` (single round) | `src/feature_forge/pipeline/core.py` |
 | 21 | Implement `IterativePipeline` (N-round) | `src/feature_forge/pipeline/iterative.py` |
 | 22 | Implement ablation pipelines | `src/feature_forge/pipeline/ablations.py` |
-| 22 | Implement `MALMASFeatureEngineer` (sklearn) | `src/feature_forge/api.py` |
+| 22 | Implement `FeatureForge` (sklearn) | `src/feature_forge/api.py` |
 | 23 | Add pipeline integration tests | `tests/integration/test_pipeline.py` |
 
 **Success Criteria:**

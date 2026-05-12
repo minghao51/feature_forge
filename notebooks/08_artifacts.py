@@ -33,7 +33,7 @@ def main():
     disk_cfg = ArtifactConfig(storage_mode="disk", storage_format="parquet")
     print(f"Disk config: {disk_cfg}")
 
-    from feature_forge.api import MALMASFeatureEngineer
+    from feature_forge.api import FeatureForge
     from feature_forge.config import LLMConfig, Settings
 
     config = Settings(
@@ -45,7 +45,7 @@ def main():
         ),
     )
 
-    fe = MALMASFeatureEngineer(config=config, artifact_config=ArtifactConfig())
+    fe = FeatureForge(config=config, artifact_config=ArtifactConfig())
     fe.fit(X_train, y_train)
 
     print(f"Generated scripts: {len(fe.generated_scripts)}")
@@ -90,8 +90,8 @@ def main():
 
     from feature_forge.artifacts import compare_methods
 
-    fe_a = MALMASFeatureEngineer(config=config, mode="unary")
-    fe_b = MALMASFeatureEngineer(config=config, mode="cross_compositional")
+    fe_a = FeatureForge(config=config, mode="unary")
+    fe_b = FeatureForge(config=config, mode="cross_compositional")
 
     try:
         fe_a.fit(X_train, y_train)
@@ -113,7 +113,7 @@ def main():
     bundles = {}
     for name in ["a", "b"]:
         try:
-            fe_mode = MALMASFeatureEngineer(config=config, mode="unary")
+            fe_mode = FeatureForge(config=config, mode="unary")
             fe_mode.fit(X_train, y_train)
             arts = fe_mode.get_artifacts()
             bundles[name] = ArtifactBundle(
@@ -155,7 +155,7 @@ def main():
 
     ax = axes[0]
     ax.bar(metrics.keys(), metrics.values(), color=["steelblue", "teal", "coral"])
-    ax.set_title("Artifact Counts from MALMASFeatureEngineer")
+    ax.set_title("Artifact Counts from FeatureForge")
     ax.set_ylabel("Count")
 
     ax = axes[1]

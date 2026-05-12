@@ -35,7 +35,7 @@ def main():
     for c in configs[:3]:
         print(f"  {c}")
 
-    from feature_forge.api import MALMASFeatureEngineer
+    from feature_forge.api import FeatureForge
     from feature_forge.config import LLMConfig, Settings
     from feature_forge.llm.providers.deepseek import DeepSeekProvider
 
@@ -75,7 +75,7 @@ def main():
             ),
         )
 
-        fe = MALMASFeatureEngineer(config=settings, llm_client=llm, mode=mode)
+        fe = FeatureForge(config=settings, llm_client=llm, mode=mode)
 
         baseline_scores = cross_val_score(
             GradientBoostingClassifier(random_state=seed),
@@ -135,7 +135,7 @@ def main():
 
     use_real = bool(os.environ.get("FF_LLM__API_KEY"))
     experiment_fn = run_real_experiment if use_real else run_simulated_experiment
-    label = "MALMASFeatureEngineer" if use_real else "simulated"
+    label = "FeatureForge" if use_real else "simulated"
 
     results = runner.run(configs, experiment_fn)
 

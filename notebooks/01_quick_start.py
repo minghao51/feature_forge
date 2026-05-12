@@ -1,4 +1,4 @@
-"""Quick Start: Sklearn API — MALMASFeatureEngineer fit, transform, and pipeline integration."""
+"""Quick Start: Sklearn API — FeatureForge fit, transform, and pipeline integration."""
 
 import os
 import warnings
@@ -44,7 +44,7 @@ def main():
     print(f"Train shape: {X_train.shape}")
     print(f"Test shape:  {X_test.shape}")
 
-    from feature_forge.api import MALMASFeatureEngineer
+    from feature_forge.api import FeatureForge
     from feature_forge.config import LLMConfig, Settings
 
     config = Settings(
@@ -58,7 +58,7 @@ def main():
         ),
     )
 
-    fe = MALMASFeatureEngineer(config=config, mode="full")
+    fe = FeatureForge(config=config, mode="full")
     for attempt in range(3):
         try:
             fe.fit(X_train, y_train)
@@ -66,7 +66,7 @@ def main():
         except Exception as exc:
             if attempt < 2:
                 print(f"fit attempt {attempt + 1} failed: {exc}. Retrying...")
-                fe = MALMASFeatureEngineer(config=config, mode="full")
+                fe = FeatureForge(config=config, mode="full")
             else:
                 raise
 
@@ -103,7 +103,7 @@ def main():
 
     for mode in modes:
         try:
-            fe_mode = MALMASFeatureEngineer(config=config, mode=mode)
+            fe_mode = FeatureForge(config=config, mode=mode)
             fe_mode.fit(X_train, y_train)
             mode_results[mode] = {
                 "features": len(fe_mode.selected_features),

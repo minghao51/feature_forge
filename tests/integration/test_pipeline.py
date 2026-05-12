@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from feature_forge.agents.base import Agent
-from feature_forge.api import MALMASFeatureEngineer
+from feature_forge.api import FeatureForge
 from feature_forge.config import Settings
 from feature_forge.llm.base import LLMClient, LLMResponse
 from feature_forge.pipeline.ablations import NoRouterPipeline, SingleAgentPipeline
@@ -28,12 +28,14 @@ class FakeLLM(LLMClient):
     def provider_name(self) -> str:
         return "fake"
 
-    async def complete(self, messages, temperature=0.2, max_tokens=4096, **kwargs):
+    async def _do_complete(self, messages, temperature=0.2, max_tokens=4096, **kwargs):
         resp = self.responses[self.call_count % len(self.responses)]
         self.call_count += 1
         return LLMResponse(content=resp, model=self.model)
 
-    async def complete_json(self, messages, schema_description, temperature=0.2, max_tokens=4096):
+    async def _do_complete_json(
+        self, messages, schema_description, temperature=0.2, max_tokens=4096
+    ):
         resp = self.responses[self.call_count % len(self.responses)]
         self.call_count += 1
         return json.loads(resp)
@@ -247,7 +249,7 @@ def generate_features(df):
     return result
 """
         llm = FakeLLM([json_resp] * 6 + [code])
-        fe = MALMASFeatureEngineer(
+        fe = FeatureForge(
             llm_client=llm,
             config=Settings(
                 task="classification", metric="auc", n_rounds=1, evaluation={"cv_folds": 2}
@@ -283,7 +285,7 @@ def generate_features(df):
     return result
 """
         llm = FakeLLM([json_resp] * 6 + [code])
-        fe = MALMASFeatureEngineer(
+        fe = FeatureForge(
             llm_client=llm,
             config=Settings(
                 task="classification", metric="auc", n_rounds=1, evaluation={"cv_folds": 2}
@@ -399,21 +401,21 @@ class TestPerAgentContext:
 
 class TestSklearnAPI:
     def test_malmas_feature_engineer_init(self):
-        from feature_forge.api import MALMASFeatureEngineer
+        from feature_forge.api import FeatureForge
 
         llm = FakeLLM([])
-        fe = MALMASFeatureEngineer(llm_client=llm)
+        fe = FeatureForge(llm_client=llm)
         assert fe.mode == "full"
 
     def test_fit_transform_smoke(self):
-        from feature_forge.api import MALMASFeatureEngineer
+        from feature_forge.api import FeatureForge
 
         llm = FakeLLM([])
-        fe = MALMASFeatureEngineer(llm_client=llm, mode="no_router")
+        fe = FeatureForge(llm_client=llm, mode="no_router")
         assert fe is not None
 
     def test_transform_executes_cached_code(self):
-        from feature_forge.api import MALMASFeatureEngineer
+        from feature_forge.api import FeatureForge
 
         json_resp = json.dumps(
             [
@@ -440,7 +442,7 @@ def generate_features(df):
             evaluation={"cv_folds": 2},
             min_effective=1,
         )
-        fe = MALMASFeatureEngineer(config=config, llm_client=llm, mode="no_router")
+        fe = FeatureForge(config=config, llm_client=llm, mode="no_router")
         X = pd.DataFrame({"a": list(range(20)), "b": [0, 1] * 10})
         y = pd.Series([0, 1] * 10)
         fe.fit(X, y)
@@ -450,10 +452,10 @@ def generate_features(df):
         assert "sum_ab" in X_out.columns
 
     def test_transform_records_failures_in_best_effort_mode(self):
-        from feature_forge.api import MALMASFeatureEngineer
+        from feature_forge.api import FeatureForge
 
         cfg = Settings(evaluation={"fail_on_feature_error": False})
-        fe = MALMASFeatureEngineer(llm_client=FakeLLM([]), config=cfg)
+        fe = FeatureForge(llm_client=FakeLLM([]), config=cfg)
         fe.feature_codes = ["def generate_features(df):\n    raise ValueError('boom')"]
         X = pd.DataFrame({"a": [1, 2]})
         X_out = fe.transform(X)
@@ -461,24 +463,24 @@ def generate_features(df):
         assert len(fe.transform_failures) == 1
 
     def test_get_pipeline_modes(self):
-        from feature_forge.api import MALMASFeatureEngineer
+        from feature_forge.api import FeatureForge
 
-        fe = MALMASFeatureEngineer(llm_client=FakeLLM([]), mode="no_memory")
+        fe = FeatureForge(llm_client=FakeLLM([]), mode="no_memory")
         pipeline = fe._get_pipeline()
         assert pipeline.__class__.__name__ == "NoMemoryPipeline"
 
-        fe = MALMASFeatureEngineer(llm_client=FakeLLM([]), mode="no_router")
+        fe = FeatureForge(llm_client=FakeLLM([]), mode="no_router")
         pipeline = fe._get_pipeline()
         assert pipeline.__class__.__name__ == "NoRouterPipeline"
 
-        fe = MALMASFeatureEngineer(llm_client=FakeLLM([]), mode="unary")
+        fe = FeatureForge(llm_client=FakeLLM([]), mode="unary")
         pipeline = fe._get_pipeline()
         assert pipeline.__class__.__name__ == "SingleAgentPipeline"
 
     def test_transform_gracefully_handles_sandbox_failure(self):
-        from feature_forge.api import MALMASFeatureEngineer
+        from feature_forge.api import FeatureForge
 
-        fe = MALMASFeatureEngineer(llm_client=FakeLLM([]))
+        fe = FeatureForge(llm_client=FakeLLM([]))
         fe.feature_codes = ["invalid python {"]
         fe.selected_features = ["bad"]
         X = pd.DataFrame({"a": [1, 2, 3]})
@@ -486,9 +488,9 @@ def generate_features(df):
         assert list(X_out.columns) == ["a"]
 
     def test_get_feature_names_out(self):
-        from feature_forge.api import MALMASFeatureEngineer
+        from feature_forge.api import FeatureForge
 
-        fe = MALMASFeatureEngineer(llm_client=FakeLLM([]))
+        fe = FeatureForge(llm_client=FakeLLM([]))
         fe.selected_features = ["f1", "f2"]
         names = fe.get_feature_names_out(["a", "b"])
         assert names == ["a", "b", "f1", "f2"]

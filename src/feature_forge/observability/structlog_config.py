@@ -64,8 +64,9 @@ def configure_logging(level: str | None = None) -> None:
             ``WARNING`` otherwise (notebooks, CI). Can also be set via
             the ``FF_LOG_LEVEL`` environment variable.
     """
+    is_tty = sys.stderr.isatty()
     if level is None:
-        level = os.environ.get("FF_LOG_LEVEL", "info" if sys.stderr.isatty() else "warning")
+        level = os.environ.get("FF_LOG_LEVEL", "info" if is_tty else "warning")
 
     shared_processors: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,
@@ -75,7 +76,7 @@ def configure_logging(level: str | None = None) -> None:
         add_open_telemetry_spans,
     ]
 
-    if sys.stderr.isatty():
+    if is_tty:
         processors = [*shared_processors, structlog.dev.ConsoleRenderer(colors=True)]
     else:
         processors = [

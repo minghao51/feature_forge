@@ -23,7 +23,7 @@ class FakeProvider(LLMClient):
     def provider_name(self) -> str:
         return "fake"
 
-    async def complete(
+    async def _do_complete(
         self,
         messages: list[dict[str, str]],
         temperature: float = 0.2,
@@ -40,7 +40,7 @@ class FakeProvider(LLMClient):
             total_tokens=15,
         )
 
-    async def complete_json(
+    async def _do_complete_json(
         self,
         messages: list[dict[str, str]],
         schema_description: str,

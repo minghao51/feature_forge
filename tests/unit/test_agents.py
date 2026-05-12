@@ -33,12 +33,14 @@ class FakeLLM(LLMClient):
     def provider_name(self) -> str:
         return "fake"
 
-    async def complete(self, messages, temperature=0.2, max_tokens=4096, **kwargs):
+    async def _do_complete(self, messages, temperature=0.2, max_tokens=4096, **kwargs):
         resp = self.responses[self.call_count % len(self.responses)]
         self.call_count += 1
         return LLMResponse(content=resp, model=self.model)
 
-    async def complete_json(self, messages, schema_description, temperature=0.2, max_tokens=4096):
+    async def _do_complete_json(
+        self, messages, schema_description, temperature=0.2, max_tokens=4096
+    ):
         resp = self.responses[self.call_count % len(self.responses)]
         self.call_count += 1
         return json.loads(resp)

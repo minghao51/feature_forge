@@ -6,7 +6,7 @@ hide:
 
 # Quick Start: Sklearn API
 
-Get started with MALMASFeatureEngineer — fit, transform, and integrate into sklearn pipelines.
+Get started with FeatureForge — fit, transform, and integrate into sklearn pipelines.
 
 <div class="iframe-container" id="iframe-wrapper-01-quick-start">
   <div class="iframe-controls">

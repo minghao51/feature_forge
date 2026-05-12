@@ -5,7 +5,7 @@ All notebooks are rendered with [Quarto](https://quarto.org) and embedded below.
 
 | Notebook | Description |
 |----------|-------------|
-| [Quick Start: Sklearn API](01-quick-start.md) | Get started with MALMASFeatureEngineer — fit, transform, and integrate into sklearn pipelines. |
+| [Quick Start: Sklearn API](01-quick-start.md) | Get started with FeatureForge — fit, transform, and integrate into sklearn pipelines. |
 | [Agents: The 6 Specialized Feature Generators](02-agents.md) | Explore all 6 built-in agents, the AgentRegistry, and how to build a custom agent. |
 | [Router & Pipeline Modes](03-router.md) | Dynamic agent selection with data-driven, performance-driven, hybrid, and LLM-based router strategies. |
 | [Iterative Pipeline & Memory](04-iterative-pipeline.md) | Multi-round feature engineering with procedural, feedback, and conceptual memory tiers. |

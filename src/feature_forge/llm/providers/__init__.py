@@ -1,6 +1,6 @@
 """LLM provider implementations."""
 
-from feature_forge.llm.base import LLMClient
+from feature_forge.utils import _create_lazy_getattr
 
 __all__ = [
     "AnthropicProvider",
@@ -9,17 +9,12 @@ __all__ = [
     "OpenAIProvider",
 ]
 
-
-def __getattr__(name: str) -> type:
-    _lazy = {
+__getattr__ = _create_lazy_getattr(
+    {
         "AnthropicProvider": "feature_forge.llm.providers.anthropic",
         "DeepSeekProvider": "feature_forge.llm.providers.deepseek",
         "LiteLLMProvider": "feature_forge.llm.providers.litellm_provider",
         "OpenAIProvider": "feature_forge.llm.providers.openai",
-    }
-    if name in _lazy:
-        import importlib
-
-        mod = importlib.import_module(_lazy[name])
-        return getattr(mod, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    },
+    __name__,
+)

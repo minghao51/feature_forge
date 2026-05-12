@@ -17,6 +17,9 @@ class FakeLLM:
     async def complete(self, messages, temperature=0.2, max_tokens=4096, **kwargs):
         return LLMResponse(content=self.code, model="fake")
 
+    async def _do_complete(self, messages, temperature=0.2, max_tokens=4096, **kwargs):
+        return await self.complete(messages, temperature, max_tokens, **kwargs)
+
 
 class ConcreteExporter(ArtifactExporter):
     """Minimal concrete implementation for testing the ABC."""

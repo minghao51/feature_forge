@@ -52,7 +52,12 @@ class CVEvaluator:
         model_name: str | None = None,
     ) -> float:
         score = self._cv_score(X, y, model_name=model_name)
-        logger.info("cv_baseline_score", score=round(score, 6), metric=self.config.metric, folds=self.cv_folds)
+        logger.info(
+            "cv_baseline_score",
+            score=round(score, 6),
+            metric=self.config.metric,
+            folds=self.cv_folds,
+        )
         return score
 
     def evaluate_feature(
@@ -84,7 +89,12 @@ class CVEvaluator:
 
         new_score = self._cv_score(X_with_new, y, model_name=model_name)
         gain = new_score - baseline_score
-        logger.debug("cv_feature_gain", gain=round(gain, 6), new_score=round(new_score, 6), baseline_score=round(baseline_score, 6))
+        logger.debug(
+            "cv_feature_gain",
+            gain=round(gain, 6),
+            new_score=round(new_score, 6),
+            baseline_score=round(baseline_score, 6),
+        )
         return gain
 
     def _cv_score(
@@ -106,8 +116,8 @@ class CVEvaluator:
             y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
 
             # Simple preprocessing: fillna for numerical, ordinal encode categoricals
-            X_train_proc = self._preprocess(X_train)
-            X_val_proc = self._preprocess(X_val, fit=False, ref=X_train_proc)
+            X_train_proc, train_state = self._preprocess(X_train, fit=True)
+            X_val_proc = self._preprocess(X_val, fit=False, ref_state=train_state)
 
             try:
                 with warnings.catch_warnings():
@@ -130,13 +140,41 @@ class CVEvaluator:
         self,
         X: pd.DataFrame,
         fit: bool = True,
-        ref: pd.DataFrame | None = None,
-    ) -> pd.DataFrame:
-        """Minimal preprocessing: fill NA, encode categoricals."""
+        ref_state: dict | None = None,
+    ) -> tuple[pd.DataFrame, dict] | pd.DataFrame:
+        """Minimal preprocessing: fill NA, encode categoricals.
+
+        When ``fit=True``, computes medians and category mappings from ``X``
+        and returns ``(processed_df, state_dict)``.
+
+        When ``fit=False``, uses values from ``ref_state`` (the training fold)
+        to avoid data leakage between train and validation splits.
+        Returns only the processed DataFrame.
+        """
         X = X.copy()
+        state: dict = {}
         for col in X.columns:
             if X[col].dtype == "object" or X[col].dtype.name == "category":
-                X[col] = X[col].astype("category").cat.codes
+                if fit:
+                    cat_series = X[col].astype("category")
+                    state[f"{col}_categories"] = cat_series.cat.categories
+                    X[col] = cat_series.cat.codes
+                else:
+                    ref_categories = (ref_state or {}).get(f"{col}_categories")
+                    if ref_categories is not None:
+                        X[col] = (
+                            X[col].astype("category").cat.set_categories(ref_categories).cat.codes
+                        )
+                    else:
+                        X[col] = X[col].astype("category").cat.codes
             else:
-                X[col] = X[col].fillna(X[col].median())
+                if fit:
+                    median = X[col].median()
+                    state[f"{col}_median"] = median
+                    X[col] = X[col].fillna(median)
+                else:
+                    fill_value = (ref_state or {}).get(f"{col}_median", X[col].median())
+                    X[col] = X[col].fillna(fill_value)
+        if fit:
+            return X, state
         return X

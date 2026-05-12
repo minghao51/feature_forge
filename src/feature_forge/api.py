@@ -1,8 +1,8 @@
-"""Sklearn-compatible API for MALMAS feature engineering.
+"""Sklearn-compatible API for Feature Forge automated feature engineering.
 
 Usage:
-    >>> from feature_forge.api import MALMASFeatureEngineer
-    >>> fe = MALMASFeatureEngineer()
+    >>> from feature_forge.api import FeatureForge
+    >>> fe = FeatureForge()
     >>> fe.fit(X_train, y_train)
     >>> X_test_enhanced = fe.transform(X_test)
 """
@@ -37,10 +37,10 @@ _SINGLE_AGENT_MODES = frozenset(
 )
 
 
-class MALMASFeatureEngineer(BaseEstimator, TransformerMixin, ArtifactExporter):
-    """Sklearn-compatible feature engineering transformer.
+class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):
+    """Sklearn-compatible automated feature engineering transformer.
 
-    Runs the full MALMAS iterative pipeline during fit() and
+    Runs the iterative multi-agent pipeline during fit() and
     applies generated feature code during transform().
 
     Implements ArtifactExporter for unified artifact access.
@@ -60,8 +60,6 @@ class MALMASFeatureEngineer(BaseEstimator, TransformerMixin, ArtifactExporter):
         artifact_config: ArtifactConfig | None = None,
     ) -> None:
         if isinstance(config, dict):
-            from feature_forge.config import Settings
-
             config = Settings(**config)
         self.config = config or get_settings()
         self.llm_client = llm_client or self._default_llm_client()
@@ -79,59 +77,40 @@ class MALMASFeatureEngineer(BaseEstimator, TransformerMixin, ArtifactExporter):
     def _default_llm_client(self) -> LLMClient:
         """Create default LLM client from settings using the provider factory."""
         cfg = self.config or get_settings()
-        return create_llm_client(cfg.llm)
+        return create_llm_client(cfg.llm, retry_config=cfg.retry)
 
     def _get_pipeline(self):
         """Get the appropriate pipeline based on mode.
 
         Imports are lazy — only the needed pipeline variant is loaded.
         """
-        if self.mode == "full":
-            from feature_forge.pipeline.iterative import IterativePipeline
+        import importlib
 
-            return IterativePipeline(
-                self.config,
-                self.llm_client,
-                sandbox=self.sandbox,
-            )
+        _PIPELINE_SPEC: dict[str, tuple[str, str]] = {
+            "full": ("feature_forge.pipeline.iterative", "IterativePipeline"),
+            "no_memory": ("feature_forge.pipeline.ablations", "NoMemoryPipeline"),
+            "no_router": ("feature_forge.pipeline.ablations", "NoRouterPipeline"),
+        }
 
-        if self.mode == "no_memory":
-            from feature_forge.pipeline.ablations import NoMemoryPipeline
-
-            return NoMemoryPipeline(
-                self.config,
-                self.llm_client,
-                sandbox=self.sandbox,
-            )
-
-        if self.mode == "no_router":
-            from feature_forge.pipeline.ablations import NoRouterPipeline
-
-            return NoRouterPipeline(
-                self.config,
-                self.llm_client,
-                sandbox=self.sandbox,
-            )
+        spec = _PIPELINE_SPEC.get(self.mode)
+        if spec is not None:
+            module_path, class_name = spec
+            mod = importlib.import_module(module_path)
+            cls = getattr(mod, class_name)
+            return cls(self.config, self.llm_client, sandbox=self.sandbox)
 
         if self.mode in _SINGLE_AGENT_MODES:
             from feature_forge.pipeline.ablations import SingleAgentPipeline
 
             return SingleAgentPipeline(
-                self.mode,
-                self.config,
-                self.llm_client,
-                sandbox=self.sandbox,
+                self.mode, self.config, self.llm_client, sandbox=self.sandbox,
             )
 
         from feature_forge.pipeline.iterative import IterativePipeline
 
-        return IterativePipeline(
-            self.config,
-            self.llm_client,
-            sandbox=self.sandbox,
-        )
+        return IterativePipeline(self.config, self.llm_client, sandbox=self.sandbox)
 
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> MALMASFeatureEngineer:
+    def fit(self, X: pd.DataFrame, y: pd.Series) -> FeatureForge:
         fit_t0 = time.perf_counter()
         logger.info(
             "fit_start",

@@ -85,7 +85,6 @@ class SandboxedExecutor:
         "isinstance",
         "hasattr",
         "type",
-        "__import__",
         "ValueError",
         "TypeError",
         "KeyError",
@@ -231,6 +230,15 @@ def _sandbox_worker_main(
     except Exception as exc:
         response_queue.put(("error", f"Failed to read input data: {exc}"))
         return
+
+    import builtins as _builtins
+
+    def _restricted_import(name: str, *args: Any, **kwargs: Any) -> Any:
+        root = name.split(".")[0]
+        if root not in SandboxedExecutor.ALLOWED_IMPORTS:
+            raise ImportError(f"Import not allowed: {name}")
+        return _builtins.__import__(name, *args, **kwargs)
+
     safe_globals: dict[str, Any] = {
         "__builtins__": {
             name: getattr(builtins, name) for name in SandboxedExecutor.ALLOWED_BUILTINS
@@ -242,6 +250,7 @@ def _sandbox_worker_main(
     }
     import math
 
+    safe_globals["__builtins__"]["__import__"] = _restricted_import
     safe_globals["math"] = math
     local_vars: dict[str, Any] = {}
 

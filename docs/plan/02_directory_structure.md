@@ -36,7 +36,7 @@ feature_forge/
 │       ├── config.py               # Pydantic-settings engine
 │       ├── exceptions.py           # Rich exception hierarchy
 │       ├── types.py                # Shared type aliases
-│       ├── api.py                  # MALMASFeatureEngineer (sklearn)
+│       ├── api.py                  # FeatureForge (sklearn)
 │       │
 │       ├── agents/                 # Plugin-ready agents
 │       │   ├── __init__.py
