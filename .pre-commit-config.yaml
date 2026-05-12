@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
         exclude: ^(notebooks/_freeze/|docs/notebooks/html/)
@@ -11,24 +11,25 @@ repos:
         args: ["--maxkb=1024"]
         exclude: ^docs/notebooks/html/
       - id: check-merge-conflict
+      - id: check-json
       - id: debug-statements
 
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.6.14
+    rev: 0.11.13
     hooks:
       - id: uv-lock
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.11.7
+    rev: v0.15.12
     hooks:
-      - id: ruff
+      - id: ruff-check
         args: [--fix]
         exclude: ^notebooks/
       - id: ruff-format
         exclude: ^notebooks/
 
   - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v4.0.0
+    rev: v4.4.0
     hooks:
       - id: conventional-pre-commit
         stages: [commit-msg]
@@ -36,6 +37,13 @@ repos:
 
   - repo: local
     hooks:
+      - id: pip-audit
+        name: pip-audit
+        entry: uv run pip-audit --skip-editable --ignore-vuln CVE-2025-69872 --ignore-vuln CVE-2026-44708 --ignore-vuln CVE-2026-44896
+        language: system
+        always_run: true
+        pass_filenames: false
+
       - id: repo-hygiene
         name: Repo hygiene (no tracked caches/OS artifacts)
         entry: uv run python scripts/check_repo_hygiene.py
@@ -46,8 +54,8 @@ repos:
         name: mypy
         entry: uv run mypy src
         language: system
-        types: [python]
         pass_filenames: false
+        types: [python]
 
       - id: quarto-render
         name: Render changed .qmd notebooks
