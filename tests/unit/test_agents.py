@@ -93,8 +93,8 @@ class TestBaseFeatureAgent:
         y = pd.Series([0, 1, 0])
         specs = await agent.generate(X, y, context={})
         assert len(specs) == 1
-        assert specs[0]["name"] == "age_squared"
-        assert specs[0]["agent_name"] == "unary"
+        assert specs[0].name == "age_squared"
+        assert specs[0].agent_name == "unary"
 
     @pytest.mark.asyncio
     async def test_generate_with_memory_context(self, fake_llm, config):
@@ -109,7 +109,7 @@ class TestBaseFeatureAgent:
         content = '```json\n[{"base_columns": "x", "derived_features": [{"name": "f1", "type": "num", "transform": "t", "logic": "l"}]}]\n```'
         specs = agent._parse_response(content)
         assert len(specs) == 1
-        assert specs[0]["name"] == "f1"
+        assert specs[0].name == "f1"
 
     def test_parse_response_invalid_json_raises(self, config):
         from feature_forge.exceptions import AgentError
@@ -297,3 +297,299 @@ class TestBuildUserPromptAutoEnrichment:
         prompt = agent._build_user_prompt(df, y, context={"description": provided})
         assert "hand-crafted" in prompt
         assert "special" in prompt
+
+
+class TestRouterAgentEdgeCases:
+    """Cover RouterAgent uncovered paths: exclusion rules, LLM selection, strategy dispatch."""
+
+    # ── Exclusion edge cases ──────────────────────────────────
+
+    def test_exclude_by_single_column(self):
+        config = Settings()
+        router = RouterAgent(config=config)
+        router.dataset_characteristics = {
+            "total_columns": 2,
+            "numerical_columns": ["a"],
+            "categorical_columns": [],
+            "datetime_columns": [],
+            "has_enrich_description": False,
+        }
+        selected = router._data_driven_selection()
+        assert "cross_compositional" not in selected
+
+    def test_exclude_no_numerical_columns(self):
+        config = Settings()
+        router = RouterAgent(config=config)
+        router.dataset_characteristics = {
+            "total_columns": 3,
+            "numerical_columns": [],
+            "categorical_columns": ["a", "b"],
+            "datetime_columns": ["dt"],
+            "has_enrich_description": False,
+        }
+        selected = router._data_driven_selection()
+        assert "local_transform" not in selected
+
+    def test_exclude_no_categorical_for_grouping(self):
+        config = Settings()
+        router = RouterAgent(config=config)
+        router.dataset_characteristics = {
+            "total_columns": 3,
+            "numerical_columns": ["a", "b"],
+            "categorical_columns": [],
+            "datetime_columns": [],
+            "has_enrich_description": False,
+        }
+        selected = router._data_driven_selection()
+        assert "aggregation" not in selected
+
+    def test_exclude_requires_enrich(self):
+        config = Settings()
+        router = RouterAgent(config=config)
+        router.dataset_characteristics = {
+            "total_columns": 3,
+            "numerical_columns": ["a", "b"],
+            "categorical_columns": ["c"],
+            "datetime_columns": [],
+            "has_enrich_description": False,
+        }
+        selected = router._data_driven_selection()
+        assert "local_pattern" not in selected
+
+    def test_requires_enrich_included_when_present(self):
+        config = Settings()
+        router = RouterAgent(config=config)
+        router.dataset_characteristics = {
+            "total_columns": 3,
+            "numerical_columns": ["a", "b"],
+            "categorical_columns": ["c"],
+            "datetime_columns": [],
+            "has_enrich_description": True,
+        }
+        selected = router._data_driven_selection()
+        assert "local_pattern" in selected
+
+    def test_dataset_char_is_none_returns_all(self):
+        config = Settings()
+        router = RouterAgent(config=config)
+        router.dataset_characteristics = None
+        selected = router._data_driven_selection()
+        assert len(selected) == len(router.agent_names)
+
+    # ── min_agents padding ────────────────────────────────────
+
+    def test_data_driven_min_agents_padding(self):
+        config = Settings()
+        config.router.min_agents = 1
+        router = RouterAgent(config=config)
+        router.dataset_characteristics = {
+            "total_columns": 1,
+            "numerical_columns": [],
+            "categorical_columns": [],
+            "datetime_columns": [],
+            "has_enrich_description": False,
+        }
+        selected = router._data_driven_selection()
+        assert len(selected) >= router.min_agents
+
+    def test_perf_driven_min_agents_with_negative_gains(self):
+        config = Settings()
+        router = RouterAgent(config=config)
+        router.agent_performance = {name: [-0.1] for name in router.agent_names}
+        selected = router._performance_driven_selection()
+        assert len(selected) >= router.min_agents
+
+    # ── Performance-driven empty ──────────────────────────────
+
+    def test_perf_driven_empty_performance(self):
+        config = Settings()
+        router = RouterAgent(config=config)
+        router.agent_performance = {name: [] for name in router.agent_names}
+        selected = router._performance_driven_selection()
+        assert len(selected) == router.max_agents
+
+    # ── Hybrid padding ────────────────────────────────────────
+
+    def test_hybrid_min_agents_padding(self):
+        config = Settings()
+        router = RouterAgent(config=config)
+        router.dataset_characteristics = {
+            "total_columns": 1,
+            "numerical_columns": [],
+            "categorical_columns": [],
+            "datetime_columns": [],
+            "has_enrich_description": False,
+        }
+        selected = router._hybrid_selection()
+        assert len(selected) >= router.min_agents
+
+    def test_hybrid_capped_at_max_agents(self):
+        config = Settings()
+        config.router.max_agents = 2
+        router = RouterAgent(config=config)
+        router.dataset_characteristics = {
+            "total_columns": 10,
+            "numerical_columns": ["a", "b", "c", "d"],
+            "categorical_columns": ["e", "f"],
+            "datetime_columns": [],
+            "has_enrich_description": False,
+        }
+        selected = router._hybrid_selection()
+        assert len(selected) <= 2
+
+    # ── Select agents strategy dispatch ───────────────────────
+
+    @pytest.mark.asyncio
+    async def test_select_agents_data_driven_strategy(self):
+        config = Settings()
+        config.router.strategy = "data_driven"
+        router = RouterAgent(config=config)
+        router.dataset_characteristics = {
+            "total_columns": 5,
+            "numerical_columns": ["a", "b"],
+            "categorical_columns": ["c"],
+            "datetime_columns": [],
+            "has_enrich_description": False,
+        }
+        selected = await router.select_agents(round_idx=1)
+        assert isinstance(selected[0], str)
+
+    @pytest.mark.asyncio
+    async def test_select_agents_performance_driven_strategy(self):
+        config = Settings()
+        config.router.strategy = "performance_driven"
+        router = RouterAgent(config=config)
+        router.agent_performance["unary"] = [0.1]
+        router.dataset_characteristics = {
+            "total_columns": 5,
+            "numerical_columns": ["a", "b"],
+            "categorical_columns": ["c"],
+            "datetime_columns": [],
+            "has_enrich_description": False,
+        }
+        selected = await router.select_agents(round_idx=1)
+        assert len(selected) >= 1
+
+    @pytest.mark.asyncio
+    async def test_select_agents_llm_strategy_fallback(self):
+        config = Settings()
+        config.router.strategy = "llm"
+        router = RouterAgent(config=config, llm_client=None)
+        router.dataset_characteristics = {
+            "total_columns": 5,
+            "numerical_columns": ["a", "b"],
+            "categorical_columns": ["c"],
+            "datetime_columns": [],
+            "has_enrich_description": False,
+        }
+        selected = await router.select_agents(round_idx=1)
+        assert len(selected) >= router.min_agents
+
+    # ── LLM-based selection ───────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_llm_selection_returns_valid_agents(self):
+        class FakeLLM:
+            def __init__(self):
+                self.model = "fake"
+
+            async def complete(self, messages, **kwargs):
+                return LLMResponse(content='["unary", "temporal"]', model="fake")
+
+        config = Settings()
+        config.router.strategy = "llm"
+        router = RouterAgent(config=config, llm_client=FakeLLM())  # type: ignore[arg-type]
+        router.dataset_characteristics = {
+            "total_columns": 5,
+            "numerical_columns": ["a", "b"],
+            "categorical_columns": ["c"],
+            "datetime_columns": [],
+            "has_enrich_description": False,
+        }
+        selected = await router._llm_based_selection(round_idx=0)
+        assert "unary" in selected
+        assert "temporal" in selected
+
+    @pytest.mark.asyncio
+    async def test_llm_selection_invalid_json_falls_back(self):
+        class FakeLLM:
+            def __init__(self):
+                self.model = "fake"
+
+            async def complete(self, messages, **kwargs):
+                return LLMResponse(content="not json", model="fake")
+
+        config = Settings()
+        config.router.strategy = "llm"
+        router = RouterAgent(config=config, llm_client=FakeLLM())  # type: ignore[arg-type]
+        router.dataset_characteristics = {
+            "total_columns": 5,
+            "numerical_columns": ["a", "b"],
+            "categorical_columns": ["c"],
+            "datetime_columns": [],
+            "has_enrich_description": False,
+        }
+        selected = await router._llm_based_selection(round_idx=0)
+        assert len(selected) >= 1
+
+    @pytest.mark.asyncio
+    async def test_llm_selection_no_llm_falls_back(self):
+        config = Settings()
+        config.router.strategy = "llm"
+        router = RouterAgent(config=config, llm_client=None)
+        router.dataset_characteristics = {
+            "total_columns": 5,
+            "numerical_columns": ["a", "b"],
+            "categorical_columns": ["c"],
+            "datetime_columns": [],
+            "has_enrich_description": False,
+        }
+        selected = await router._llm_based_selection(round_idx=0)
+        assert len(selected) >= 1
+
+    # ── Build selection context ────────────────────────────────
+
+    def test_build_selection_context_with_chars(self):
+        config = Settings()
+        router = RouterAgent(config=config)
+        router.dataset_characteristics = {
+            "total_columns": 5,
+            "numerical_columns": ["a", "b"],
+            "categorical_columns": ["c"],
+            "datetime_columns": [],
+            "has_enrich_description": False,
+        }
+        ctx = router._build_selection_context(round_idx=0, description=None, task_description=None)
+        assert "Current iteration: Round 1" in ctx
+        assert "Total columns: 5" in ctx
+
+    def test_build_selection_context_with_performance(self):
+        config = Settings()
+        router = RouterAgent(config=config)
+        router.dataset_characteristics = {
+            "total_columns": 3,
+            "numerical_columns": ["a"],
+            "categorical_columns": ["b"],
+            "datetime_columns": [],
+            "has_enrich_description": False,
+        }
+        router.agent_performance["unary"] = [0.1, 0.2]
+        router.agent_performance["temporal"] = []
+        ctx = router._build_selection_context(round_idx=2, description=None, task_description=None)
+        assert "unary: 0.1500" in ctx or "unary" in ctx
+        assert "temporal: No data yet" in ctx
+
+    def test_build_selection_context_with_task_description(self):
+        config = Settings()
+        router = RouterAgent(config=config)
+        router.dataset_characteristics = {
+            "total_columns": 3,
+            "numerical_columns": ["a"],
+            "categorical_columns": ["b"],
+            "datetime_columns": [],
+            "has_enrich_description": False,
+        }
+        ctx = router._build_selection_context(
+            round_idx=0, description=None, task_description="Predict churn"
+        )
+        assert "Task Description: Predict churn" in ctx

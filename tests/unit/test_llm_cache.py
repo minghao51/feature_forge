@@ -90,6 +90,20 @@ class TestDiskCache:
         assert cache.get("k1") is None
         cache.close()
 
+    def test_cache_context_manager(self, tmp_path):
+        cache_dir = str(tmp_path / "cache_ctx")
+        with DiskCache(cache_dir=cache_dir, enabled=True) as cache:
+            cache.set("k", {"v": 1})
+            assert cache.get("k") == {"v": 1}
+        # After exit, cache should be closed
+        assert cache._cache is None
+
+    def test_set_disabled_does_nothing(self):
+        cache = DiskCache(enabled=False)
+        cache.set("k", {"v": 1})
+        # No error, and no cache should exist
+        assert cache.get("k") is None
+
 
 class TestLangfuseLLMWrapper:
     @pytest.mark.asyncio

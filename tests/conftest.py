@@ -10,6 +10,9 @@ import pytest
 
 from feature_forge.llm.base import LLMClient
 
+_AUTO_MARK_DIRS = {"unit": "unit", "integration": "integration"}
+_MARKER_DECORATORS = {"property", "metamorphic", "contract", "differential"}
+
 
 class FakeLLM(LLMClient):
     """Fake LLM that returns predetermined responses for deterministic testing."""
@@ -57,6 +60,15 @@ class FakeLLM(LLMClient):
         enhanced = self._inject_json_schema(messages, schema_description)
         response = await self._do_complete(enhanced, temperature, max_tokens, json_mode=True)
         return json.loads(response.content)
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Auto-mark tests by directory and propagate AI-code markers."""
+    for item in items:
+        for dir_name, marker_name in _AUTO_MARK_DIRS.items():
+            if f"/{dir_name}/" in item.nodeid or f"\\{dir_name}\\" in item.nodeid:
+                item.add_marker(getattr(pytest.mark, marker_name))
+                break
 
 
 @pytest.fixture

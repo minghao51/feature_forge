@@ -342,7 +342,7 @@ class TestCVPreprocessNoLeakage:
     def test_fit_uses_own_medians(self):
         evaluator = CVEvaluator(config=Settings(task="regression", metric="rmse"))
         train = pd.DataFrame({"a": [1.0, 2.0, 3.0, np.nan]})
-        result, state = evaluator._preprocess(train, fit=True)
+        result, _state = evaluator._preprocess(train, fit=True)
         assert result["a"].isna().sum() == 0
         assert result["a"].iloc[3] == 2.0
 
@@ -362,3 +362,63 @@ class TestCVPreprocessNoLeakage:
         val_proc = evaluator._preprocess(val, fit=False, ref_state=state)
         assert val_proc["cat"].iloc[0] == train_proc["cat"].iloc[0]
         assert val_proc["cat"].iloc[1] == -1
+
+
+class TestCVEvaluatorEdgeCases:
+    """Cover CVEvaluator edge cases (regression, auto-baseline, column dedup, fold failure)."""
+
+    def test_regression_uses_kfold(self):
+        config = Settings(task="regression", metric="rmse", evaluation={"cv_folds": 3})
+        evaluator = CVEvaluator(config=config)
+        X = pd.DataFrame({"a": list(range(20))})
+        y = pd.Series([float(i) for i in range(20)])
+        score = evaluator.evaluate_baseline(X, y, model_name="random_forest")
+        assert isinstance(score, float)
+
+    def test_evaluate_feature_auto_baseline(self):
+        config = Settings(task="classification", metric="auc", evaluation={"cv_folds": 3})
+        evaluator = CVEvaluator(config=config)
+        X = pd.DataFrame({"a": list(range(20))})
+        y = pd.Series([0, 1] * 10)
+        new_feat = pd.DataFrame({"b": [float(i % 2) for i in range(20)]})
+        gain = evaluator.evaluate_feature(
+            X, y, new_feat, baseline_score=None, model_name="random_forest"
+        )
+        assert isinstance(gain, float)
+
+    def test_column_dedup(self):
+        config = Settings(task="classification", metric="auc", evaluation={"cv_folds": 3})
+        evaluator = CVEvaluator(config=config)
+        X = pd.DataFrame({"a": list(range(20))})
+        y = pd.Series([0, 1] * 10)
+        # feature_df has overlapping column 'a'
+        overlap = pd.DataFrame({"a": [float(i) for i in range(20)]})
+        gain = evaluator.evaluate_feature(
+            X, y, overlap, baseline_score=0.5, model_name="random_forest"
+        )
+        assert isinstance(gain, float)
+
+    def test_cv_fold_exception_raises_evaluation_error(self):
+        from unittest.mock import patch
+
+        config = Settings(task="classification", metric="auc", evaluation={"cv_folds": 3})
+        evaluator = CVEvaluator(config=config)
+        X = pd.DataFrame({"a": list(range(20))})
+        y = pd.Series([0, 1] * 10)
+
+        # Mock _cv_score to raise ValueError, which gets wrapped as EvaluationError
+        with patch.object(evaluator, "_cv_score", side_effect=ValueError("cv fold crash")):
+            with pytest.raises(Exception, match="cv fold crash"):
+                evaluator.evaluate_baseline(X, y, model_name="random_forest")
+
+    def test_preprocess_transform_missing_ref_state(self):
+        evaluator = CVEvaluator(config=Settings(task="regression", metric="rmse"))
+        val = pd.DataFrame({"a": [1.0, float("nan")]})
+        result = evaluator._preprocess(val, fit=False, ref_state={})
+        assert result["a"].isna().sum() == 0  # falls back to val median
+
+    def test_preprocess_transform_missing_categorical_ref(self):
+        evaluator = CVEvaluator(config=Settings(task="classification", metric="auc"))
+        val = pd.DataFrame({"cat": ["x", "y"]})
+        result = evaluator._preprocess(val, fit=False, ref_state={})
+        assert "cat" in result.columns
