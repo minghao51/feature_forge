@@ -43,19 +43,38 @@ dependencies = [
     "tenacity>=8.0",
     "xgboost>=2.0",
     "matplotlib>=3.7",
+    "pyarrow>=23.0.1",
+    "nest-asyncio>=1.6.0",
+    "seaborn>=0.13.2",
 ]
 
 [project.optional-dependencies]
-baselines = [
-    "openfe",
-    "caafe",
-    "mlflow>=2.10",
-    "litellm>=1.40",
-]
+caafe = ["caafe>0"]
+openfe = ["openfe>0"]
+kaggle = ["kaggle"]
+lightgbm = ["lightgbm>=4.0"]
+catboost = ["catboost>=1.2"]
+wandb = ["wandb>=0.16"]
+mlflow = ["mlflow>=2.10"]
+litellm = ["litellm>=1.40"]
 observability = [
     "opentelemetry-api>=1.20",
     "langfuse>=2.0",
     "wandb>=0.16",
+    "diskcache>=5.6",
+    "pyarrow>=23.0.1",
+]
+all = [
+    "caafe>0",
+    "openfe>0",
+    "kaggle",
+    "lightgbm>=4.0",
+    "catboost>=1.2",
+    "wandb>=0.16",
+    "mlflow>=2.10",
+    "litellm>=1.40",
+    "opentelemetry-api>=1.20",
+    "langfuse>=2.0",
     "diskcache>=5.6",
     "pyarrow>=23.0.1",
 ]
@@ -79,6 +98,12 @@ dev = [
     "ipykernel>=6.0",
     "nbformat>=5.10.4",
     "jupyter>=1.1.1",
+    "diskcache>=5.6.3",
+    "langfuse>=4.5.1",
+    "opentelemetry-api>=1.41.1",
+    "hypothesis>=6.152.7",
+    "mkdocs-jupyter>=0.26.3",
+    "types-tqdm>=4.67.3.20260508",
 ]
 
 [project.entry-points."feature_forge.agents"]
@@ -94,6 +119,26 @@ openfe = "feature_forge.baselines.openfe:OpenFEBaseline"
 caafe = "feature_forge.baselines.caafe:CAAFEBaseline"
 llmfe = "feature_forge.baselines.llmfe:LLMFEBaseline"
 malmus = "feature_forge.baselines.malmus:MalmusBaseline"
+
+[project.entry-points."feature_forge.metrics"]
+auc = "feature_forge.evaluation.metrics:auc_score"
+acc = "feature_forge.evaluation.metrics:acc_score"
+f1 = "feature_forge.evaluation.metrics:f1_score_metric"
+rmse = "feature_forge.evaluation.metrics:rmse_score"
+mae = "feature_forge.evaluation.metrics:mae_score"
+r2 = "feature_forge.evaluation.metrics:r2_score_metric"
+nrmse = "feature_forge.evaluation.metrics:nrmse_score"
+
+[project.entry-points."feature_forge.models"]
+xgboost = "feature_forge.evaluation.model_factory:create_xgboost"
+lightgbm = "feature_forge.evaluation.model_factory:create_lightgbm"
+catboost = "feature_forge.evaluation.model_factory:create_catboost"
+random_forest = "feature_forge.evaluation.model_factory:create_random_forest"
+mlp = "feature_forge.evaluation.model_factory:create_mlp"
+
+[project.entry-points."feature_forge.datasets"]
+titanic = "feature_forge.data.registry:titanic_loader"
+house_prices = "feature_forge.data.registry:house_prices_loader"
 
 [project.urls]
 Homepage = "https://github.com/your-org/feature-forge"
@@ -151,12 +196,13 @@ module = [
     "mlflow",
     "langfuse",
     "diskcache",
-    "litellm",
     "sklearn.*",
     "lightgbm",
     "catboost",
     "kaggle",
     "opentelemetry",
+    "tqdm",
+    "litellm",
 ]
 ignore_missing_imports = true
 
@@ -177,6 +223,11 @@ markers = [
     "llm: marks tests that call LLM APIs (expensive)",
     "baseline: marks tests requiring optional baseline packages",
     "integration: marks integration tests",
+    "unit: fast isolated tests",
+    "property: hypothesis-based property tests",
+    "metamorphic: metamorphic relation tests",
+    "contract: API surface contract tests",
+    "differential: reference comparison tests",
 ]
 asyncio_mode = "auto"
 

@@ -6,12 +6,17 @@ and feature evaluation.
 
 from __future__ import annotations
 
+import ast
 import asyncio
+import subprocess
+import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from joblib import Parallel, delayed  # type: ignore[import-untyped]
 
 from feature_forge.agents.base import Agent
 from feature_forge.config import Settings
@@ -36,18 +41,125 @@ class CodeGenerator:
             prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
         )
 
-    async def generate_code(self, specs: list[FeatureSpec]) -> str:
-        """Generate Python code for a list of feature specs."""
-        user_prompt = f"Please generate code for the following features:\n{specs}"
-        response = await self.llm_client.complete(
-            messages=[
-                {"role": "system", "content": self._system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.2,
-            max_tokens=4096,
+    async def generate_code(
+        self, specs: list[FeatureSpec], error_feedback: str | None = None
+    ) -> str:
+        """Generate Python code for a list of feature specs.
+
+        Includes AST validation and a single retry on syntax errors.
+        """
+        specs_dump = [s.model_dump() if hasattr(s, "model_dump") else s for s in specs]
+        user_prompt = f"Please generate code for the following features:\n{specs_dump}"
+        if error_feedback:
+            user_prompt += f"\n\n{error_feedback}"
+
+        for attempt in range(2):
+            response = await self.llm_client.complete(
+                messages=[
+                    {"role": "system", "content": self._system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.2,
+                max_tokens=4096,
+            )
+            code = strip_markdown_fences(response.content)
+
+            # Validate with AST
+            error_msg = _validate_code_ast(code)
+            if error_msg is None:
+                return code
+
+            if attempt == 0:
+                logger.warning("code_gen_ast_invalid", error=error_msg, attempt=attempt)
+                user_prompt = (
+                    user_prompt + f"\n\nYour previous code failed with: {error_msg}\n"
+                    "Please fix the code and output only valid Python."
+                )
+            else:
+                logger.error("code_gen_ast_retry_failed", error=error_msg)
+
+        return code
+
+
+def _validate_code_ast(code: str) -> str | None:
+    """Validate generated Python code via AST + linting (no execution).
+
+    Returns None if valid, or an error message string if not.
+    Checks:
+    - Valid Python syntax (AST parse)
+    - Contains generate_features function
+    - No banned imports (os, sys, etc.)
+    - No undefined names (ruff lint, catches bare column refs like 'f1')
+    """
+
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as exc:
+        return f"Python syntax error: {exc}"
+
+    # Check for generate_features function
+    has_generate_fn = any(
+        isinstance(node, ast.FunctionDef) and node.name == "generate_features"
+        for node in ast.walk(tree)
+    )
+    if not has_generate_fn:
+        return "Missing generate_features(df) function definition"
+
+    # Check for banned imports
+    _BANNED_IMPORTS = {
+        "os",
+        "sys",
+        "subprocess",
+        "shutil",
+        "socket",
+        "requests",
+        "urllib",
+        "http",
+        "ftplib",
+        "telnetlib",
+        "pickle",
+        "ctypes",
+    }
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".")[0]
+                if root in _BANNED_IMPORTS:
+                    return f"Forbidden import: {alias.name}"
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                root = node.module.split(".")[0]
+                if root in _BANNED_IMPORTS:
+                    return f"Forbidden import: {node.module}"
+
+    # Ruff lint: catches undefined names (bare 'f1' instead of df['f1'])
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as tmp:
+            tmp.write(code)
+            tmp_path = tmp.name
+        result = subprocess.run(
+            [sys.executable, "-m", "ruff", "check", "--select", "F821,F823", tmp_path],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
-        return strip_markdown_fences(response.content)
+        if result.returncode != 0 and result.stdout.strip():
+            # Extract first error line
+            first_error = (
+                result.stdout.strip().split("\n")[0] if result.stdout.strip() else "lint error"
+            )
+            return f"Undefined name or reference: {first_error}"
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass  # ruff not available, skip lint
+    finally:
+        try:
+            import os as _os
+
+            _os.unlink(tmp_path)
+        except (OSError, NameError):
+            pass
+
+    return None
 
 
 class CorePipeline:
@@ -132,9 +244,15 @@ class CorePipeline:
                 if self.config.evaluation.fail_on_agent_error:
                     raise PipelineError(f"Agent '{agent.name}' failed: {specs}") from specs
                 continue
+            normalized: list[FeatureSpec] = []
             for spec in specs:
-                spec["agent_name"] = agent.name
-            all_specs.extend(specs)
+                if isinstance(spec, dict):
+                    spec_obj = FeatureSpec(**spec)
+                else:
+                    spec_obj = spec
+                spec_obj.agent_name = agent.name
+                normalized.append(spec_obj)
+            all_specs.extend(normalized)
             logger.info("agent_specs_generated", agent=agent.name, num_specs=len(specs))
 
         if not all_specs:
@@ -155,27 +273,52 @@ class CorePipeline:
                 "generated_code": "",
             }
 
-        # Step 2: Generate code for all specs
+        # Step 2-3: Generate code + execute in sandbox (with retry on failure)
         logger.info("code_generation_start", num_specs=len(all_specs))
         code_gen_t0 = time.perf_counter()
-        try:
-            code = await self.code_generator.generate_code(all_specs)
-        except Exception as exc:
-            raise PipelineError(f"Code generation failed: {exc}") from exc
+        code = ""
+        features_train = pd.DataFrame()
+        last_error: str | None = None
+
+        for code_attempt in range(3):
+            error_feedback = (
+                f"Previous attempt failed with: {last_error}. Fix the error and regenerate."
+                if last_error
+                else None
+            )
+            try:
+                code = await self.code_generator.generate_code(
+                    all_specs, error_feedback=error_feedback
+                )
+            except Exception as exc:
+                raise PipelineError(f"Code generation failed: {exc}") from exc
+
+            sandbox_t0 = time.perf_counter()
+            try:
+                features_train = self.sandbox.execute(code, X_train)
+                break  # success
+            except Exception as exc:
+                last_error = str(exc)
+                if code_attempt < 2:
+                    logger.warning(
+                        "sandbox_execution_retry",
+                        attempt=code_attempt,
+                        error=last_error[:200],
+                    )
+                else:
+                    raise PipelineError(
+                        f"Sandbox execution failed after 3 attempts: {last_error}"
+                    ) from exc
+
+        if features_train.empty:
+            raise PipelineError(f"Sandbox execution failed after 3 attempts: {last_error}")
+
         logger.info(
             "code_generation_complete",
             num_specs=len(all_specs),
             code_length=len(code),
             latency_ms=round((time.perf_counter() - code_gen_t0) * 1000, 1),
         )
-
-        # Step 3: Execute code to get feature DataFrames
-        logger.info("sandbox_execution_start")
-        sandbox_t0 = time.perf_counter()
-        try:
-            features_train = self.sandbox.execute(code, X_train)
-        except Exception as exc:
-            raise PipelineError(f"Sandbox execution failed: {exc}") from exc
         logger.info(
             "sandbox_execution_complete",
             result_shape=features_train.shape,
@@ -201,20 +344,47 @@ class CorePipeline:
         )
         gains: dict[str, float] = {}
         candidate_columns = self._prefilter_candidate_columns(features_train)
-        for col in candidate_columns:
-            try:
-                gain = self.evaluator.evaluate_feature(
-                    X_train, y_train, features_train[[col]], baseline_score=baseline_score
+
+        if len(candidate_columns) > 1:
+            eval_results = Parallel(n_jobs=-1, prefer="threads")(
+                delayed(self._eval_single_feature)(
+                    self.evaluator, X_train, y_train, features_train[[col]], col, baseline_score
                 )
-                gains[col] = gain
-                logger.debug(
-                    "feature_evaluated", feature=col, gain=round(gain, 6), effective=gain > 0
-                )
-            except Exception as exc:
-                logger.warning("feature_evaluation_failed", feature=col, error=str(exc))
-                if self.config.evaluation.fail_on_feature_error:
-                    raise PipelineError(f"Feature evaluation failed for '{col}': {exc}") from exc
-                gains[col] = float("-inf")
+                for col in candidate_columns
+            )
+            for col, result in zip(candidate_columns, eval_results, strict=True):
+                if isinstance(result, Exception):
+                    logger.warning("feature_evaluation_failed", feature=col, error=str(result))
+                    if self.config.evaluation.fail_on_feature_error:
+                        raise PipelineError(
+                            f"Feature evaluation failed for '{col}': {result}"
+                        ) from result
+                    gains[col] = float("-inf")
+                else:
+                    gains[col] = result
+                    logger.debug(
+                        "feature_evaluated",
+                        feature=col,
+                        gain=round(result, 6),
+                        effective=result > 0,
+                    )
+        else:
+            for col in candidate_columns:
+                try:
+                    gain = self.evaluator.evaluate_feature(
+                        X_train, y_train, features_train[[col]], baseline_score=baseline_score
+                    )
+                    gains[col] = gain
+                    logger.debug(
+                        "feature_evaluated", feature=col, gain=round(gain, 6), effective=gain > 0
+                    )
+                except Exception as exc:
+                    logger.warning("feature_evaluation_failed", feature=col, error=str(exc))
+                    if self.config.evaluation.fail_on_feature_error:
+                        raise PipelineError(
+                            f"Feature evaluation failed for '{col}': {exc}"
+                        ) from exc
+                    gains[col] = float("-inf")
 
         # Step 5: Select top-k effective features
         effective = {k: v for k, v in gains.items() if v > 0}
@@ -231,9 +401,7 @@ class CorePipeline:
         # Build per-agent gain DataFrames
         agent_gains: dict[str, pd.DataFrame] = {}
         for agent in agents:
-            agent_feature_names = [
-                s["name"] for s in all_specs if s.get("agent_name") == agent.name
-            ]
+            agent_feature_names = [s.name for s in all_specs if s.agent_name == agent.name]
             agent_gain_rows = []
             for fname in agent_feature_names:
                 if fname in gains:
@@ -290,3 +458,19 @@ class CorePipeline:
                 variances.append((col, 0.0))
         variances.sort(key=lambda x: x[1], reverse=True)
         return [col for col, _ in variances[:max_candidates]]
+
+    @staticmethod
+    def _eval_single_feature(
+        evaluator: CVEvaluator,
+        X_train: pd.DataFrame,
+        y_train: pd.Series,
+        feature_df: pd.DataFrame,
+        col: str,
+        baseline_score: float,
+    ) -> float | Exception:
+        try:
+            return evaluator.evaluate_feature(
+                X_train, y_train, feature_df, baseline_score=baseline_score
+            )
+        except Exception as exc:
+            return exc

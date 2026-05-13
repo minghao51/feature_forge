@@ -5,8 +5,10 @@ Supports both classification (AUC, ACC, F1) and regression (RMSE, MAE, R2).
 
 from __future__ import annotations
 
+import importlib.metadata
+import warnings
 from collections.abc import Callable
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 from sklearn.metrics import (
@@ -88,8 +90,78 @@ METRIC_REGISTRY: dict[str, Callable[..., Any]] = {
 }
 
 
+class MetricRegistry:
+    """Registry for evaluation metrics with entry point discovery.
+
+    Built-in metrics are registered by default. Additional metrics can be
+    discovered via the ``feature_forge.metrics`` entry point group, or
+    registered programmatically via ``register()``.
+    """
+
+    ENTRY_POINT_GROUP = "feature_forge.metrics"
+
+    _builtin: ClassVar[dict[str, Callable[..., Any]]] = dict(METRIC_REGISTRY)
+    _discovered: ClassVar[dict[str, Callable[..., Any]] | None] = None
+
+    @classmethod
+    def discover(cls) -> dict[str, Callable[..., Any]]:
+        """Discover metrics registered via entry points."""
+        discovered: dict[str, Callable[..., Any]] = {}
+        for ep in importlib.metadata.entry_points(group=cls.ENTRY_POINT_GROUP):
+            if ep.name in cls._builtin:
+                warnings.warn(
+                    f"Entry point metric '{ep.name}' overrides built-in metric.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+            if ep.name in discovered:
+                warnings.warn(
+                    f"Duplicate metric entry point name '{ep.name}'. Last registered wins.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+            try:
+                discovered[ep.name] = ep.load()
+            except Exception as exc:
+                warnings.warn(
+                    f"Failed to load metric entry point '{ep.name}': {exc}",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+        return discovered
+
+    @classmethod
+    def get_builtin(cls) -> dict[str, Callable[..., Any]]:
+        """Return built-in metrics only."""
+        return dict(cls._builtin)
+
+    @classmethod
+    def get_all(cls) -> dict[str, Callable[..., Any]]:
+        """Return built-in + entry-point discovered metrics."""
+        if cls._discovered is None:
+            cls._discovered = cls.discover()
+        return {**cls._builtin, **cls._discovered}
+
+    @classmethod
+    def get(cls, name: str) -> Callable[..., Any]:
+        """Get a metric function by name."""
+        metrics = cls.get_all()
+        if name not in metrics:
+            raise EvaluationError(f"Unknown metric: {name}. Available: {list(metrics.keys())}")
+        return metrics[name]
+
+    @classmethod
+    def register(cls, name: str, fn: Callable[..., Any]) -> None:
+        """Register a metric programmatically."""
+        if name in cls._builtin:
+            warnings.warn(
+                f"Metric '{name}' already registered. Overwriting.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        cls._builtin[name] = fn
+
+
 def get_metric(name: str) -> Callable[..., Any]:
-    """Get metric function by name."""
-    if name not in METRIC_REGISTRY:
-        raise EvaluationError(f"Unknown metric: {name}. Available: {list(METRIC_REGISTRY.keys())}")
-    return METRIC_REGISTRY[name]
+    """Get metric function by name (delegates to MetricRegistry)."""
+    return MetricRegistry.get(name)

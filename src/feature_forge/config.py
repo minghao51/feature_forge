@@ -263,7 +263,7 @@ class Settings(BaseSettings):
     @field_validator("metric")
     @classmethod
     def _validate_metric(cls, v: str) -> str:
-        valid = {"auc", "acc", "f1", "rmse", "mae", "r2"}
+        valid = {"auc", "acc", "f1", "rmse", "mae", "r2", "nrmse"}
         if v not in valid:
             raise ValueError(f"metric must be one of {valid}, got {v}")
         return v

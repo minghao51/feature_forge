@@ -14,10 +14,11 @@ import pandas as pd
 
 from feature_forge.artifacts.base import ArtifactConfig
 from feature_forge.baselines.base import Baseline
+from feature_forge.config import Settings, get_settings
 from feature_forge.evaluation.cv import CVEvaluator
 from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.llm.base import LLMClient
-from feature_forge.llm.providers.deepseek import DeepSeekProvider
+from feature_forge.llm.factory import create_llm_client
 from feature_forge.observability.structlog_config import get_logger
 from feature_forge.utils import run_coro_sync, strip_markdown_fences
 
@@ -39,13 +40,18 @@ class LLMFEBaseline(Baseline):
     def __init__(
         self,
         llm_client: LLMClient | None = None,
+        settings: Settings | None = None,
         n_features: int = 5,
         mode: Literal["single_shot", "iterative"] = "single_shot",
         evaluator: CVEvaluator | None = None,
         artifact_config: ArtifactConfig | None = None,
     ) -> None:
         super().__init__("llmfe", artifact_config=artifact_config)
-        self.llm_client = llm_client or DeepSeekProvider()
+        if llm_client is not None:
+            self.llm_client = llm_client
+        else:
+            s = settings or get_settings()
+            self.llm_client = create_llm_client(s.llm, s.retry)
         self.n_features = n_features
         self.mode = mode
         self.evaluator = evaluator

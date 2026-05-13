@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
+import re
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -135,9 +136,15 @@ class BaseFeatureAgent(Agent):
 
         return "\n\n".join(parts)
 
+    _column_desc_cache: ClassVar[dict[tuple[int, int, int], dict[str, dict[str, Any]]]] = {}
+    _CACHE_MAX_SIZE: ClassVar[int] = 64
+
     @staticmethod
     def _infer_column_descriptions(X: pd.DataFrame) -> dict[str, dict[str, Any]]:
-        """Generate column descriptions from DataFrame statistics."""
+        cache_key: tuple[int, int, int] = (X.shape[0], X.shape[1], hash(tuple(X.columns)))
+        cached = BaseFeatureAgent._column_desc_cache.get(cache_key)
+        if cached is not None:
+            return cached
 
         desc: dict[str, dict[str, Any]] = {}
         for col in X.columns:
@@ -156,6 +163,10 @@ class BaseFeatureAgent(Agent):
                 info["top"] = str(col_data.mode().iloc[0]) if len(col_data) > 0 else ""
                 info["missing"] = int(col_data.isna().sum())
             desc[col] = info
+
+        BaseFeatureAgent._column_desc_cache[cache_key] = desc
+        if len(BaseFeatureAgent._column_desc_cache) > BaseFeatureAgent._CACHE_MAX_SIZE:
+            BaseFeatureAgent._column_desc_cache.pop(next(iter(BaseFeatureAgent._column_desc_cache)))
         return desc
 
     async def generate(
@@ -198,17 +209,28 @@ class BaseFeatureAgent(Agent):
         return specs
 
     def _parse_response(self, content: str) -> list[FeatureSpec]:
-        """Parse JSON array of feature specs from LLM response."""
         content = content.strip()
+
+        json_str = content
         if content.startswith("```"):
-            content = content.removeprefix("```json").removeprefix("```")
-            content = content.removesuffix("```").strip()
+            json_str = re.sub(r"^```(?:json)?\s*", "", content)
+            json_str = re.sub(r"\s*```$", "", json_str).strip()
 
         try:
-            data = json.loads(content)
-        except json.JSONDecodeError as exc:
-            logger.error("agent_parse_error", agent=self.name, response_preview=content[:200])
-            raise AgentError(f"{self.name} invalid JSON: {exc}") from exc
+            data = json.loads(json_str)
+        except json.JSONDecodeError:
+            bracket_match = re.search(r"\[.*\]", content, re.DOTALL)
+            if bracket_match:
+                try:
+                    data = json.loads(bracket_match.group())
+                except json.JSONDecodeError as exc:
+                    logger.error(
+                        "agent_parse_error", agent=self.name, response_preview=content[:200]
+                    )
+                    raise AgentError(f"{self.name} invalid JSON: {exc}") from exc
+            else:
+                logger.error("agent_parse_error", agent=self.name, response_preview=content[:200])
+                raise AgentError(f"{self.name} could not extract JSON from response") from None
 
         if not isinstance(data, list):
             raise AgentError(f"{self.name} expected JSON list, got {type(data).__name__}")
@@ -221,14 +243,16 @@ class BaseFeatureAgent(Agent):
             if isinstance(base_cols, str):
                 base_cols = [base_cols]
             for feat in item.get("derived_features", []):
-                spec: FeatureSpec = {
-                    "name": feat.get("name", "unknown"),
-                    "type": feat.get("type", "numerical"),
-                    "transform": feat.get("transform", ""),
-                    "logic": feat.get("logic", ""),
-                    "base_columns": base_cols,
-                    "agent_name": self.name,
-                }
+                if not isinstance(feat, dict):
+                    continue
+                spec = FeatureSpec(
+                    name=feat.get("name", "unknown"),
+                    type=feat.get("type", "numerical"),
+                    transform=feat.get("transform", ""),
+                    logic=feat.get("logic", ""),
+                    base_columns=base_cols,
+                    agent_name=self.name,
+                )
                 specs.append(spec)
         return specs
 

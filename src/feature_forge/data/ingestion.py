@@ -66,7 +66,9 @@ class KaggleFetcher:
             Dict with keys: train, test, target, metadata.
         """
         data = self.fetch(dataset_slug)
-        train_df = data.get("train.csv") or next(iter(data.values()))
+        train_df = data.get("train.csv")
+        if train_df is None:
+            train_df = next(iter(data.values()))
         test_df = data.get("test.csv", pd.DataFrame())
 
         metadata = {

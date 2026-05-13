@@ -52,14 +52,6 @@ class LiteLLMProvider(LLMClient):
             raise LLMError("litellm is not installed. Run: uv pip install litellm")
         self.provider_env_vars = provider_env_vars or {}
 
-    def _setup_env(self) -> None:
-        import os
-
-        for key, value in self.provider_env_vars.items():
-            os.environ[key] = value
-        if self.api_key:
-            os.environ.setdefault("API_KEY", self.api_key)
-
     def _json_mode_kwargs(self) -> dict[str, Any]:
         return {"response_format": {"type": "json_object"}}
 
@@ -70,16 +62,17 @@ class LiteLLMProvider(LLMClient):
         max_tokens: int,
         **kwargs: Any,
     ) -> Any:
-        self._setup_env()
-        return await litellm.acompletion(
-            model=self.model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            api_key=self.api_key,
-            api_base=self.base_url,
+        call_kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "api_key": self.api_key,
+            "api_base": self.base_url,
+            **self.provider_env_vars,
             **kwargs,
-        )
+        }
+        return await litellm.acompletion(**call_kwargs)
 
     def _extract_content(self, raw_response: Any) -> str:
         return raw_response.choices[0].message.content or ""

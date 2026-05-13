@@ -62,8 +62,16 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
         if isinstance(config, dict):
             config = Settings(**config)
         self.config = config or get_settings()
-        self.llm_client = llm_client or self._default_llm_client()
         self.mode = mode
+        # Defer LLM client creation: allow None so notebooks can
+        # explore the API without an API key.  fit() will raise if
+        # no client is available.
+        self.llm_client: LLMClient | None = llm_client
+        if llm_client is None:
+            try:
+                self.llm_client = self._default_llm_client()
+            except Exception:
+                pass  # will be caught at fit() time
         self.selected_features: list[str] = []
         self.feature_codes: list[str] = []
         self.sandbox = SandboxedExecutor(
@@ -102,6 +110,7 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
         if self.mode in _SINGLE_AGENT_MODES:
             from feature_forge.pipeline.ablations import SingleAgentPipeline
 
+            assert self.llm_client is not None
             return SingleAgentPipeline(
                 self.mode,
                 self.config,
@@ -111,9 +120,16 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
 
         from feature_forge.pipeline.iterative import IterativePipeline
 
+        assert self.llm_client is not None
         return IterativePipeline(self.config, self.llm_client, sandbox=self.sandbox)
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> FeatureForge:
+        if self.llm_client is None:
+            raise RuntimeError(
+                "FeatureForge.fit() requires an LLM client. "
+                "Set DEEPSEEK_API_KEY (or your provider's key) "
+                "or pass llm_client= explicitly."
+            )
         fit_t0 = time.perf_counter()
         logger.info(
             "fit_start",

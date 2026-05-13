@@ -31,6 +31,46 @@ from feature_forge.observability.structlog_config import get_logger
 logger = get_logger(__name__)
 
 
+def _to_parquet_safe(df: pd.DataFrame) -> pd.DataFrame:
+    """Convert DataFrame columns to parquet-serializable types.
+
+    Handles Categorical columns with non-serializable values (e.g.,
+    pd.Interval), complex objects, and other extension types that
+    pyarrow cannot natively serialize.
+    """
+    df = df.copy()
+    for col in df.columns:
+        series = df[col]
+        # Categorical columns may contain Interval or other complex types
+        if isinstance(series.dtype, pd.CategoricalDtype):
+            try:
+                # Try to convert to numeric float first (works for interval midpoints)
+                numeric = pd.to_numeric(
+                    series.astype(str).str.extract(r"([-\d.]+)", expand=False), errors="coerce"
+                )
+                if numeric.notna().sum() > len(numeric) * 0.5:
+                    df[col] = numeric.astype(float)
+                else:
+                    df[col] = series.astype(str)
+            except Exception:
+                df[col] = series.astype(str)
+        # Object columns may contain complex types
+        elif series.dtype == object:
+            try:
+                df[col] = pd.to_numeric(series, errors="coerce")
+                if df[col].isna().all() and series.notna().any():
+                    df[col] = series.astype(str)
+            except Exception:
+                df[col] = series.astype(str)
+        # Any unrecognized extension type → float or string
+        elif not pd.api.types.is_numeric_dtype(series) and not pd.api.types.is_bool_dtype(series):
+            try:
+                df[col] = series.astype(float)
+            except (TypeError, ValueError):
+                df[col] = series.astype(str)
+    return df
+
+
 @dataclass(frozen=True)
 class SandboxLimits:
     timeout_seconds: float = 5.0
@@ -93,7 +133,6 @@ class SandboxedExecutor:
         "RuntimeError",
         "ZeroDivisionError",
         "OverflowError",
-        "Exception",
         "NotImplementedError",
         "StopIteration",
     }
@@ -266,6 +305,8 @@ def _sandbox_worker_main(
                 ("error", f"generate_features must return a DataFrame, got {type(result).__name__}")
             )
             return
+        # Convert non-serializable types (Interval, Categorical, object) to safe numeric/string
+        result = _to_parquet_safe(result)
         with tempfile.NamedTemporaryFile(
             mode="wb", suffix=".parquet", delete=False, prefix="feature_forge_sandbox_"
         ) as temp_file:

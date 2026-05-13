@@ -308,14 +308,14 @@ class IterativePipeline(BaseIterativePipeline):
             for _, row in agent_gain_df.iterrows():
                 fname = row["feature"]
                 gain = row["gain"]
-                spec = next((s for s in core_results["specs"] if s["name"] == fname), None)
+                spec = next((s for s in core_results["specs"] if s.name == fname), None)
                 if spec:
                     memory.record_procedure(
-                        base_columns=spec.get("base_columns", []),
-                        transform=spec.get("transform", ""),
+                        base_columns=spec.base_columns,
+                        transform=spec.transform,
                         feature_name=fname,
-                        ty=spec.get("type", "unknown"),
-                        description=spec.get("logic", ""),
+                        ty=spec.type,
+                        description=spec.logic,
                         round_idx=round_idx,
                     )
                     effective = gain > 0
@@ -325,16 +325,16 @@ class IterativePipeline(BaseIterativePipeline):
                         value=gain,
                         effective=effective,
                         round_idx=round_idx,
-                        base=spec.get("base_columns", []),
-                        ty=spec.get("type", "unknown"),
+                        base=spec.base_columns,
+                        ty=spec.type,
                     )
                     if not effective:
                         memory.record_unused_procedure(
-                            base_columns=spec.get("base_columns", []),
-                            transform=spec.get("transform", ""),
+                            base_columns=spec.base_columns,
+                            transform=spec.transform,
                             feature_name=fname,
-                            ty=spec.get("type", "unknown"),
-                            description=spec.get("logic", ""),
+                            ty=spec.type,
+                            description=spec.logic,
                             round_idx=round_idx,
                         )
             memory.save()

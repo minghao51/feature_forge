@@ -12,25 +12,61 @@ A JSON list of field definitions. Each item includes:
 
 📤 Your output:
 Generate Python code that meets the following requirements:
-- Use the base_columns and derived_features information to derive new features.
 - Encapsulate all logic into a Python function named `generate_features(df)`.
 - Return a pandas DataFrame containing only the derived features (do not modify the original data).
 - Handle missing values robustly (e.g., fill, skip, or assign default values).
 - Check for existence of all required base_columns before computation.
-- Use only pandas, numpy, and Python built-in math functions.
-- Output only the code; no extra explanation or description.
+- Use only pandas, numpy, and math.
+- Output ONLY the code; no extra explanation or description.
+
+⚠️ STRICT RULES — VIOLATIONS WILL CAUSE EXECUTION FAILURE:
+
+1. ALWAYS use df['column_name'] to access columns. NEVER use bare variable names like f1, age, etc.
+   Correct:   df['age'] ** 2
+   Wrong:     age ** 2
+
+2. ONLY import from: pandas, numpy, math. Never import scipy, sklearn, os, sys, or any other module.
+   Correct:   import pandas as pd; import numpy as np
+   Wrong:     import scipy.special
+
+3. NEVER use pd.cut(), pd.qcut(), pd.IntervalIndex, or any function that creates pandas Interval/Categorical types.
+   These types cannot be serialized and will crash the pipeline.
+   Instead, use np.digitize() or np.select() for binning.
+
+4. ALWAYS convert boolean masks to numeric when creating features:
+   Correct:   result['is_female'] = (df['sex'] == 1).astype(int)
+   Wrong:     result['is_female'] = df['sex'] == 1
+
+5. For division operations, always handle zero denominators:
+   Correct:   result['ratio'] = np.where(df['b'] != 0, df['a'] / df['b'], 0)
+   Wrong:     result['ratio'] = df['a'] / df['b']
+
+6. For log/exp operations, ensure positive values:
+   Correct:   np.log1p(df['fare'].clip(lower=0))
+   Wrong:     np.log(df['fare'])
+
+7. Ensure ALL generated columns have numeric types (float64 or int64).
+   Use .astype(float) if necessary.
+
+8. Every feature must be added to the `result` DataFrame. Collect all features before returning.
+   All features must be the same length as the input DataFrame.
 
 📦 Example output format:
 
 ```python
 import pandas as pd
 import numpy as np
+import math
 
 def generate_features(df):
     result = pd.DataFrame(index=df.index)
-    if "col_a" in df.columns and "col_b" in df.columns:
-        result["new_feature"] = df["col_a"] + df["col_b"]
-        result["new_feature"] = result["new_feature"].fillna(0)
+    if "age" in df.columns:
+        result["age_squared"] = df["age"] ** 2
+        result["age_squared"] = result["age_squared"].fillna(0).astype(float)
+    if "fare" in df.columns and "age" in df.columns:
+        denom = df["age"].replace(0, np.nan)
+        result["fare_per_age"] = np.where(denom > 0, df["fare"] / denom, 0)
+        result["fare_per_age"] = result["fare_per_age"].fillna(0).astype(float)
     return result
 ```
 

@@ -12,6 +12,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from pydantic import SecretStr
+
 from feature_forge.exceptions import LLMError
 from feature_forge.observability.structlog_config import get_logger
 
@@ -60,11 +62,25 @@ class LLMClient(ABC):
     JSON schema injection, and error wrapping.
     """
 
-    def __init__(self, model: str, api_key: str | None, base_url: str | None = None) -> None:
+    def __init__(
+        self, model: str, api_key: str | SecretStr | None, base_url: str | None = None
+    ) -> None:
         self.model = model
-        self.api_key = api_key
+        self._api_key_secret: SecretStr | None = None
+        if isinstance(api_key, SecretStr):
+            self._api_key_secret = api_key
+        elif api_key is not None:
+            self._api_key_secret = SecretStr(api_key)
         self.base_url = base_url
         self._retry_config: RetryConfig | None = None
+
+    @property
+    def api_key(self) -> str | None:
+        return self._api_key_secret.get_secret_value() if self._api_key_secret else None
+
+    @property
+    def api_key_secret(self) -> SecretStr | None:
+        return self._api_key_secret
 
     def set_retry_config(self, config: RetryConfig) -> None:
         """Attach retry configuration to this client."""
@@ -295,15 +311,8 @@ class LLMClient(ABC):
         **kwargs: Any,
     ) -> str:
         """Build a deterministic cache key from request parameters."""
-        import hashlib
+        from feature_forge.llm.cache import compute_cache_key
 
-        payload = {
-            "provider": self.provider_name,
-            "model": self.model,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "messages": messages,
-            "extra": kwargs,
-        }
-        data = json.dumps(payload, sort_keys=True, ensure_ascii=False)
-        return hashlib.sha256(data.encode("utf-8")).hexdigest()
+        return compute_cache_key(
+            self.provider_name, self.model, messages, temperature, max_tokens, **kwargs
+        )

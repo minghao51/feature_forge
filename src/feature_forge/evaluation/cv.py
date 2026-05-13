@@ -132,7 +132,7 @@ class CVEvaluator:
                     else:
                         y_pred = model.predict(X_val_proc)
                     scores.append(self.metric_fn(y_val.values, y_pred))
-            except Exception as exc:
+            except (ValueError, RuntimeError) as exc:
                 raise EvaluationError(f"CV fold failed: {exc}") from exc
 
         return float(np.mean(scores))

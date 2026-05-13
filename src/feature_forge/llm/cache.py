@@ -20,6 +20,26 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def compute_cache_key(
+    provider: str,
+    model: str,
+    messages: list[dict[str, str]],
+    temperature: float,
+    max_tokens: int,
+    **kwargs: Any,
+) -> str:
+    payload: dict[str, Any] = {
+        "provider": provider,
+        "model": model,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "messages": messages,
+        "extra": kwargs,
+    }
+    data = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(data.encode("utf-8")).hexdigest()
+
+
 class DiskCache:
     """Disk-backed cache for LLM responses.
 
@@ -56,17 +76,7 @@ class DiskCache:
         max_tokens: int,
         **kwargs: Any,
     ) -> str:
-        """Generate deterministic SHA-256 cache key."""
-        payload = {
-            "provider": provider,
-            "model": model,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "messages": messages,
-            "extra": kwargs,
-        }
-        data = json.dumps(payload, sort_keys=True, ensure_ascii=False)
-        return hashlib.sha256(data.encode("utf-8")).hexdigest()
+        return compute_cache_key(provider, model, messages, temperature, max_tokens, **kwargs)
 
     def get(self, key: str) -> dict[str, Any] | None:
         if not self.enabled:

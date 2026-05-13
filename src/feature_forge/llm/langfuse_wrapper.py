@@ -73,9 +73,11 @@ class LangfuseLLMWrapper(LLMClient):
         **kwargs: Any,
     ) -> LLMResponse:
         """Complete with cache check, Langfuse tracing, and retry on inner client."""
-        cache_key = self.build_cache_key(messages, temperature, max_tokens, **kwargs)
-
+        cache_key: str | None = None
         if self._cache is not None:
+            cache_key = self.build_cache_key(messages, temperature, max_tokens, **kwargs)
+
+        if self._cache is not None and cache_key is not None:
             cached = self._cache.get(cache_key)
             if cached is not None:
                 logger.info(
@@ -96,7 +98,7 @@ class LangfuseLLMWrapper(LLMClient):
             "llm_cache_miss",
             provider=self.provider_name,
             model=self.model,
-            cache_key=cache_key[:16],
+            cache_key=cache_key[:16] if cache_key else "none",
         )
 
         @trace_generation(name=f"{self.provider_name}-completion")
@@ -110,7 +112,7 @@ class LangfuseLLMWrapper(LLMClient):
 
         response = await _traced_complete()
 
-        if self._cache is not None:
+        if self._cache is not None and cache_key is not None:
             self._cache.set(
                 cache_key,
                 {

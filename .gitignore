@@ -144,8 +144,5 @@ data/raw/
 wandb/
 mlruns/
 
-# Quarto / MkDocs generated notebook outputs
-# Canonical published notebook HTML lives in docs/notebooks/html/
-notebooks/_freeze/
-notebooks/*.html
-notebooks/*_files/
+# MkDocs
+.cache/mkdocs-jupyter/

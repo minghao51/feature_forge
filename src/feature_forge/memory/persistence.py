@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -19,8 +21,19 @@ class MemoryPersistence:
         self.memory_path.parent.mkdir(parents=True, exist_ok=True)
 
     def save(self, data: dict[str, Any]) -> None:
-        with open(self.memory_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        fd, tmp_path = tempfile.mkstemp(
+            suffix=".tmp", dir=self.memory_path.parent, prefix=self.memory_path.stem
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            os.replace(tmp_path, self.memory_path)
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
         logger.debug("memory_save", path=str(self.memory_path), num_keys=len(data))
 
     def load(self) -> dict[str, Any] | None:

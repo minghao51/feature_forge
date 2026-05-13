@@ -6,6 +6,8 @@ from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
 from typing import Any
 
+from tqdm import tqdm
+
 from feature_forge.experiment.tracker import ExperimentTracker
 from feature_forge.observability.structlog_config import get_logger
 
@@ -32,18 +34,25 @@ class ExperimentRunner:
         self,
         configs: list[dict[str, Any]],
         experiment_fn: Callable[[dict[str, Any]], dict[str, Any]],
+        progress: bool = True,
     ) -> list[dict[str, Any]]:
         """Run all experiment configurations.
 
         Args:
             configs: List of parameter dictionaries.
             experiment_fn: Function that takes a config dict and returns results.
+            progress: Show ``tqdm`` progress bar.
 
         Returns:
             List of result dictionaries.
         """
         results: list[dict[str, Any]] = []
-        for i, config in enumerate(configs):
+        iterator = (
+            tqdm(enumerate(configs), total=len(configs), desc="Experiments")
+            if progress
+            else enumerate(configs)
+        )
+        for i, config in iterator:
             run_name = f"run_{i}_{config.get('dataset', 'unknown')}"
             logger.info("experiment_run_start", run_name=run_name, config_keys=list(config.keys()))
             if self.tracker is not None:
@@ -71,18 +80,51 @@ class ExperimentRunner:
         self,
         configs: list[dict[str, Any]],
         experiment_fn: Callable[[dict[str, Any]], dict[str, Any]],
+        max_workers: int | None = None,
+        progress: bool = True,
     ) -> list[dict[str, Any]]:
         """Run experiments in parallel using process pool.
 
         Note: experiment_fn must be pickleable.
+        Tracker is called from the main process after each future completes.
+
+        Args:
+            configs: List of parameter dictionaries.
+            experiment_fn: Function that takes a config dict and returns results.
+            max_workers: Override max workers (defaults to ``self.max_workers``).
+            progress: Show ``tqdm`` progress bar.
+
+        Returns:
+            List of result dictionaries.
         """
-        with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
+        workers = max_workers or self.max_workers
+        with ProcessPoolExecutor(max_workers=workers) as executor:
             futures = [executor.submit(experiment_fn, cfg) for cfg in configs]
             results = []
-            for cfg, future in zip(configs, futures, strict=False):
+            iterator = (
+                tqdm(
+                    enumerate(zip(configs, futures, strict=False)),
+                    total=len(configs),
+                    desc="Experiments (parallel)",
+                )
+                if progress
+                else enumerate(zip(configs, futures, strict=False))
+            )
+            for i, (cfg, future) in iterator:
+                run_name = f"run_{i}_{cfg.get('dataset', 'unknown')}"
+                if self.tracker is not None:
+                    self.tracker.init_run(run_name=run_name, config=cfg)
                 try:
                     result = future.result()
+                    if self.tracker is not None:
+                        self.tracker.log_metrics(
+                            {k: v for k, v in result.items() if isinstance(v, float)}
+                        )
                     results.append({**cfg, **result})
                 except Exception as exc:
+                    logger.error("experiment_run_error", run_name=run_name, error=str(exc))
                     results.append({**cfg, "error": str(exc)})
+                finally:
+                    if self.tracker is not None:
+                        self.tracker.finish()
             return results
