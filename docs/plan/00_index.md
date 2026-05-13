@@ -29,6 +29,8 @@ This document outlines the comprehensive implementation plan for `feature_forge`
 | `07_observability.md` | structlog + Langfuse + OpenTelemetry |
 | `08_experiment_tracking.md` | WandB + MLflow abstraction |
 | `09_baseline_selection.md` | Why MALMAS + OpenFE + CAAFE + LLM-FE |
+| `10_experimental_platform_refactor.md` | Hybrid plugin platform refactor: `ExperimentalPlatform` API + entry point hooks for baselines/datasets/models/metrics |
+| `11_platform_refactor_review.md` | Post-implementation review, gaps identified, and fixes applied |
 
 ## Research Basis
 
@@ -56,8 +58,16 @@ This plan is informed by:
 
 ---
 
+## Current Phase
+
+**Platform Refactor (In Progress)** — See `10_experimental_platform_refactor.md`. The `ExperimentalPlatform` facade, plugin hook extensions (MetricRegistry, ModelRegistry, DatasetRegistry entry points, BaselineProtocol), and package formalization are being implemented.
+
 ## Next Steps
 
-1. Review all plan documents in `docs/plan/`
-2. Approve or modify Phase 1 scope
-3. Begin implementation with `uv init` and directory scaffolding
+1. ✅ Review `10_experimental_platform_refactor.md`
+2. ✅ Approve Option C (Hybrid) approach
+3. ✅ Phase 1: `ExperimentalPlatform` facade — done
+4. ✅ Phase 2: Plugin hook extensions — done
+5. ✅ Phase 3: Package formalization — done
+6. ⬜ Tests — writing
+7. ⬜ Phase 4: Export CLI — deferred
