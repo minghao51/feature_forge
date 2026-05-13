@@ -2,6 +2,18 @@ site_name: Feature Forge
 site_url: https://minghao51.github.io/feature_forge/
 theme:
   name: material
+  custom_dir: overrides
+  palette:
+    - scheme: default
+      primary: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
   features:
     - navigation.tabs
     - navigation.sections
@@ -18,6 +30,15 @@ plugins:
             show_source: true
             show_root_heading: true
             docstring_style: google
+  - mkdocs-jupyter:
+      execute: false
+      theme: light
+      include: ["*.ipynb", "*.py"]
+      allow_errors: false
+      include_source: true
+      ignore_h1_titles: true
+      cache: true
+      cache_dir: .cache/mkdocs-jupyter
 markdown_extensions:
   - pymdownx.blocks.caption
   - md_in_html
@@ -31,9 +52,9 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - pymdownx.snippets
 extra_css:
-  - stylesheets/notebooks.css
+  - stylesheets/jupyter-fix.css
 extra_javascript:
-  - javascripts/notebooks.js
+  - javascripts/jupyter-theme-bridge.js
 extra:
   version:
     provider: mike
@@ -58,13 +79,6 @@ nav:
       - 09 Baseline Selection: plan/09_baseline_selection.md
   - Notebooks:
       - Overview: notebooks/index.md
-      - 01 Quick Start: notebooks/01-quick-start.md
-      - 02 Agents: notebooks/02-agents.md
-      - 03 Router & Modes: notebooks/03-router.md
-      - 04 Iterative Pipeline: notebooks/04-iterative-pipeline.md
-      - 05 Experiment Matrix: notebooks/05-experiment-matrix.md
-      - 06 Baselines: notebooks/06-baselines.md
-      - 07 Evaluation: notebooks/07-evaluation.md
-      - 08 Artifacts: notebooks/08-artifacts.md
-      - 09 Configuration: notebooks/09-configuration.md
-      - 10 Method Comparison: notebooks/10-method-comparison.md
+      - 01 Getting Started: notebooks/01_getting_started.ipynb
+      - 02 Pipeline Deep Dive: notebooks/02_pipeline_deep_dive.ipynb
+      - 03 Benchmarks & Artifacts: notebooks/03_benchmarks_and_artifacts.ipynb

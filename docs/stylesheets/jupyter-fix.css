@@ -1,0 +1,6 @@
+.jupyter-wrapper { font-size: 0.8rem; padding: 0; }
+.jupyter-wrapper .jp-Cell { padding: 0.5rem 0; margin: 0; }
+.jupyter-wrapper .jp-Editor .CodeMirror-line { font-family: var(--md-code-font-family, monospace); }
+.jupyter-wrapper .jp-OutputArea-output { background-color: var(--md-code-bg-color); border-radius: 4px; overflow-x: auto; }
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-OutputArea-output pre { color: #e2e8f0; }
+[data-md-color-scheme="default"] .jupyter-wrapper .jp-OutputArea-output pre { color: #1e293b; }

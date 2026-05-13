@@ -203,6 +203,7 @@ module = [
     "opentelemetry",
     "tqdm",
     "litellm",
+    "seaborn",
 ]
 ignore_missing_imports = true
 

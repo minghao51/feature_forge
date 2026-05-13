@@ -57,7 +57,34 @@ pipeline = Pipeline([
 pipeline.fit(X_train, y_train)
 ```
 
-### Experiment Matrix
+### ExperimentalPlatform (Recommended)
+
+```python
+from feature_forge import ExperimentalPlatform
+
+platform = ExperimentalPlatform()
+
+results = platform.run(
+    datasets=["titanic", "house_prices"],
+    baselines=["malmus", "caafe", "openfe", "llmfe"],
+    models=["xgboost"],
+    mode="single_shot",
+    cv_folds=5,
+)
+
+print(platform.report(results))
+# ┌──────────┬──────────┬──────────┬──────────┬──────────┐
+# │ dataset  │ baseline │ model    │ cv_score │ gain     │
+# ├──────────┼──────────┼──────────┼──────────┼──────────┤
+# │ titanic  │ malmus   │ xgboost  │ 0.8523   │ +0.0312  │
+# │ ...      │ ...      │ ...      │ ...      │ ...      │
+# └──────────┴──────────┴──────────┴──────────┴──────────┘
+
+platform.report_best(results)     # best per dataset
+df = platform.to_dataframe(results)  # raw pandas DataFrame
+```
+
+### Experiment Matrix (Advanced)
 
 ```python
 from feature_forge.experiment import ExperimentMatrix, ExperimentRunner, Reporter
