@@ -104,6 +104,7 @@ dev = [
     "hypothesis>=6.152.7",
     "mkdocs-jupyter>=0.26.3",
     "types-tqdm>=4.67.3.20260508",
+    "types-pyyaml>=6.0.12.20260510",
 ]
 
 [project.entry-points."feature_forge.agents"]
@@ -203,7 +204,6 @@ module = [
     "opentelemetry",
     "tqdm",
     "litellm",
-    "seaborn",
 ]
 ignore_missing_imports = true
 

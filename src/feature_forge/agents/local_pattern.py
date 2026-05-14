@@ -8,5 +8,5 @@ from feature_forge.agents.base import BaseFeatureAgent
 class LocalPatternAgent(BaseFeatureAgent):
     """Generates features based on distributional patterns."""
 
-    prompt_filename = "local_pattern.txt"
+    prompt_key = "local_pattern"
     agent_name = "local_pattern"

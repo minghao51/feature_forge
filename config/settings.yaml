@@ -13,9 +13,13 @@ llm:
   model: "deepseek-chat"
   base_url: "https://api.deepseek.com"
   temperature: 0.2
-  max_tokens: 4096
+  max_tokens: 32768
+  agent_max_tokens: 8192
+  codegen_max_tokens: 16384
   cache_responses: true
   max_concurrent_calls: 3
+  thinking_enabled: true
+  reasoning_effort: "medium"
 
 tracker:
   backend: "wandb"

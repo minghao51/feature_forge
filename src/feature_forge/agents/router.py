@@ -6,8 +6,6 @@ selection strategies.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any, ClassVar
 
 import pandas as pd
@@ -15,6 +13,7 @@ import pandas as pd
 from feature_forge.config import Settings
 from feature_forge.llm.base import LLMClient
 from feature_forge.observability.structlog_config import get_logger
+from feature_forge.prompts import get_registry
 from feature_forge.types import AgentName
 
 logger = get_logger(__name__)
@@ -83,8 +82,7 @@ class RouterAgent:
         self.agent_selection_count: dict[str, int] = dict.fromkeys(self.agent_names, 0)
         self.dataset_characteristics: dict[str, Any] | None = None
 
-        prompt_path = Path(__file__).parent / "../prompts/router.txt"
-        self.router_prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
+        self.router_prompt = get_registry().get("router").system
 
     def analyze_dataset(
         self,
@@ -196,16 +194,29 @@ class RouterAgent:
             {"role": "user", "content": context},
         ]
         try:
-            response = await self.llm_client.complete(
-                messages=messages, temperature=0.3, max_tokens=256
+            response = await self.llm_client.complete_json(
+                messages=messages,
+                schema_description='{"agents":["unary","cross_compositional"]}',
+                temperature=0.3,
+                max_tokens=256,
             )
-            selected = json.loads(response.content)
+            if isinstance(response, dict):
+                selected = response.get("agents", [])
+            elif isinstance(response, list):
+                selected = response
+            else:
+                selected = []
             if isinstance(selected, list):
-                valid = [a for a in selected if a in self.agent_names]
+                valid = [a for a in selected if isinstance(a, str) and a in self.agent_names]
                 if valid:
                     return valid
-        except Exception:
-            pass
+                logger.warning("router_llm_selection_empty_valid", selected=selected)
+            else:
+                logger.warning(
+                    "router_llm_selection_invalid_type", response_type=type(response).__name__
+                )
+        except Exception as exc:
+            logger.warning("router_llm_selection_failed", error=str(exc)[:200])
         return self._hybrid_selection()
 
     def _build_selection_context(

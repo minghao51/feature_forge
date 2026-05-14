@@ -11,7 +11,6 @@ import json
 import re
 import time
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import Any, ClassVar
 
 import pandas as pd
@@ -20,6 +19,7 @@ from feature_forge.config import Settings
 from feature_forge.exceptions import AgentError
 from feature_forge.llm.base import LLMClient
 from feature_forge.observability.structlog_config import get_logger
+from feature_forge.prompts import get_registry
 from feature_forge.types import AgentName, FeatureSpec
 
 logger = get_logger(__name__)
@@ -84,11 +84,11 @@ class BaseFeatureAgent(Agent):
     """Base class for feature agents with common LLM interaction pattern.
 
     Subclasses must define:
-    - `prompt_filename`: Name of the prompt file in prompts/
+    - `prompt_key`: Registry key (= yaml filename without extension)
     - `agent_name`: Unique agent identifier string
     """
 
-    prompt_filename: str = ""
+    prompt_key: str = ""
     agent_name: str = ""
 
     def __init__(
@@ -97,10 +97,7 @@ class BaseFeatureAgent(Agent):
         llm_client: LLMClient,
     ) -> None:
         super().__init__(name=AgentName(self.agent_name), config=config, llm_client=llm_client)
-        prompt_path = Path(__file__).parent / "../prompts" / self.prompt_filename
-        self._system_prompt = (
-            prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
-        )
+        self._system_prompt = get_registry().get(self.prompt_key).system
 
     @property
     def system_prompt(self) -> str:
@@ -136,12 +133,14 @@ class BaseFeatureAgent(Agent):
 
         return "\n\n".join(parts)
 
-    _column_desc_cache: ClassVar[dict[tuple[int, int, int], dict[str, dict[str, Any]]]] = {}
+    _column_desc_cache: ClassVar[
+        dict[tuple[int, int, tuple[str, ...]], dict[str, dict[str, Any]]]
+    ] = {}
     _CACHE_MAX_SIZE: ClassVar[int] = 64
 
     @staticmethod
     def _infer_column_descriptions(X: pd.DataFrame) -> dict[str, dict[str, Any]]:
-        cache_key: tuple[int, int, int] = (X.shape[0], X.shape[1], hash(tuple(X.columns)))
+        cache_key: tuple[int, int, tuple[str, ...]] = (X.shape[0], X.shape[1], tuple(X.columns))
         cached = BaseFeatureAgent._column_desc_cache.get(cache_key)
         if cached is not None:
             return cached
@@ -189,16 +188,24 @@ class BaseFeatureAgent(Agent):
         )
         gen_t0 = time.perf_counter()
         try:
-            response = await self.llm_client.complete(
+            response = await self.llm_client.complete_json(
                 messages=messages,
+                schema_description=(
+                    '{"features":[{"base_columns":["col_a"],'
+                    '"derived_features":[{"name":"f","type":"numerical",'
+                    '"transform":"op","logic":"..."}]}]}'
+                ),
                 temperature=self.config.llm.temperature,
-                max_tokens=self.config.llm.max_tokens,
+                max_tokens=self.config.llm.agent_max_tokens,
             )
+            if not isinstance(response, (dict, list, str)):
+                raise AgentError(
+                    f"{self.name} expected JSON object/list/string, got {type(response).__name__}"
+                )
+            specs = self._parse_response(response)
         except Exception as exc:
             logger.error("agent_generate_error", agent=self.name, error=str(exc))
             raise AgentError(f"{self.name} LLM call failed: {exc}") from exc
-
-        specs = self._parse_response(response.content)
         latency_ms = round((time.perf_counter() - gen_t0) * 1000, 1)
         logger.info(
             "agent_generate_complete",
@@ -208,32 +215,38 @@ class BaseFeatureAgent(Agent):
         )
         return specs
 
-    def _parse_response(self, content: str) -> list[FeatureSpec]:
-        content = content.strip()
+    def _parse_response(self, content: str | dict[str, Any] | list[Any]) -> list[FeatureSpec]:
+        if isinstance(content, (dict, list)):
+            data = content
+        else:
+            content = content.strip()
+            json_str = content
+            if content.startswith("```"):
+                json_str = re.sub(r"^```(?:json)?\s*", "", content)
+                json_str = re.sub(r"\s*```$", "", json_str).strip()
 
-        json_str = content
-        if content.startswith("```"):
-            json_str = re.sub(r"^```(?:json)?\s*", "", content)
-            json_str = re.sub(r"\s*```$", "", json_str).strip()
-
-        try:
-            data = json.loads(json_str)
-        except json.JSONDecodeError:
-            bracket_match = re.search(r"\[.*\]", content, re.DOTALL)
-            if bracket_match:
-                try:
-                    data = json.loads(bracket_match.group())
-                except json.JSONDecodeError as exc:
+            try:
+                data = json.loads(json_str)
+            except json.JSONDecodeError:
+                bracket_match = re.search(r"\[.*\]", content, re.DOTALL)
+                if bracket_match:
+                    try:
+                        data = json.loads(bracket_match.group())
+                    except json.JSONDecodeError as exc:
+                        logger.error(
+                            "agent_parse_error", agent=self.name, response_preview=content[:200]
+                        )
+                        raise AgentError(f"{self.name} invalid JSON: {exc}") from exc
+                else:
                     logger.error(
                         "agent_parse_error", agent=self.name, response_preview=content[:200]
                     )
-                    raise AgentError(f"{self.name} invalid JSON: {exc}") from exc
-            else:
-                logger.error("agent_parse_error", agent=self.name, response_preview=content[:200])
-                raise AgentError(f"{self.name} could not extract JSON from response") from None
+                    raise AgentError(f"{self.name} could not extract JSON from response") from None
 
+        if isinstance(data, dict):
+            data = data.get("features", data)
         if not isinstance(data, list):
-            raise AgentError(f"{self.name} expected JSON list, got {type(data).__name__}")
+            raise AgentError(f"{self.name} expected JSON list/object, got {type(data).__name__}")
 
         specs: list[FeatureSpec] = []
         for item in data:

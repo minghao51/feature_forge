@@ -8,5 +8,5 @@ from feature_forge.agents.base import BaseFeatureAgent
 class UnaryFeatureAgent(BaseFeatureAgent):
     """Generates derived features from single columns."""
 
-    prompt_filename = "unary.txt"
+    prompt_key = "unary"
     agent_name = "unary"

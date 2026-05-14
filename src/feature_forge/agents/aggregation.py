@@ -8,5 +8,5 @@ from feature_forge.agents.base import BaseFeatureAgent
 class AggregationConstructAgent(BaseFeatureAgent):
     """Generates aggregation-based features."""
 
-    prompt_filename = "aggregation.txt"
+    prompt_key = "aggregation"
     agent_name = "aggregation"

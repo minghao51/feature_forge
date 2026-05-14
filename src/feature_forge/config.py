@@ -52,9 +52,13 @@ class LLMConfig(BaseModel):
     api_key: SecretStr | None = None
     base_url: str | None = None
     temperature: float = 0.2
-    max_tokens: int = 4096
+    max_tokens: int = 32768
+    agent_max_tokens: int = 8192
+    codegen_max_tokens: int = 16384
     cache_responses: bool = True
     max_concurrent_calls: int = 3
+    thinking_enabled: bool = False
+    reasoning_effort: Literal["low", "medium", "high", "max"] = "medium"
 
     @field_validator("base_url", "api_key", mode="before")
     @classmethod
@@ -74,6 +78,13 @@ class LLMConfig(BaseModel):
     def _validate_max_tokens(cls, v: int) -> int:
         if v < 1:
             raise ValueError(f"max_tokens must be >= 1, got {v}")
+        return v
+
+    @field_validator("agent_max_tokens", "codegen_max_tokens")
+    @classmethod
+    def _validate_split_max_tokens(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError(f"token limits must be >= 1, got {v}")
         return v
 
 
