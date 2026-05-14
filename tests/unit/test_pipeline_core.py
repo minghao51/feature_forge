@@ -182,3 +182,11 @@ class TestCorePipeline:
         result = CorePipeline._eval_single_feature(evaluator, X, y, feat_df, "f1", 0.5)
         assert isinstance(result, Exception)
         assert "bad feature" in str(result)
+
+
+class TestColumnDedup:
+    def test_dedup_keeps_first_occurrence(self):
+        df = pd.DataFrame([[1, 3, 5], [2, 4, 6]], columns=["a", "b", "a"])
+        deduped = df.loc[:, ~df.columns.duplicated()]
+        assert list(deduped.columns) == ["a", "b"]
+        assert deduped["a"].tolist() == [1, 2]

@@ -266,13 +266,22 @@ class TestInferColumnDescriptions:
         desc = BaseFeatureAgent._infer_column_descriptions(df)
         assert desc == {}
 
+    def test_cache_key_uses_tuple_not_hash(self):
+        from feature_forge.agents.base import BaseFeatureAgent
+
+        df = pd.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]})
+        _ = BaseFeatureAgent._infer_column_descriptions(df)
+        cache = BaseFeatureAgent._column_desc_cache
+        expected_key = (2, 2, ("a", "b"))
+        assert any(k == expected_key for k in cache), f"Expected key {expected_key} in cache"
+
 
 class TestBuildUserPromptAutoEnrichment:
     def test_empty_description_auto_enriched(self):
         from feature_forge.agents.base import BaseFeatureAgent
 
         class DummyAgent(BaseFeatureAgent):
-            prompt_filename = "unary.txt"
+            prompt_key = "unary"
             agent_name = "dummy"
 
         agent = DummyAgent(config=Settings(), llm_client=FakeLLM())
@@ -287,7 +296,7 @@ class TestBuildUserPromptAutoEnrichment:
         from feature_forge.agents.base import BaseFeatureAgent
 
         class DummyAgent(BaseFeatureAgent):
-            prompt_filename = "unary.txt"
+            prompt_key = "unary"
             agent_name = "dummy"
 
         agent = DummyAgent(config=Settings(), llm_client=FakeLLM())
@@ -493,8 +502,13 @@ class TestRouterAgentEdgeCases:
             def __init__(self):
                 self.model = "fake"
 
+            async def complete_json(
+                self, messages, schema_description="", temperature=0.2, max_tokens=4096
+            ):
+                return json.loads('{"agents":["unary","temporal"]}')
+
             async def complete(self, messages, **kwargs):
-                return LLMResponse(content='["unary", "temporal"]', model="fake")
+                return LLMResponse(content='{"agents":["unary","temporal"]}', model="fake")
 
         config = Settings()
         config.router.strategy = "llm"
@@ -515,6 +529,11 @@ class TestRouterAgentEdgeCases:
         class FakeLLM:
             def __init__(self):
                 self.model = "fake"
+
+            async def complete_json(
+                self, messages, schema_description="", temperature=0.2, max_tokens=4096
+            ):
+                raise Exception("not json")
 
             async def complete(self, messages, **kwargs):
                 return LLMResponse(content="not json", model="fake")
@@ -593,3 +612,13 @@ class TestRouterAgentEdgeCases:
             round_idx=0, description=None, task_description="Predict churn"
         )
         assert "Task Description: Predict churn" in ctx
+
+
+class TestLLMConfig:
+    def test_max_tokens_default_matches_yaml(self):
+        from feature_forge.config import LLMConfig
+
+        cfg = LLMConfig()
+        assert cfg.max_tokens == 32768, f"Expected 32768, got {cfg.max_tokens}"
+        assert cfg.agent_max_tokens == 8192, f"Expected 8192, got {cfg.agent_max_tokens}"
+        assert cfg.codegen_max_tokens == 16384, f"Expected 16384, got {cfg.codegen_max_tokens}"

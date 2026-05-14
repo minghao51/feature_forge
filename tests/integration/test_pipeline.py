@@ -176,8 +176,8 @@ def generate_features(df):
     result['sum_ab'] = df['a'] + df['b']
     return result
 """
-        # 6 agents + 1 code generator = 7 calls; provide json for agents, code for generator
-        responses = [json_resp] * 6 + [code]
+        # 6 agents + 6 code generators (per-agent batching) = 12 calls
+        responses = [json_resp] * 6 + [code] * 6
         llm = FakeLLM(responses)
         config = Settings(
             task="classification",
@@ -218,7 +218,7 @@ def generate_features(df):
     result['const_feature'] = 1
     return result
 """
-        responses = [json_resp] * 6 + [code]
+        responses = [json_resp] * 6 + [code] * 6
         llm = FakeLLM(responses)
         config = Settings(
             task="classification", metric="auc", n_rounds=1, evaluation={"cv_folds": 2}
@@ -248,7 +248,7 @@ def generate_features(df):
     result['sum_ab'] = df['a'] + df['b']
     return result
 """
-        llm = FakeLLM([json_resp] * 6 + [code])
+        llm = FakeLLM([json_resp] * 6 + [code] * 6)
         fe = FeatureForge(
             llm_client=llm,
             config=Settings(
@@ -284,7 +284,7 @@ def generate_features(df):
     result['double_a'] = df['a'] * 2
     return result
 """
-        llm = FakeLLM([json_resp] * 6 + [code])
+        llm = FakeLLM([json_resp] * 6 + [code] * 6)
         fe = FeatureForge(
             llm_client=llm,
             config=Settings(
@@ -345,14 +345,8 @@ def generate_features(df):
     @pytest.mark.asyncio
     async def test_no_router_pipeline(self, sample_data):
         X, y = sample_data
-        code = """
-import pandas as pd
-
-def generate_features(df):
-    return pd.DataFrame(index=df.index)
-"""
-        # 6 agents + 1 code generator
-        llm = FakeLLM(["[]"] * 6 + [code])
+        # 6 agents return empty specs, so no code gen calls needed
+        llm = FakeLLM(["[]"] * 6)
         config = Settings(
             task="classification", metric="auc", n_rounds=1, evaluation={"cv_folds": 2}
         )
@@ -434,7 +428,7 @@ def generate_features(df):
     result['sum_ab'] = df['a'] + df['b']
     return result
 """
-        llm = FakeLLM([json_resp] * 6 + [code])
+        llm = FakeLLM([json_resp] * 6 + [code] * 6)
         config = Settings(
             task="classification",
             metric="auc",

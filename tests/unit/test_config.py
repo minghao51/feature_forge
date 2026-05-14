@@ -22,7 +22,9 @@ class TestLLMConfig:
         cfg = LLMConfig()
         assert cfg.model == "deepseek-chat"
         assert cfg.temperature == 0.2
-        assert cfg.max_tokens == 4096
+        assert cfg.max_tokens == 32768
+        assert cfg.agent_max_tokens == 8192
+        assert cfg.codegen_max_tokens == 16384
         assert cfg.cache_responses is True
 
     def test_temperature_validation(self):
@@ -34,6 +36,10 @@ class TestLLMConfig:
     def test_max_tokens_validation(self):
         with pytest.raises(ValidationError, match="max_tokens"):
             LLMConfig(max_tokens=0)
+        with pytest.raises(ValidationError, match="token limits"):
+            LLMConfig(agent_max_tokens=0)
+        with pytest.raises(ValidationError, match="token limits"):
+            LLMConfig(codegen_max_tokens=0)
 
     def test_api_key_secret(self):
         cfg = LLMConfig(api_key="sk-secret")
