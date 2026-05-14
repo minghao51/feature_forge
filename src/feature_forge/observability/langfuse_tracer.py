@@ -10,7 +10,7 @@ Provides decorators and utilities for automatic tracing of:
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from feature_forge.config import Settings
 
@@ -43,7 +43,7 @@ def _get_langfuse_observe() -> Callable[..., Any]:
         from langfuse import observe
     except ImportError as exc:
         raise ImportError("langfuse not installed. Run: uv pip install langfuse") from exc
-    return observe  # type: ignore[no-any-return]
+    return cast(Callable[..., Any], observe)
 
 
 def trace_agent(name: str | None = None) -> Callable[..., Any]:
@@ -55,11 +55,14 @@ def trace_agent(name: str | None = None) -> Callable[..., Any]:
             ...
     """
     observe = _get_langfuse_observe()
-    return observe(  # type: ignore[no-any-return]
-        name=name or "agent",
-        as_type="agent",
-        capture_input=True,
-        capture_output=True,
+    return cast(
+        Callable[..., Any],
+        observe(
+            name=name or "agent",
+            as_type="agent",
+            capture_input=True,
+            capture_output=True,
+        ),
     )
 
 
@@ -72,11 +75,14 @@ def trace_generation(name: str | None = None) -> Callable[..., Any]:
             ...
     """
     observe = _get_langfuse_observe()
-    return observe(  # type: ignore[no-any-return]
-        name=name or "generation",
-        as_type="generation",
-        capture_input=True,
-        capture_output=True,
+    return cast(
+        Callable[..., Any],
+        observe(
+            name=name or "generation",
+            as_type="generation",
+            capture_input=True,
+            capture_output=True,
+        ),
     )
 
 
@@ -89,11 +95,14 @@ def trace_tool(name: str | None = None) -> Callable[..., Any]:
             ...
     """
     observe = _get_langfuse_observe()
-    return observe(  # type: ignore[no-any-return]
-        name=name or "tool",
-        as_type="tool",
-        capture_input=True,
-        capture_output=True,
+    return cast(
+        Callable[..., Any],
+        observe(
+            name=name or "tool",
+            as_type="tool",
+            capture_input=True,
+            capture_output=True,
+        ),
     )
 
 
@@ -104,9 +113,12 @@ def trace_pipeline(name: str = "pipeline") -> Callable[..., Any]:
     attach to.
     """
     observe = _get_langfuse_observe()
-    return observe(  # type: ignore[no-any-return]
-        name=name,
-        as_type="span",
-        capture_input=True,
-        capture_output=True,
+    return cast(
+        Callable[..., Any],
+        observe(
+            name=name,
+            as_type="span",
+            capture_input=True,
+            capture_output=True,
+        ),
     )

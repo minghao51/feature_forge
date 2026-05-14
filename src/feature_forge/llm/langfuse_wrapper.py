@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from feature_forge.llm.base import LLMClient, LLMResponse
+from feature_forge.llm.base import JSONValue, LLMClient, LLMResponse
 from feature_forge.llm.cache import DiskCache
 from feature_forge.observability.langfuse_tracer import trace_generation
 from feature_forge.observability.structlog_config import get_logger
@@ -132,7 +132,7 @@ class LangfuseLLMWrapper(LLMClient):
         schema_description: str,
         temperature: float = 0.2,
         max_tokens: int = 4096,
-    ) -> dict[str, Any]:
+    ) -> JSONValue:
         return await self._client.complete_json(
             messages=messages,
             schema_description=schema_description,

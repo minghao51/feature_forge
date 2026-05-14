@@ -25,11 +25,11 @@ def add_open_telemetry_spans(
     This allows correlating logs with distributed traces.
     """
     try:
-        from opentelemetry import trace
+        from opentelemetry.trace import get_current_span
     except ImportError:
         return event_dict
 
-    span = trace.get_current_span()
+    span = get_current_span()
     if not span.is_recording():
         event_dict["span"] = None
         return event_dict

@@ -10,7 +10,7 @@ import json
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
 from pydantic import SecretStr
 
@@ -21,6 +21,8 @@ if TYPE_CHECKING:
     from feature_forge.config import RetryConfig
 
 logger = get_logger(__name__)
+
+JSONValue: TypeAlias = dict[str, "JSONValue"] | list["JSONValue"] | str | int | float | bool | None
 
 
 class LLMResponse:
@@ -34,6 +36,7 @@ class LLMResponse:
         completion_tokens: int = 0,
         total_tokens: int = 0,
         raw_response: Any | None = None,
+        reasoning_content: str | None = None,
     ) -> None:
         self.content = content
         self.model = model
@@ -41,6 +44,7 @@ class LLMResponse:
         self.completion_tokens = completion_tokens
         self.total_tokens = total_tokens
         self.raw_response = raw_response
+        self.reasoning_content = reasoning_content
 
     def __repr__(self) -> str:
         return (
@@ -63,7 +67,12 @@ class LLMClient(ABC):
     """
 
     def __init__(
-        self, model: str, api_key: str | SecretStr | None, base_url: str | None = None
+        self,
+        model: str,
+        api_key: str | SecretStr | None,
+        base_url: str | None = None,
+        thinking_enabled: bool = False,
+        reasoning_effort: str = "medium",
     ) -> None:
         self.model = model
         self._api_key_secret: SecretStr | None = None
@@ -73,6 +82,8 @@ class LLMClient(ABC):
             self._api_key_secret = SecretStr(api_key)
         self.base_url = base_url
         self._retry_config: RetryConfig | None = None
+        self.thinking_enabled = thinking_enabled
+        self.reasoning_effort = reasoning_effort
 
     @property
     def api_key(self) -> str | None:
@@ -115,6 +126,10 @@ class LLMClient(ABC):
         """Extract text content from the provider's raw response."""
         raise NotImplementedError
 
+    def _extract_reasoning_content(self, raw_response: Any) -> str | None:
+        """Extract reasoning/thinking content if the provider supports it."""
+        return None
+
     def _extract_usage(self, raw_response: Any) -> tuple[int, int, int]:
         """Extract (prompt_tokens, completion_tokens, total_tokens) from raw response."""
         raise NotImplementedError
@@ -154,7 +169,7 @@ class LLMClient(ABC):
         schema_description: str,
         temperature: float = 0.2,
         max_tokens: int = 4096,
-    ) -> dict[str, Any]:
+    ) -> JSONValue:
         """Send a completion request with JSON mode and automatic retry.
 
         Args:
@@ -165,7 +180,7 @@ class LLMClient(ABC):
             max_tokens: Maximum tokens to generate.
 
         Returns:
-            Parsed JSON dict from the model response.
+            Parsed JSON value from the model response.
 
         Raises:
             LLMError: On API failure or invalid JSON after all retries.
@@ -214,6 +229,7 @@ class LLMClient(ABC):
             raise LLMError(f"{self.provider_name} API error: {exc}") from exc
 
         content = self._extract_content(raw)
+        reasoning_content = self._extract_reasoning_content(raw)
         prompt_tokens, completion_tokens, total_tokens = self._extract_usage(raw)
         latency_ms = round((time.perf_counter() - t0) * 1000, 1)
 
@@ -236,6 +252,7 @@ class LLMClient(ABC):
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
             raw_response=raw,
+            reasoning_content=reasoning_content,
         )
 
     async def _do_complete_json(
@@ -244,7 +261,7 @@ class LLMClient(ABC):
         schema_description: str,
         temperature: float = 0.2,
         max_tokens: int = 4096,
-    ) -> dict[str, Any]:
+    ) -> JSONValue:
         enhanced = self._inject_json_schema(messages, schema_description)
         json_kwargs = self._json_mode_kwargs()
         response = await self._do_complete(
@@ -282,7 +299,7 @@ class LLMClient(ABC):
             enhanced.insert(0, {"role": "system", "content": schema_instruction})
         return enhanced
 
-    def _parse_json_response(self, content: str) -> dict[str, Any]:
+    def _parse_json_response(self, content: str) -> JSONValue:
         """Parse JSON from LLM content with error handling."""
         content = content.strip()
         if not content:
@@ -291,7 +308,7 @@ class LLMClient(ABC):
                 "Try rephrasing the prompt or increasing max_tokens."
             )
         try:
-            return json.loads(content)  # type: ignore[no-any-return]
+            return cast(JSONValue, json.loads(content))
         except json.JSONDecodeError as exc:
             logger.error(
                 "llm_json_parse_error",

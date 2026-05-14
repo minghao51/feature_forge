@@ -60,11 +60,17 @@ def create_llm_client(config: LLMConfig, retry_config: RetryConfig | None = None
     provider_cls = getattr(mod, class_name)
 
     api_key = config.api_key.get_secret_value() if config.api_key else None
-    client = provider_cls(
-        model=config.model,
-        api_key=api_key,
-        base_url=config.base_url or default_url,
-    )
+
+    init_kwargs: dict[str, object] = {
+        "model": config.model,
+        "api_key": api_key,
+        "base_url": config.base_url or default_url,
+    }
+    if provider == "deepseek":
+        init_kwargs["thinking_enabled"] = config.thinking_enabled
+        init_kwargs["reasoning_effort"] = config.reasoning_effort
+
+    client = provider_cls(**init_kwargs)
 
     if retry_config is not None:
         client.set_retry_config(retry_config)
