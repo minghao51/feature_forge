@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import json
 import subprocess
 import sys
-import tempfile
 import time
-from pathlib import Path
+from collections import defaultdict
 from typing import Any
 
 import pandas as pd
@@ -25,6 +25,7 @@ from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.exceptions import PipelineError
 from feature_forge.llm.base import LLMClient
 from feature_forge.observability.structlog_config import get_logger
+from feature_forge.prompts import get_registry
 from feature_forge.types import FeatureSpec
 from feature_forge.utils import strip_markdown_fences
 
@@ -34,22 +35,31 @@ logger = get_logger(__name__)
 class CodeGenerator:
     """Generates pandas code from feature specifications."""
 
-    def __init__(self, llm_client: LLMClient) -> None:
+    def __init__(self, llm_client: LLMClient, max_tokens: int = 32768) -> None:
         self.llm_client = llm_client
-        prompt_path = Path(__file__).parent / "../prompts/code_generation.txt"
-        self._system_prompt = (
-            prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
-        )
+        self._system_prompt = get_registry().get("code_generation").system
+        self._max_tokens = max_tokens
 
     async def generate_code(
-        self, specs: list[FeatureSpec], error_feedback: str | None = None
+        self,
+        specs: list[FeatureSpec],
+        schema: dict[str, Any] | None = None,
+        error_feedback: str | None = None,
     ) -> str:
         """Generate Python code for a list of feature specs.
 
         Includes AST validation and a single retry on syntax errors.
         """
         specs_dump = [s.model_dump() if hasattr(s, "model_dump") else s for s in specs]
-        user_prompt = f"Please generate code for the following features:\n{specs_dump}"
+        specs_json = json.dumps(specs_dump, indent=2, ensure_ascii=False)
+
+        parts: list[str] = []
+        if schema:
+            schema_json = json.dumps(schema, indent=2, ensure_ascii=False)
+            parts.append(f"Data schema:\n{schema_json}")
+        parts.append(f"Generate code for features:\n{specs_json}")
+        user_prompt = "\n\n".join(parts)
+
         if error_feedback:
             user_prompt += f"\n\n{error_feedback}"
 
@@ -60,11 +70,10 @@ class CodeGenerator:
                     {"role": "user", "content": user_prompt},
                 ],
                 temperature=0.2,
-                max_tokens=4096,
+                max_tokens=self._max_tokens,
             )
             code = strip_markdown_fences(response.content)
 
-            # Validate with AST
             error_msg = _validate_code_ast(code)
             if error_msg is None:
                 return code
@@ -134,30 +143,20 @@ def _validate_code_ast(code: str) -> str | None:
 
     # Ruff lint: catches undefined names (bare 'f1' instead of df['f1'])
     try:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as tmp:
-            tmp.write(code)
-            tmp_path = tmp.name
         result = subprocess.run(
-            [sys.executable, "-m", "ruff", "check", "--select", "F821,F823", tmp_path],
+            [sys.executable, "-m", "ruff", "check", "--select", "F821,F823", "-"],
+            input=code,
             capture_output=True,
             text=True,
             timeout=10,
         )
         if result.returncode != 0 and result.stdout.strip():
-            # Extract first error line
             first_error = (
                 result.stdout.strip().split("\n")[0] if result.stdout.strip() else "lint error"
             )
             return f"Undefined name or reference: {first_error}"
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         pass  # ruff not available, skip lint
-    finally:
-        try:
-            import os as _os
-
-            _os.unlink(tmp_path)
-        except (OSError, NameError):
-            pass
 
     return None
 
@@ -188,7 +187,9 @@ class CorePipeline:
             timeout_seconds=config.evaluation.sandbox_timeout_seconds,
             max_memory_mb=config.evaluation.sandbox_max_memory_mb,
         )
-        self.code_generator = code_generator or CodeGenerator(llm_client)
+        self.code_generator = code_generator or CodeGenerator(
+            llm_client, max_tokens=config.llm.codegen_max_tokens
+        )
 
     async def run(
         self,
@@ -273,63 +274,114 @@ class CorePipeline:
                 "generated_code": "",
             }
 
-        # Step 2-3: Generate code + execute in sandbox (with retry on failure)
-        logger.info("code_generation_start", num_specs=len(all_specs))
+        # Step 2-3: Per-agent code generation + sandbox execution
+        schema: dict[str, Any] = {
+            "shape": list(X_train.shape),
+            "columns": {
+                col: {
+                    "dtype": str(X_train[col].dtype),
+                    "nullable": bool(X_train[col].isna().any()),
+                }
+                for col in X_train.columns
+            },
+            "index_type": type(X_train.index).__name__,
+            "index_length": len(X_train),
+        }
+
+        specs_by_agent: dict[str, list[FeatureSpec]] = defaultdict(list)
+        for spec in all_specs:
+            specs_by_agent[spec.agent_name].append(spec)
+
+        logger.info(
+            "code_generation_start", num_specs=len(all_specs), num_agents=len(specs_by_agent)
+        )
         code_gen_t0 = time.perf_counter()
-        code = ""
-        features_train = pd.DataFrame()
-        last_error: str | None = None
 
-        for code_attempt in range(3):
-            error_feedback = (
-                f"Previous attempt failed with: {last_error}. Fix the error and regenerate."
-                if last_error
-                else None
-            )
-            try:
-                code = await self.code_generator.generate_code(
-                    all_specs, error_feedback=error_feedback
-                )
-            except Exception as exc:
-                raise PipelineError(f"Code generation failed: {exc}") from exc
-
-            sandbox_t0 = time.perf_counter()
-            try:
-                features_train = self.sandbox.execute(code, X_train)
-                break  # success
-            except Exception as exc:
-                last_error = str(exc)
-                if code_attempt < 2:
+        all_code_parts: list[tuple[str, str]] = []
+        for agent_name, agent_specs in specs_by_agent.items():
+            last_error: str | None = None
+            for _ in range(2):
+                try:
+                    code = await self.code_generator.generate_code(
+                        agent_specs, schema=schema, error_feedback=last_error
+                    )
+                except Exception as exc:
+                    last_error = str(exc)
                     logger.warning(
-                        "sandbox_execution_retry",
-                        attempt=code_attempt,
+                        "agent_code_gen_failed",
+                        agent=agent_name,
                         error=last_error[:200],
                     )
-                else:
-                    raise PipelineError(
-                        f"Sandbox execution failed after 3 attempts: {last_error}"
-                    ) from exc
+                    continue
+                all_code_parts.append((agent_name, code))
+                break
 
-        if features_train.empty:
-            raise PipelineError(f"Sandbox execution failed after 3 attempts: {last_error}")
+        features_train_parts: list[pd.DataFrame] = []
+        combined_code_parts: list[str] = []
+
+        for agent_name, code in all_code_parts:
+            sandbox_t0 = time.perf_counter()
+            try:
+                part = self.sandbox.execute(code, X_train)
+                features_train_parts.append(part)
+                combined_code_parts.append(code)
+                logger.info(
+                    "agent_sandbox_complete",
+                    agent=agent_name,
+                    result_shape=part.shape,
+                    latency_ms=round((time.perf_counter() - sandbox_t0) * 1000, 1),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "agent_code_execution_failed",
+                    agent=agent_name,
+                    error=str(exc)[:200],
+                )
+                continue
+
+        code = "\n\n".join(combined_code_parts)
+
+        if not features_train_parts:
+            raise PipelineError("All agent code executions failed — no features generated")
+
+        features_train = (
+            pd.concat(features_train_parts, axis=1)
+            if len(features_train_parts) > 1
+            else features_train_parts[0]
+        )
+        dup_cols = features_train.columns[features_train.columns.duplicated()].tolist()
+        if dup_cols:
+            logger.warning("column_dedup", duplicated_columns=dup_cols)
+        features_train = features_train.loc[:, ~features_train.columns.duplicated()]
 
         logger.info(
             "code_generation_complete",
             num_specs=len(all_specs),
+            num_agents=len(specs_by_agent),
             code_length=len(code),
             latency_ms=round((time.perf_counter() - code_gen_t0) * 1000, 1),
-        )
-        logger.info(
-            "sandbox_execution_complete",
-            result_shape=features_train.shape,
-            latency_ms=round((time.perf_counter() - sandbox_t0) * 1000, 1),
         )
 
         features_test = pd.DataFrame()
         if X_test is not None:
-            try:
-                features_test = self.sandbox.execute(code, X_test)
-            except Exception:
+            features_test_parts: list[pd.DataFrame] = []
+            for _agent_name, agent_code in all_code_parts:
+                try:
+                    part = self.sandbox.execute(agent_code, X_test)
+                    features_test_parts.append(part)
+                except Exception:
+                    continue
+            if features_test_parts:
+                features_test = (
+                    pd.concat(features_test_parts, axis=1)
+                    if len(features_test_parts) > 1
+                    else features_test_parts[0]
+                )
+                test_dup = features_test.columns[features_test.columns.duplicated()].tolist()
+                if test_dup:
+                    logger.warning("column_dedup_test", duplicated_columns=test_dup)
+                features_test = features_test.loc[:, ~features_test.columns.duplicated()]
+            else:
                 features_test = pd.DataFrame(index=X_test.index)
 
         # Ensure alignment
