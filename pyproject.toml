@@ -46,6 +46,7 @@ dependencies = [
     "pyarrow>=23.0.1",
     "nest-asyncio>=1.6.0",
     "seaborn>=0.13.2",
+    "openfe>=0.0.12",
 ]
 
 [project.optional-dependencies]

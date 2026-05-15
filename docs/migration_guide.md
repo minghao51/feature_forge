@@ -56,9 +56,8 @@ response = await client.complete(messages=[...])
 
 **After:**
 ```python
-from feature_forge.agents import AgentRegistry, UnaryFeatureAgent
+from feature_forge.methods.malmas.agents import AgentRegistry, UnaryFeatureAgent
 
-# Discover all agents
 agents = AgentRegistry.get_builtin_agents()
 agent = agents["unary"](config, llm_client)
 ```
@@ -73,7 +72,8 @@ memory = AgentMemory("unary", "project", "cache_dir", 0)
 
 **After:**
 ```python
-from feature_forge.memory import AgentMemory
+from feature_forge.methods.malmas.memory import AgentMemory
+
 memory = AgentMemory("unary", "memory_files/unary_memory.json")
 ```
 
@@ -108,6 +108,75 @@ tracker = WandBTracker(project="feature-forge")
 runner = ExperimentRunner(tracker=tracker)
 ```
 
+## Baseline → Method Migration (v0.1 → v0.2)
+
+The `baselines/` directory was restructured into `methods/` with each FE method as a self-contained sub-package.
+
+### Class Renames
+
+| Old | New |
+|-----|-----|
+| `Baseline` | `BaseMethod` |
+| `BaselineProtocol` | `MethodProtocol` |
+| `BaselineRegistry` | `MethodRegistry` |
+| `OpenFEBaseline` | `OpenFEMethod` |
+| `CAAFEBaseline` | `CAAFEMethod` |
+| `LLMFEBaseline` | `LLMFEMethod` |
+| `MalmusBaseline` | `MalmusMethod` |
+
+### Import Path Changes
+
+| Old | New |
+|-----|-----|
+| `feature_forge.baselines` | `feature_forge.methods` |
+| `feature_forge.baselines.base` | `feature_forge.methods.base` |
+| `feature_forge.baselines.openfe` | `feature_forge.methods.openfe.method` |
+| `feature_forge.baselines.caafe` | `feature_forge.methods.caafe.method` |
+| `feature_forge.baselines.llmfe` | `feature_forge.methods.llmfe.method` |
+| `feature_forge.baselines.malmus` | `feature_forge.methods.malmus.method` |
+| `feature_forge.agents` | `feature_forge.methods.malmas.agents` |
+| `feature_forge.agents.base` | `feature_forge.methods.malmas.agents.base` |
+| `feature_forge.agents.router` | `feature_forge.methods.malmas.agents.router` |
+| `feature_forge.memory` | `feature_forge.methods.malmas.memory` |
+| `feature_forge.pipeline` | `feature_forge.methods.malmas.pipeline` |
+
+### Entry Point Group Changes
+
+| Old | New |
+|-----|-----|
+| `feature_forge.baselines` | `feature_forge.methods` |
+| `feature_forge.agents` | `feature_forge.methods.malmas.agents` |
+
+### ExperimentalPlatform API Changes
+
+```python
+# Before
+platform.run(datasets=["titanic"], baselines=["malmus"], models=["xgboost"])
+platform.register_baseline("custom", MyBaseline)
+platform.list_baselines()
+
+# After
+platform.run(datasets=["titanic"], methods=["malmus"], models=["xgboost"])
+platform.register_method("custom", MyMethod)
+platform.list_methods()
+```
+
+### Prompt Migration
+
+Agent prompts migrated from `.txt` files to YAML-backed registry:
+
+```python
+# Before: loaded from file path relative to package
+prompt_path = Path(__file__).parent / "prompts/unary.txt"
+
+# After: loaded from YAML registry
+from feature_forge.prompts import get_registry
+prompt = get_registry().get("unary")
+system_text = prompt.system
+```
+
+Prompt YAML files live in `config/prompts/` (e.g., `config/prompts/unary.yaml`).
+
 ## Breaking Changes
 
 1. **Global config removed** → Use `Settings()` instances
@@ -116,3 +185,7 @@ runner = ExperimentRunner(tracker=tracker)
 4. **LLM interface** → Now async with `LLMClient.complete()`
 5. **Metrics** → Now in `feature_forge.evaluation.metrics`
 6. **API Key Configuration** → Use `FF_LLM__API_KEY` for all providers, or set provider-specific keys directly. Keys are passed to LLM clients via config, not auto-propagated to environment variables.
+7. **Baseline → Method rename** — `Baseline` → `BaseMethod`, `BaselineRegistry` → `MethodRegistry`, all `*Baseline` → `*Method`
+8. **Import paths restructured** — `agents/`, `baselines/`, `memory/`, `pipeline/` merged into `methods/` namespace
+9. **Entry point groups renamed** — `feature_forge.baselines` → `feature_forge.methods`, `feature_forge.agents` → `feature_forge.methods.malmas.agents`
+10. **ExperimentalPlatform API** — `baselines=` → `methods=`, `list_baselines()` → `list_methods()`, `register_baseline()` → `register_method()`

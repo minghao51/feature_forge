@@ -82,3 +82,5 @@ nav:
       - 01 Getting Started: notebooks/01_getting_started.ipynb
       - 02 Pipeline Deep Dive: notebooks/02_pipeline_deep_dive.ipynb
       - 03 Benchmarks & Artifacts: notebooks/03_benchmarks_and_artifacts.ipynb
+      - 04 Custom Method: notebooks/04_custom_method.ipynb
+      - 05 Methods Deep Dive: notebooks/05_methods_deep_dive.ipynb

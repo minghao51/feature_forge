@@ -42,19 +42,41 @@ runner = ExperimentRunner()
 results = runner.run(matrix.generate(), run_experiment)
 ```
 
+### Custom Method
+
+```python
+from feature_forge.methods.base import BaseMethod
+
+class MyMethod(BaseMethod):
+    def __init__(self):
+        super().__init__("my_method")
+
+    def fit(self, X_train, y_train):
+        return self
+
+    def transform(self, X):
+        return pd.DataFrame({"my_feature": X.iloc[:, 0] * 2}, index=X.index)
+```
+
+Register in `pyproject.toml`:
+```toml
+[project.entry-points."feature_forge.methods"]
+my_method = "my_package:MyMethod"
+```
+
 ### Custom Agent
 
 ```python
-from feature_forge.agents import Agent, BaseFeatureAgent
+from feature_forge.methods.malmas.agents import Agent, BaseFeatureAgent
 
 class MyAgent(BaseFeatureAgent):
-    prompt_filename = "my_prompt.txt"
+    prompt_filename = "my_prompt"
     agent_name = "my_agent"
 ```
 
 Register in `pyproject.toml`:
 ```toml
-[project.entry-points."feature_forge.agents"]
+[project.entry-points."feature_forge.methods.malmas.agents"]
 my_agent = "my_package:MyAgent"
 ```
 

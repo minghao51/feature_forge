@@ -63,6 +63,31 @@ cached_client = LangfuseLLMWrapper(client, cache=DiskCache())
 - `DeepSeekProvider`: DeepSeek API
 - `AnthropicProvider`: Claude API
 
+**`DeepSeekProvider` additional parameters:**
+- `thinking_enabled: bool = False` — Enable thinking/reasoning mode
+- `reasoning_effort: str = "medium"` — One of `"low"`, `"medium"`, `"high"`, `"max"`
+
+---
+
+### Prompt Registry
+
+YAML-driven prompt templates loaded from `config/prompts/*.yaml`.
+
+```python
+from feature_forge.prompts import get_registry
+
+registry = get_registry()
+prompt = registry.get("unary")
+print(prompt.system)
+print(prompt.description)
+```
+
+**`Prompt` model:**
+- `system: str` (required) — System prompt text
+- `description: str = ""` — Human-readable description
+
+**Available prompts:** `unary`, `cross_compositional`, `aggregation`, `temporal`, `local_transform`, `local_pattern`, `router`, `code_generation`
+
 ---
 
 ## Agent System
@@ -70,6 +95,12 @@ cached_client = LangfuseLLMWrapper(client, cache=DiskCache())
 ### `Agent`
 
 Abstract base for feature generation agents.
+
+```python
+from feature_forge.methods.malmas.agents import Agent, AgentRegistry
+```
+
+Agents are MALMAS-specific and discovered via the `feature_forge.methods.malmas.agents` entry-point group.
 
 **Built-in agents:**
 - `UnaryFeatureAgent`: Single-column transformations
@@ -99,12 +130,55 @@ Per-agent 3-tier memory:
 - **Conceptual**: LLM-summarized rules
 
 ```python
-from feature_forge.memory import AgentMemory
+from feature_forge.methods.malmas.memory import AgentMemory
 
 memory = AgentMemory("unary", "memory_files/unary.json")
 memory.record_procedure(["age"], "log", "age_log", "numerical", "log transform", 0)
 memory.record_feedback("age_log", "auc", 0.05, True, 0, ["age"], "numerical")
 memory.save()
+```
+
+---
+
+## Methods
+
+### `MethodProtocol`
+
+```python
+from feature_forge.methods.base import MethodProtocol
+```
+
+Runtime-checkable protocol. Any class with `name`, `fit()`, `transform()`, `fit_transform()`, `generated_scripts`, `feature_metadata`, `get_artifacts()` satisfies it — no imports needed.
+
+### `BaseMethod`
+
+```python
+from feature_forge.methods.base import BaseMethod
+```
+
+Abstract base inheriting `ArtifactExporter`. Constructor takes `name` and optional `artifact_config`. Subclasses must implement `fit()` and `transform()`. Provides `fit_transform()`, `generated_scripts`, `get_artifacts()`.
+
+### `MethodRegistry`
+
+```python
+from feature_forge.methods import MethodRegistry
+```
+
+Entry-point discovery via `feature_forge.methods` group.
+
+- `get_builtin_methods()` → dict of 5 built-in methods
+- `get_all_methods()` → built-in + entry-point discovered
+- `discover()` → raw entry-point scan
+
+Built-in methods: `malmas`, `openfe`, `caafe`, `llmfe`, `malmus`
+
+```python
+from feature_forge.methods import MethodRegistry
+
+methods = MethodRegistry.get_builtin_methods()
+for name, cls in methods.items():
+    print(f'{name}: {cls.__name__}')
+# malmas: MALMASMethod, openfe: OpenFEMethod, caafe: CAAFEMethod, llmfe: LLMFEMethod, malmus: MalmusMethod
 ```
 
 ---
@@ -176,22 +250,24 @@ reporter = Reporter(results)
 print(reporter.to_markdown())
 ```
 
----
+### `ExperimentalPlatform`
 
-## Baselines
-
-### `Baseline`
-
-Abstract base for baseline methods.
-
-**Built-in baselines:**
-- `OpenFEBaseline`: OpenFE wrapper
-- `CAAFEBaseline`: CAAFE wrapper
-- `LLMFEBaseline`: Simple LLM-based FE
+High-level experiment runner.
 
 ```python
-from feature_forge.baselines import OpenFEBaseline, LLMFEBaseline
+from feature_forge import ExperimentalPlatform
 
-openfe = OpenFEBaseline()
-X_enhanced = openfe.fit_transform(X_train, y_train)
+platform = ExperimentalPlatform()
+results = platform.run(
+    datasets=["titanic"],
+    methods=["malmus", "caafe"],
+    models=["xgboost"],
+)
 ```
+
+**Methods:**
+- `run(datasets, methods, models)` — Run experiments (param: `methods=`, not `baselines=`)
+- `register_method(name, cls)` — Register a custom method where `cls` is `type[BaseMethod]`
+- `list_methods()` — List available methods
+
+Result dict key is `method` (not `baseline`).

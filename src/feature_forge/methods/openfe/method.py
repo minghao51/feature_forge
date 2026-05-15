@@ -43,7 +43,7 @@ class OpenFEMethod(BaseMethod):
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            self._ofe = OpenFE(n_jobs=self.n_jobs)
+            self._ofe = OpenFE()
             self._features = self._ofe.fit(data=X_train, label=y_train, metric=self.metric)
             _, self._train_features = transform(
                 X_train, X_train, self._features, n_jobs=self.n_jobs

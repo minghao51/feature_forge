@@ -7,7 +7,7 @@ This document describes every method and pipeline implemented in Feature Forge, 
 ## Table of Contents
 
 1. [Core System: MALMAS Multi-Agent Pipeline](#1-core-system-malmas-multi-agent-pipeline)
-2. [Baselines](#2-baselines)
+2. [Methods](#2-methods)
    - [OpenFE](#21-openfe)
    - [CAAFE](#22-caafe)
    - [LLM-FE](#23-llm-fe)
@@ -16,7 +16,9 @@ This document describes every method and pipeline implemented in Feature Forge, 
 4. [Memory System](#4-memory-system)
 5. [Router Strategies](#5-router-strategies)
 6. [Evaluation & Sandboxing](#6-evaluation-sandboxing)
-7. [Full Reference List](#7-full-reference-list)
+7. [Prompt Registry](#7-prompt-registry)
+8. [Thinking Mode](#8-thinking-mode)
+9. [Full Reference List](#9-full-reference-list)
 
 ---
 
@@ -71,13 +73,148 @@ MALMAS decomposes automated feature engineering into a multi-round, multi-agent 
 - Agent base class: `src/feature_forge/methods/malmas/agents/base.py`
 - Agent implementations: `src/feature_forge/methods/malmas/agents/unary.py`, `cross_compositional.py`, `aggregation.py`, `temporal.py`, `local_transform.py`, `local_pattern.py`
 
+### Methods Plugin Architecture
+
+Feature Forge uses a plugin architecture for feature engineering methods. All methods live under the `methods/` directory:
+
+```
+src/feature_forge/methods/
+├── base.py            # MethodProtocol, BaseMethod, MethodRegistry
+├── caafe/method.py    # CAAFEMethod
+├── llmfe/method.py    # LLMFEMethod
+├── malmas/            # Full MALMAS sub-package
+│   ├── method.py      # MALMASMethod
+│   ├── agents/        # 6 agents + router + registry
+│   ├── pipeline/      # CorePipeline, IterativePipeline, ablations
+│   ├── memory/        # 3-tier memory
+│   └── prompts/       # YAML prompt loading (local copy)
+├── malmus/method.py   # MalmusMethod
+└── openfe/method.py   # OpenFEMethod
+```
+
+The architecture is built on three core abstractions in `base.py`:
+
+- **`MethodProtocol`** — A `@runtime_checkable` Protocol that enables duck-typing. Third-party methods can satisfy the protocol without importing anything from `feature_forge`. Required attributes: `name` (str). Required methods: `fit`, `transform`, `fit_transform`, `generated_scripts` (property), `feature_metadata` (property), `get_artifacts`.
+
+- **`BaseMethod`** — Inherits `ArtifactExporter` and provides a concrete base class with default implementations for `fit_transform` (calls `fit` then `transform`), `generated_scripts`, `get_artifacts`, and artifact management. Subclasses only need to implement `fit` and `transform`.
+
+- **`MethodRegistry`** — Discovers methods via Python entry points in the `feature_forge.methods` group. Falls back to built-in methods if entry points aren't available. Key APIs:
+  - `get_builtin_methods()` — Returns the built-in method classes
+  - `get_all_methods()` — Returns built-in + entry-point-discovered methods
+  - `discover()` — Explicitly scans entry points and returns discovered method classes
+
+### Plugin Authoring Guide
+
+You can add custom feature engineering methods to Feature Forge via two approaches:
+
+#### Option A: Protocol-compliant (zero imports)
+
+Implement the `MethodProtocol` interface without any `feature_forge` dependency:
+
+```python
+# my_method/method.py
+from typing import Any
+import pandas as pd
+
+class MyMethod:
+    name = "my_method"
+
+    def fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> "MyMethod":
+        self._code = "# feature generation code"
+        return self
+
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        return pd.DataFrame({"my_feature": X.iloc[:, 0] * 2}, index=X.index)
+
+    def fit_transform(self, X_train: pd.DataFrame, y_train: pd.Series) -> pd.DataFrame:
+        self.fit(X_train, y_train)
+        return self.transform(X_train)
+
+    @property
+    def generated_scripts(self) -> list[str]:
+        return [self._code] if hasattr(self, '_code') else []
+
+    @property
+    def feature_metadata(self) -> list[dict[str, Any]]:
+        return [{"name": "my_feature", "type": "numerical"}]
+
+    def get_artifacts(self) -> dict[str, Any]:
+        return {}
+```
+
+#### Option B: BaseMethod subclass (full artifact support)
+
+Subclass `BaseMethod` for integrated artifact export and lifecycle management:
+
+```python
+from feature_forge.methods.base import BaseMethod
+
+class MyMethod(BaseMethod):
+    def __init__(self):
+        super().__init__("my_method")
+        self._code = ""
+
+    def fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> "MyMethod":
+        self._code = "# generated feature code"
+        self._artifacts["generated_code"] = self._code
+        return self
+
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        return pd.DataFrame({"my_feature": X.iloc[:, 0] * 2}, index=X.index)
+```
+
+#### Registration via entry points
+
+Register your method so Feature Forge discovers it automatically:
+
+```toml
+[project.entry-points."feature_forge.methods"]
+my_method = "my_method.method:MyMethod"
+```
+
+#### Programmatic registration
+
+Register at runtime without modifying package metadata:
+
+```python
+from feature_forge import ExperimentalPlatform
+platform = ExperimentalPlatform()
+platform.register_method("my_method", MyMethod)
+```
+
+#### Verification
+
+Confirm your method is registered:
+
+```python
+from feature_forge.methods import MethodRegistry
+all_methods = MethodRegistry.get_all_methods()
+assert "my_method" in all_methods
+
+# Or via platform
+"my_method" in platform.list_methods()
+```
+
+### Per-Agent Parallel Code Generation
+
+The MALMAS pipeline uses per-agent parallel code generation for improved throughput:
+
+1. Feature specs are grouped by agent name (`specs_by_agent`) after the agent generation phase.
+2. Each agent's code is generated in parallel via `asyncio.gather` with a semaphore controlling concurrency.
+3. Data schema (shape, column dtypes, nullable flags) is injected as context into the LLM prompt so generated code matches the actual data layout.
+4. Each agent's code is executed independently in the sandbox with timeout guards (`asyncio.wait_for`).
+5. Results are concatenated via `pd.concat(axis=1)` with duplicate column deduplication.
+6. If code fails AST validation after 2 attempts, raises `PipelineError` (no longer silently skipped).
+
+The `max_tokens` parameter for code generation is configurable via `config.llm.codegen_max_tokens` (default: 16384).
+
 ---
 
-## 2. Baselines
+## 2. Methods
 
 ### 2.1 OpenFE
 
-**Non-LLM baseline** using tree-based feature generation with gradient boosting evaluation.
+**Non-LLM method** using tree-based feature generation with gradient boosting evaluation.
 
 **Paper:**
 > "OpenFE: Automated Feature Generation with Expert-level Performance"
@@ -94,11 +231,11 @@ MALMAS decomposes automated feature engineering into a multi-round, multi-agent 
 3. **Two-Stage Pruning**: Successive halving followed by Mean Decrease in Impurity (MDI) to identify effective features.
 4. **Benchmark**: Beat 99.3% of Kaggle teams on IEEE-CIS Fraud Detection using a simple XGBoost + OpenFE pipeline.
 
-#### Feature Forge Wrapper
+#### Feature Forge Method
 
-`OpenFEBaseline` wraps the `openfe` Python package with best-effort artifact extraction (selected operators, candidate features, feature importances). Since OpenFE doesn't generate code, artifacts are operator names and importance scores.
+`OpenFEMethod` wraps the `openfe` Python package with best-effort artifact extraction (selected operators, candidate features, feature importances). Since OpenFE doesn't generate code, artifacts are operator names and importance scores.
 
-**Implementation:** `src/feature_forge/methods/openfe.py`
+**Implementation:** `src/feature_forge/methods/openfe/method.py`
 
 ---
 
@@ -129,7 +266,7 @@ CAAFE improved performance on 11/14 benchmark datasets, boosting mean ROC AUC fr
 | `unified` (default) | Reimplementation using our `CVEvaluator` and `SandboxedExecutor` for full artifact control and per-feature gain tracking |
 | `fidelity` | Wraps the original `caafe` library for exact reproduction of published behavior |
 
-**Implementation:** `src/feature_forge/methods/caafe.py`
+**Implementation:** `src/feature_forge/methods/caafe/method.py`
 
 ---
 
@@ -153,19 +290,19 @@ CAAFE improved performance on 11/14 benchmark datasets, boosting mean ROC AUC fr
 
 LLM-FE outperforms traditional baselines (OCTree) across 19 classification and 10 regression benchmarks.
 
-#### Feature Forge Implementation
+#### Feature Forge Method
 
-`LLMFEBaseline` implements the core iterative prompting pattern with two modes:
+`LLMFEMethod` implements the core iterative prompting pattern with two modes:
 - **`single_shot`**: One LLM call generates all features at once.
 - **`iterative`**: Sequential LLM calls with CV-based keep/discard after each iteration.
 
-**Implementation:** `src/feature_forge/methods/llmfe.py`
+**Implementation:** `src/feature_forge/methods/llmfe/method.py`
 
 ---
 
 ### 2.4 Malmus (Structured JSON)
 
-**Feature Forge's own structured baseline** that enforces JSON-mode output from LLMs.
+**Feature Forge's own structured method** that enforces JSON-mode output from LLMs.
 
 Malmus is not based on a published paper. It is a novel contribution of Feature Forge that addresses a key limitation of LLM-FE and CAAFE: **free-text code generation is unreliable**. By forcing the LLM to return structured JSON with per-feature metadata (name, code, description, libraries), Malmus achieves:
 
@@ -188,7 +325,7 @@ Malmus is not based on a published paper. It is a novel contribution of Feature 
 | `single_shot` | One LLM call generates all features at once |
 | `iterative` | Sequential LLM calls with CV-based keep/discard and feedback loops |
 
-**Implementation:** `src/feature_forge/methods/malmus.py`
+**Implementation:** `src/feature_forge/methods/malmus/method.py`
 
 ---
 
@@ -198,12 +335,12 @@ The 6 specialized agents are based on the MALMAS agent taxonomy:
 
 | Agent | Specialization | Prompt File |
 |-------|---------------|-------------|
-| **Unary Feature** | Single-column transforms: log, sqrt, binning, encoding | `prompts/unary.txt` |
-| **Cross-Compositional** | Multi-column interactions: ratios, products, differences | `prompts/cross_compositional.txt` |
-| **Aggregation Construct** | GroupBy aggregations: mean/count/sum per category | `prompts/aggregation.txt` |
-| **Temporal Feature** | Date/time features: day-of-week, elapsed, cyclical encoding | `prompts/temporal.txt` |
-| **Local Transform** | Local numerical transforms: rolling, diff, lag | `prompts/local_transform.txt` |
-| **Local Pattern** | Distributional patterns: outlier flags, quantile ranks, z-scores | `prompts/local_pattern.txt` |
+| **Unary Feature** | Single-column transforms: log, sqrt, binning, encoding | `config/prompts/unary.yaml` |
+| **Cross-Compositional** | Multi-column interactions: ratios, products, differences | `config/prompts/cross_compositional.yaml` |
+| **Aggregation Construct** | GroupBy aggregations: mean/count/sum per category | `config/prompts/aggregation.yaml` |
+| **Temporal Feature** | Date/time features: day-of-week, elapsed, cyclical encoding | `config/prompts/temporal.yaml` |
+| **Local Transform** | Local numerical transforms: rolling, diff, lag | `config/prompts/local_transform.yaml` |
+| **Local Pattern** | Distributional patterns: outlier flags, quantile ranks, z-scores | `config/prompts/local_pattern.yaml` |
 
 Each agent:
 1. Receives dataset column metadata + memory context + positive/negative feature lists
@@ -211,17 +348,24 @@ Each agent:
 3. Parses structured JSON feature specifications
 4. Returns `list[FeatureSpec]` for the code generator
 
-Agents are discoverable via Python entry points (`feature_forge.agents` group), allowing external packages to register custom agents.
+Agents are discoverable via Python entry points (`feature_forge.methods.malmas.agents` group), allowing external packages to register custom agents.
+
+> **Note:** Agents are MALMAS-specific components. They live under `methods/malmas/agents/`, not as shared infrastructure.
 
 **Source:** MALMAS paper, Section 3.2 ("Specialized Feature Generation Agents")
 
 **Implementation:** `src/feature_forge/methods/malmas/agents/`
 
+**Import example:**
+```python
+from feature_forge.methods.malmas.agents import UnaryFeatureAgent, CrossCompositionalAgent
+```
+
 ---
 
 ## 4. Memory System
 
-The 3-tier memory architecture is based on the MALMAS memory module:
+The 3-tier memory architecture is based on the MALMAS memory module. Memory is a MALMAS-specific subsystem living under `methods/malmas/memory/`.
 
 **Source:** MALMAS paper, Section 3.3 ("Memory Module")
 
@@ -261,6 +405,8 @@ The router includes a warmup phase (1 round by default) where all agents run to 
 
 **Implementation:** `src/feature_forge/methods/malmas/agents/router.py`
 
+Entry point group: `feature_forge.methods.malmas.agents`
+
 ---
 
 ## 6. Evaluation & Sandboxing
@@ -285,11 +431,88 @@ Threat model and trust boundary:
 - File-system and network operations are blocked by validation/runtime guards.
 - This is incremental hardening, not full container/jail isolation; use an external sandbox boundary for high-risk multi-tenant workloads.
 
+> **Note:** The per-agent sandbox execution uses `asyncio.wait_for` with a timeout of `max(sandbox_timeout * 2, 30)` seconds per agent, preventing a single slow agent from blocking the pipeline.
+
 **Implementation:** `src/feature_forge/evaluation/sandbox.py`
 
 ---
 
-## 7. Full Reference List
+## 7. Prompt Registry
+
+Feature Forge manages LLM prompts as YAML files with a centralized registry.
+
+### Prompt Files
+
+Prompts are stored in `config/prompts/*.yaml`. Each YAML file has:
+- `system` (required): The system prompt text
+- `description` (optional): A human-readable description of the prompt's purpose
+
+### Prompt Model
+
+The `Prompt` Pydantic model validates prompt files:
+- `system: str` — Must be non-empty (validated)
+- `description: str = ""` — Optional metadata
+
+### PromptRegistry
+
+`PromptRegistry` provides lazy loading from the `config/prompts/` directory. It is accessed as a singleton via `get_registry()`.
+
+### Available Prompts
+
+| Name | Purpose |
+|------|---------|
+| `unary` | Single-column feature transforms |
+| `cross_compositional` | Multi-column interaction features |
+| `aggregation` | GroupBy aggregation features |
+| `temporal` | Date/time-derived features |
+| `local_transform` | Localized numerical transforms |
+| `local_pattern` | Distributional pattern detection |
+| `router` | Agent selection routing |
+| `code_generation` | Code generation from feature specs |
+
+### Usage
+
+```python
+from feature_forge.prompts import get_registry
+registry = get_registry()
+prompt = registry.get("unary")
+print(prompt.system)
+```
+
+> **Note:** The top-level `feature_forge.prompts` module provides the registry. MALMAS-specific prompts are stored alongside the shared config in `config/prompts/`.
+
+---
+
+## 8. Thinking Mode
+
+The DeepSeek provider supports a thinking/reasoning mode that enables extended chain-of-thought processing before generating a response.
+
+### Configuration
+
+Thinking mode is configured in `config/settings.yaml`:
+
+```yaml
+llm:
+  thinking_enabled: true
+  reasoning_effort: "medium"
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `thinking_enabled` | `bool` | `False` | Enable/disable thinking mode |
+| `reasoning_effort` | `str` | `"medium"` | Reasoning depth: `low`, `medium`, `high`, or `max` |
+
+### Implementation
+
+When enabled, `DeepSeekProvider._call_api()` injects `reasoning_effort` and `extra_body.thinking.type="enabled"` into the API request. Reasoning content is extracted via `_extract_reasoning_content()` from `message.reasoning_content` in the API response.
+
+> **Note:** Thinking mode is DeepSeek-specific. Other providers ignore these parameters.
+
+---
+
+## 9. Full Reference List
 
 ### Papers
 

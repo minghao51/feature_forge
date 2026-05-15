@@ -141,6 +141,7 @@ memory_files/
 data/raw/
 *.pkl
 *.dill
+*.feather
 wandb/
 mlruns/
 

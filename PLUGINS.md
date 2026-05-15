@@ -1,35 +1,35 @@
 # Plugin Developer Guide
 
-Feature Forge supports extensibility via Python entry points. You can register custom baselines, datasets, models, and metrics without modifying the core package.
+Feature Forge supports extensibility via Python entry points. You can register custom methods, datasets, models, and metrics without modifying the core package.
 
 ## Table of Contents
 
-- [Baseline Plugins](#baseline-plugins)
+- [Method Plugins](#method-plugins)
 - [Model Plugins](#model-plugins)
 - [Metric Plugins](#metric-plugins)
 - [Dataset Plugins](#dataset-plugins)
 - [Using Plugins with ExperimentalPlatform](#using-plugins-with-experimentalplatform)
 
-## Baseline Plugins
+## Method Plugins
 
 ### Contract
 
-A baseline plugin must satisfy `BaselineProtocol` — a `@runtime_checkable` protocol that requires:
+A method plugin must satisfy `MethodProtocol` — a `@runtime_checkable` protocol that requires:
 
-- `name: str` — Human-readable name
-- `fit(X_train, y_train) -> Self` — Fit the baseline
-- `transform(X) -> pd.DataFrame` — Generate features
-- `fit_transform(X_train, y_train) -> pd.DataFrame` — Convenience method
-- `generated_scripts -> list[str]` — Generated code blocks
-- `feature_metadata -> list[dict]` — Feature descriptions
-- `get_artifacts() -> dict` — Collected artifacts
+- `name: str`
+- `fit(X_train, y_train) -> Self`
+- `transform(X) -> pd.DataFrame`
+- `fit_transform(X_train, y_train) -> pd.DataFrame`
+- `generated_scripts -> list[str]`
+- `feature_metadata -> list[dict]`
+- `get_artifacts() -> dict`
 
-You do **not** need to import from `feature_forge` to create a baseline.
+You do **not** need to import from `feature_forge` to create a method plugin.
 
 ### Example
 
 ```python
-# mymethod/baseline.py
+# mymethod/method.py
 from typing import Any
 import pandas as pd
 
@@ -66,8 +66,8 @@ class MyMethod:
 In your `pyproject.toml`:
 
 ```toml
-[project.entry-points."feature_forge.baselines"]
-mymethod = "mymethod.baseline:MyMethod"
+[project.entry-points."feature_forge.methods"]
+mymethod = "mymethod.method:MyMethod"
 ```
 
 After `pip install`, `MyMethod` is auto-discovered:
@@ -76,7 +76,7 @@ After `pip install`, `MyMethod` is auto-discovered:
 from feature_forge import ExperimentalPlatform
 
 platform = ExperimentalPlatform()
-"mymethod" in platform.list_baselines()  # True
+"mymethod" in platform.list_methods()  # True
 ```
 
 ## Model Plugins
@@ -164,7 +164,7 @@ from feature_forge import ExperimentalPlatform
 platform = ExperimentalPlatform()
 
 # Auto-discovers all registered plugins
-print(platform.list_baselines())
+print(platform.list_methods())
 print(platform.list_models())
 print(platform.list_metrics())
 print(platform.list_datasets())
@@ -172,7 +172,7 @@ print(platform.list_datasets())
 # Use discovered plugins in experiments
 results = platform.run(
     datasets=["titanic", "my_dataset"],
-    baselines=["malmus", "mymethod"],
+    methods=["malmus", "mymethod"],
     models=["xgboost", "catboost"],  # catboost from plugin
 )
 ```
@@ -180,7 +180,7 @@ results = platform.run(
 You can also register plugins programmatically:
 
 ```python
-platform.register_baseline("adhoc", MyMethod)
+platform.register_method("adhoc", MyMethod)
 platform.register_model("custom", create_custom_model)
 platform.register_metric("custom_metric", my_metric_fn)
 platform.register_dataset("custom_ds", {"source": "local", ...})
@@ -192,16 +192,16 @@ Feature Forge follows **semantic versioning** for its public API. Plugin contrac
 
 | Core Version | Plugin API Stability |
 |--------------|----------------------|
-| `0.1.x` | BaselineProtocol, model/metric/dataset signatures as documented above |
+| `0.1.x` | MethodProtocol, model/metric/dataset signatures as documented above |
 | `0.2.x` | Expected backward compatible; deprecations announced 1 minor version in advance |
 | `1.0.0+` | Full backward compatibility for plugin entry point contracts within major version |
 
 **Compatibility Rules:**
 - A plugin that works with `feature-forge==0.1.0` will work with any `0.1.x` release.
-- Breaking changes to `BaselineProtocol` or entry point signatures will trigger a **minor version bump** (`0.2.0`) during the `0.x` phase, and a **major version bump** (`1.0.0 → 2.0.0`) after `1.0.0`.
+- Breaking changes to `MethodProtocol` or entry point signatures will trigger a **minor version bump** (`0.2.0`) during the `0.x` phase, and a **major version bump** (`1.0.0 → 2.0.0`) after `1.0.0`.
 - Deprecated methods will emit `DeprecationWarning` for at least one minor version before removal.
 
 **Best Practices for Plugin Authors:**
 1. Pin your plugin's `feature-forge` dependency to the compatible minor version: `feature-forge>=0.1.0,<0.2.0`.
-2. Import from `feature_forge.baselines.base` only if you need `Baseline` ABC; otherwise, write protocol-compliant classes without any feature_forge imports.
+2. Import from `feature_forge.methods.base` only if you need `BaseMethod` ABC; otherwise, write protocol-compliant classes without any feature_forge imports.
 3. Test your plugin against the latest patch release of the target minor version before publishing.

@@ -1,9 +1,17 @@
 # Methods Directory Restructure
 
 **Date:** May 2026
-**Status:** Planned
+**Status:** Completed
+**Completed:** May 2026
 **Depends on:** Current codebase state (no other in-flight changes required)
 **Related:** `09_baseline_selection.md`, `10_experimental_platform_refactor.md`
+
+> **Implementation note:** The restructure was executed as planned with minor deviations:
+> - Prompts migrated to YAML (not `.txt`) with a `PromptRegistry` singleton in `feature_forge.prompts`.
+> - CAAFE, LLM-FE, and Malmus kept prompts inline in `method.py` rather than extracting to separate `prompts.py` files.
+> - `MALMASMethod` wraps `FeatureForge` as planned.
+> - `AgentName` moved to `methods/malmas/types.py`.
+> - Old directories (`agents/`, `baselines/`, `memory/`, `pipeline/`) fully removed — clean break, no re-exports.
 
 ## Motivation
 
@@ -129,32 +137,32 @@ src/feature_forge/
 ```python
 class MALMASMethod(BaseMethod):
     """MALMAS method adapter implementing MethodProtocol."""
-    
+
     def __init__(self, settings: Settings | None = None, **kwargs):
         self._settings = settings or get_settings()
         self._kwargs = kwargs
         self._forge: FeatureForge | None = None
-    
+
     def fit(self, X_train: pd.DataFrame, y_train: pd.Series, **kwargs) -> MALMASMethod:
         self._forge = FeatureForge(settings=self._settings, **self._kwargs)
         self._forge.fit(X_train, y_train, **kwargs)
         return self
-    
+
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         return self._forge.transform(X)
-    
+
     def fit_transform(self, X_train, y_train, **kwargs) -> pd.DataFrame:
         self.fit(X_train, y_train, **kwargs)
         return self.transform(X_train)
-    
+
     @property
     def generated_scripts(self) -> list[str]:
         return self._forge.generated_scripts if self._forge else []
-    
+
     @property
     def feature_metadata(self) -> list:
         return self._forge.feature_metadata if self._forge else []
-    
+
     def get_artifacts(self): ...
 ```
 

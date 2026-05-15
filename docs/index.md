@@ -16,7 +16,7 @@ Feature Forge is a production-ready refactoring of the MALMAS (Memory-Augmented 
 - **Enforced LLM Caching**: DiskCache with SHA-256 keys prevents accidental API costs
 - **Sandboxed Execution**: AST-validated code execution for LLM-generated features
 - **Experiment Matrix**: Cartesian product of datasets × methods × seeds × models × rounds
-- **Baselines**: OpenFE [[2]](#ref-2), CAAFE [[3]](#ref-3), LLM-FE [[4]](#ref-4), Malmus (structured JSON)
+- **Methods**: OpenFE [[2]](#ref-2), CAAFE [[3]](#ref-3), LLM-FE [[4]](#ref-4), Malmus (structured JSON), MALMAS (multi-agent)
 - **Observability**: structlog + Langfuse + OpenTelemetry
 - **Tracking**: WandB (default) + MLflow (optional)
 - **Sklearn Compatible**: `FeatureForge` inherits `BaseEstimator` + `TransformerMixin`
@@ -78,19 +78,41 @@ reporter = Reporter(results)
 print(reporter.to_markdown())
 ```
 
+### Custom Method
+
+```python
+from feature_forge.methods.base import BaseMethod
+
+class MyMethod(BaseMethod):
+    def __init__(self):
+        super().__init__("my_method")
+
+    def fit(self, X_train, y_train):
+        return self
+
+    def transform(self, X):
+        return pd.DataFrame({"my_feature": X.iloc[:, 0] * 2}, index=X.index)
+```
+
+Register in your `pyproject.toml`:
+```toml
+[project.entry-points."feature_forge.methods"]
+my_method = "my_package:MyMethod"
+```
+
 ### Custom Agent
 
 ```python
-from feature_forge.agents import BaseFeatureAgent
+from feature_forge.methods.malmas.agents import BaseFeatureAgent
 
 class DomainAgent(BaseFeatureAgent):
-    prompt_filename = "domain.txt"
+    prompt_filename = "domain"
     agent_name = "domain"
 ```
 
 Register in your `pyproject.toml`:
 ```toml
-[project.entry-points."feature_forge.agents"]
+[project.entry-points."feature_forge.methods.malmas.agents"]
 domain = "my_package:DomainAgent"
 ```
 
@@ -113,9 +135,10 @@ export FF_TRACKER__PROJECT=my-project
 
 ```
 Experiment Layer    → ExperimentMatrix, ExperimentRunner, Tracker, Reporter
+Methods Layer       → MethodRegistry, BaseMethod, 5 method packages (malmas, caafe, llmfe, malmus, openfe)
 Pipeline Layer      → FeatureForge, CorePipeline, IterativePipeline
-Agent Layer         → 6 Agents + Router + Registry
-Memory Layer        → Procedural, Feedback, Conceptual
+Agent Layer         → 6 Agents + Router + Registry (MALMAS-specific)
+Memory Layer        → Procedural, Feedback, Conceptual (MALMAS-specific)
 LLM Layer           → LLMClient, DiskCache, LangfuseWrapper
 Evaluation Layer    → Metrics, CV, ModelFactory, Sandbox
 Data Layer          → KaggleFetcher, DatasetRegistry
