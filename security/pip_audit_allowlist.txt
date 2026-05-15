@@ -1,0 +1,5 @@
+# Allowed vulnerability IDs for pip-audit.
+# Format: "<ID> <optional reason>"
+#
+# Keep this list minimal and temporary; remove entries once fixed upstream.
+CVE-2025-69872 temporary allowlist until an upstream fixed diskcache release is available

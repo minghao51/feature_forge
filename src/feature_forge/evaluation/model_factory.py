@@ -116,8 +116,18 @@ class ModelRegistry:
     def discover(cls) -> dict[str, Callable[..., Any]]:
         """Discover models registered via entry points."""
         discovered: dict[str, Callable[..., Any]] = {}
+        builtin = cls.get_builtin()
         for ep in importlib.metadata.entry_points(group=cls.ENTRY_POINT_GROUP):
-            if ep.name in cls.get_builtin():
+            try:
+                loaded = ep.load()
+            except Exception as exc:
+                warnings.warn(
+                    f"Failed to load model entry point '{ep.name}': {exc}",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                continue
+            if ep.name in builtin and builtin[ep.name] is not loaded:
                 warnings.warn(
                     f"Entry point model '{ep.name}' overrides built-in model.",
                     RuntimeWarning,
@@ -129,14 +139,7 @@ class ModelRegistry:
                     RuntimeWarning,
                     stacklevel=2,
                 )
-            try:
-                discovered[ep.name] = ep.load()
-            except Exception as exc:
-                warnings.warn(
-                    f"Failed to load model entry point '{ep.name}': {exc}",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
+            discovered[ep.name] = loaded
         return discovered
 
     @classmethod

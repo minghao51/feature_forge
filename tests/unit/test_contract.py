@@ -11,9 +11,7 @@ import inspect
 import numpy as np
 import pytest
 
-from feature_forge.agents.base import Agent, AgentRegistry
 from feature_forge.api import FeatureForge
-from feature_forge.baselines.base import Baseline
 from feature_forge.config import Settings
 from feature_forge.evaluation.metrics import METRIC_REGISTRY, MetricRegistry
 from feature_forge.evaluation.model_factory import ModelFactory
@@ -22,7 +20,9 @@ from feature_forge.experiment.matrix import ExperimentMatrix
 from feature_forge.experiment.tracker import ExperimentTracker, NoOpTracker
 from feature_forge.llm.base import LLMClient
 from feature_forge.llm.cache import DiskCache
-from feature_forge.memory.base import AgentMemory
+from feature_forge.methods.base import BaseMethod
+from feature_forge.methods.malmas.agents.base import Agent, AgentRegistry
+from feature_forge.methods.malmas.memory.base import AgentMemory
 
 pytestmark = pytest.mark.contract
 
@@ -75,17 +75,17 @@ class TestLLMClientContract:
             LLMClient(model="test", api_key="test")
 
 
-# ── Baseline protocol contract ─────────────────────────────────────────
+# ── BaseMethod protocol contract ─────────────────────────────────────────
 
 
 class TestBaselineContract:
     def test_has_required_members(self):
         required = ("fit", "transform", "fit_transform", "generated_scripts", "feature_metadata")
         for member in required:
-            assert hasattr(Baseline, member), f"Baseline missing {member}"
+            assert hasattr(BaseMethod, member), f"BaseMethod missing {member}"
 
     def test_get_artifacts_method(self):
-        assert hasattr(Baseline, "get_artifacts")
+        assert hasattr(BaseMethod, "get_artifacts")
 
 
 # ── Metric contract ────────────────────────────────────────────────────

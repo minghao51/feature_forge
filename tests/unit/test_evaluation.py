@@ -236,7 +236,7 @@ class TestPrefilterCandidateColumns:
     def _make_pipeline(self):
         from feature_forge.config import Settings
         from feature_forge.llm.base import LLMClient, LLMResponse
-        from feature_forge.pipeline.core import CorePipeline
+        from feature_forge.methods.malmas.pipeline.core import CorePipeline
 
         class FakeLLM(LLMClient):
             def __init__(self):
@@ -310,7 +310,7 @@ class TestPrefilterCandidateColumns:
     def test_custom_max_candidate_features(self):
         from feature_forge.config import Settings
         from feature_forge.llm.base import LLMClient, LLMResponse
-        from feature_forge.pipeline.core import CorePipeline
+        from feature_forge.methods.malmas.pipeline.core import CorePipeline
 
         class FakeLLM(LLMClient):
             def __init__(self):

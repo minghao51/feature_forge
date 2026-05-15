@@ -5,8 +5,8 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from feature_forge.baselines import BaselineRegistry, LLMFEBaseline
-from feature_forge.baselines.base import Baseline
+from feature_forge.methods import LLMFEMethod, MethodRegistry
+from feature_forge.methods.base import BaseMethod
 
 
 class FakeLLM:
@@ -22,22 +22,23 @@ class FakeLLM:
         return await self.complete(messages, temperature, max_tokens, **kwargs)
 
 
-class TestBaselineRegistry:
-    def test_get_builtin_baselines(self):
-        baselines = BaselineRegistry.get_builtin_baselines()
+class TestMethodRegistry:
+    def test_get_builtin_methods(self):
+        baselines = MethodRegistry.get_builtin_methods()
+        assert "malmas" in baselines
         assert "openfe" in baselines
         assert "caafe" in baselines
         assert "llmfe" in baselines
 
-    def test_get_all_baselines(self):
-        baselines = BaselineRegistry.get_all_baselines()
+    def test_get_all_methods(self):
+        baselines = MethodRegistry.get_all_methods()
         assert "llmfe" in baselines
 
 
-class TestLLMFEBaseline:
+class TestLLMFEMethod:
     def test_init(self):
         llm = FakeLLM("def generate_features(df): return df")
-        baseline = LLMFEBaseline(llm_client=llm)
+        baseline = LLMFEMethod(llm_client=llm)
         assert baseline.name == "llmfe"
 
     def test_fit_transform(self):
@@ -50,7 +51,7 @@ def generate_features(df):
     return result
 """
         llm = FakeLLM(code)
-        baseline = LLMFEBaseline(llm_client=llm)
+        baseline = LLMFEMethod(llm_client=llm)
         X = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
         y = pd.Series([0, 1, 0])
         result = baseline.fit_transform(X, y)
@@ -58,7 +59,7 @@ def generate_features(df):
 
     def test_transform_before_fit_raises(self):
         llm = FakeLLM("")
-        baseline = LLMFEBaseline(llm_client=llm)
+        baseline = LLMFEMethod(llm_client=llm)
         with pytest.raises(RuntimeError):
             baseline.transform(pd.DataFrame())
 
@@ -66,5 +67,5 @@ def generate_features(df):
 class TestOpenFENotInstalled:
     def test_fit_raises_when_not_installed(self):
         llm = FakeLLM("def generate_features(df): return df")
-        _ = LLMFEBaseline(llm_client=llm)
-        assert issubclass(LLMFEBaseline, Baseline)
+        _ = LLMFEMethod(llm_client=llm)
+        assert issubclass(LLMFEMethod, BaseMethod)

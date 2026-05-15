@@ -8,8 +8,8 @@ import pandas as pd
 import pytest
 from pydantic import ValidationError
 
+from feature_forge.methods.malmas.types import AgentName
 from feature_forge.types import (
-    AgentName,
     DatasetName,
     FeatureSpec,
     MemoryEntry,

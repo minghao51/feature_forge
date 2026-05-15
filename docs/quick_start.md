@@ -4,7 +4,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/feature-forge.git
+git clone https://github.com/minghao51/feature_forge.git
 cd feature-forge
 
 # Install with uv

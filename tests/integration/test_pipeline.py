@@ -7,13 +7,13 @@ import json
 import pandas as pd
 import pytest
 
-from feature_forge.agents.base import Agent
 from feature_forge.api import FeatureForge
 from feature_forge.config import Settings
 from feature_forge.llm.base import LLMClient, LLMResponse
-from feature_forge.pipeline.ablations import NoRouterPipeline, SingleAgentPipeline
-from feature_forge.pipeline.core import CodeGenerator, CorePipeline
-from feature_forge.pipeline.iterative import IterativePipeline
+from feature_forge.methods.malmas.agents.base import Agent
+from feature_forge.methods.malmas.pipeline.ablations import NoRouterPipeline, SingleAgentPipeline
+from feature_forge.methods.malmas.pipeline.core import CodeGenerator, CorePipeline
+from feature_forge.methods.malmas.pipeline.iterative import IterativePipeline
 
 
 class FakeLLM(LLMClient):

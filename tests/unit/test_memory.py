@@ -7,7 +7,7 @@ import json
 import pytest
 
 from feature_forge.llm.base import LLMClient, LLMResponse
-from feature_forge.memory import AgentMemory, ConceptualMemory, MemoryPersistence
+from feature_forge.methods.malmas.memory import AgentMemory, ConceptualMemory, MemoryPersistence
 
 
 class FakeLLM(LLMClient):

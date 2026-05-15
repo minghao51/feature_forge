@@ -131,11 +131,15 @@ uv run pytest
 # With coverage report
 uv run pytest --cov=feature_forge --cov-report=html
 
-# Linting
-uv run ruff check src tests
+# Linting (required gate)
+uv run ruff check src
+# Optional debt track visibility
+uv run ruff check notebooks docs/notebooks
 
-# Type checking
+# Type checking (required gate)
 uv run mypy src
+# Optional debt track visibility
+uv run mypy tests
 
 # Pre-commit hooks
 pre-commit install

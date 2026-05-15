@@ -18,26 +18,26 @@ Single Python package (`feature_forge`) with a `src/` layout.
 
 ### 2. Pipeline Orchestration Layer
 
-- **`src/feature_forge/pipeline/iterative.py`** — Multi-round iterative pipeline
+- **`src/feature_forge/methods/malmas/pipeline/iterative.py`** — Multi-round iterative pipeline
   - `BaseIterativePipeline` — Template method: `_select_agents()` → `_build_agent_context()` → `CorePipeline.run()` → `_post_round()`
   - `IterativePipeline` — Full pipeline with router + memory
   - Each round: router picks agents → agents generate specs → code generated → sandboxed execution → CV evaluation → memory update → router performance update
-- **`src/feature_forge/pipeline/core.py`** — Single-round core pipeline
+- **`src/feature_forge/methods/malmas/pipeline/core.py`** — Single-round core pipeline
   - `CorePipeline.run()`: runs agents in parallel (semaphore-bounded) → generates code via LLM → executes in sandbox → evaluates via CV → selects top-k effective features
-- **`src/feature_forge/pipeline/ablations.py`** — Ablation variants
+- **`src/feature_forge/methods/malmas/pipeline/ablations.py`** — Ablation variants
   - `NoMemoryPipeline`, `NoRouterPipeline`, `SingleAgentPipeline`
 
 ### 3. Agent Layer
 
-- **`src/feature_forge/agents/base.py`** — `Agent` ABC and `BaseFeatureAgent` base class
+- **`src/feature_forge/methods/malmas/agents/base.py`** — `Agent` ABC and `BaseFeatureAgent` base class
   - Each agent has a system prompt (loaded from `src/feature_forge/prompts/`) and implements `generate()` → returns `list[FeatureSpec]`
   - `AgentRegistry` — Discovers agents via Python entry points or built-in module map
 - **Built-in agents**: `unary.py`, `cross_compositional.py`, `aggregation.py`, `temporal.py`, `local_transform.py`, `local_pattern.py`
-- **`src/feature_forge/agents/router.py`** — `RouterAgent` with strategies: `data_driven`, `performance_driven`, `hybrid`, `llm`
+- **`src/feature_forge/methods/malmas/agents/router.py`** — `RouterAgent` with strategies: `data_driven`, `performance_driven`, `hybrid`, `llm`
 
 ### 4. Memory Layer
 
-- **`src/feature_forge/memory/base.py`** — `AgentMemory` with 3-tier MALMAS-style memory: procedural, feedback, conceptual
+- **`src/feature_forge/methods/malmas/memory/base.py`** — `AgentMemory` with 3-tier MALMAS-style memory: procedural, feedback, conceptual
 - Per-agent persistence to JSON files in `memory_files/agent_memories/`
 
 ### 5. LLM Abstraction Layer
@@ -190,18 +190,18 @@ feature_forge/
 | Concern | Path |
 |---|---|
 | User-facing API | `src/feature_forge/api.py` |
-| Pipeline orchestration | `src/feature_forge/pipeline/iterative.py` |
-| Core single-round logic | `src/feature_forge/pipeline/core.py` |
-| Agent definitions | `src/feature_forge/agents/*.py` |
-| Agent selection (router) | `src/feature_forge/agents/router.py` |
+| Pipeline orchestration | `src/feature_forge/methods/malmas/pipeline/iterative.py` |
+| Core single-round logic | `src/feature_forge/methods/malmas/pipeline/core.py` |
+| Agent definitions | `src/feature_forge/methods/malmas/agents/*.py` |
+| Agent selection (router) | `src/feature_forge/methods/malmas/agents/router.py` |
 | LLM provider factory | `src/feature_forge/llm/factory.py` |
 | Configuration | `src/feature_forge/config.py` + `config/settings.yaml` |
 | Secrets | `.env` (dotenvx) + `.env.example` |
 | Prompt templates | `src/feature_forge/prompts/*.txt` |
-| Memory system | `src/feature_forge/memory/base.py` |
+| Memory system | `src/feature_forge/methods/malmas/memory/base.py` |
 | Sandboxed execution | `src/feature_forge/evaluation/sandbox.py` |
 | Feature evaluation | `src/feature_forge/evaluation/cv.py` |
-| Baselines | `src/feature_forge/baselines/*.py` |
+| Baselines | `src/feature_forge/methods/*.py` |
 | Experiment runner | `src/feature_forge/experiment/runner.py` |
 | Observability | `src/feature_forge/observability/structlog_config.py` |
 
@@ -211,8 +211,8 @@ feature_forge/
 |---|---|---|
 | Package init | `src/feature_forge/__init__.py` | Configures logging, exports `__version__` |
 | sklearn API | `src/feature_forge/api.py::FeatureForge` | Primary user-facing class |
-| Pipeline | `src/feature_forge/pipeline/iterative.py::IterativePipeline` | Full pipeline orchestration |
-| Core pipeline | `src/feature_forge/pipeline/core.py::CorePipeline` | Single-round execution |
+| Pipeline | `src/feature_forge/methods/malmas/pipeline/iterative.py::IterativePipeline` | Full pipeline orchestration |
+| Core pipeline | `src/feature_forge/methods/malmas/pipeline/core.py::CorePipeline` | Single-round execution |
 | Agent entry points | `pyproject.toml [project.entry-points."feature_forge.agents"]` | Plugin discovery |
 | Baseline entry points | `pyproject.toml [project.entry-points."feature_forge.baselines"]` | Baseline discovery |
 

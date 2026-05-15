@@ -7,7 +7,9 @@ import json
 import pandas as pd
 import pytest
 
-from feature_forge.agents import (
+from feature_forge.config import Settings
+from feature_forge.llm.base import LLMClient, LLMResponse
+from feature_forge.methods.malmas.agents import (
     AgentRegistry,
     AggregationConstructAgent,
     CrossCompositionalAgent,
@@ -17,8 +19,6 @@ from feature_forge.agents import (
     TemporalFeatureAgent,
     UnaryFeatureAgent,
 )
-from feature_forge.config import Settings
-from feature_forge.llm.base import LLMClient, LLMResponse
 
 
 class FakeLLM(LLMClient):
@@ -150,6 +150,7 @@ class TestRouterAgent:
             "numerical_columns": ["a", "b"],
             "categorical_columns": ["c"],
             "datetime_columns": [],
+            "single_column_dataset": False,
             "has_enrich_description": False,
         }
         selected = router._data_driven_selection()
@@ -171,6 +172,7 @@ class TestRouterAgent:
             "numerical_columns": ["a", "b"],
             "categorical_columns": ["c"],
             "datetime_columns": [],
+            "single_column_dataset": False,
             "has_enrich_description": False,
         }
         router.agent_performance["unary"] = [0.1]
@@ -233,7 +235,7 @@ class TestAllAgentsInstantiate:
 
 class TestInferColumnDescriptions:
     def test_numerical_columns(self):
-        from feature_forge.agents.base import BaseFeatureAgent
+        from feature_forge.methods.malmas.agents.base import BaseFeatureAgent
 
         df = pd.DataFrame({"a": [1.0, 2.0, 3.0], "b": [4.0, 5.0, 6.0]})
         desc = BaseFeatureAgent._infer_column_descriptions(df)
@@ -244,7 +246,7 @@ class TestInferColumnDescriptions:
         assert desc["a"]["max"] == 3.0
 
     def test_categorical_columns(self):
-        from feature_forge.agents.base import BaseFeatureAgent
+        from feature_forge.methods.malmas.agents.base import BaseFeatureAgent
 
         df = pd.DataFrame({"cat": ["x", "y", "x", "z"]})
         desc = BaseFeatureAgent._infer_column_descriptions(df)
@@ -253,21 +255,21 @@ class TestInferColumnDescriptions:
         assert desc["cat"]["unique"] == 3
 
     def test_missing_values(self):
-        from feature_forge.agents.base import BaseFeatureAgent
+        from feature_forge.methods.malmas.agents.base import BaseFeatureAgent
 
         df = pd.DataFrame({"a": [1.0, None, 3.0]})
         desc = BaseFeatureAgent._infer_column_descriptions(df)
         assert desc["a"]["missing"] == 1
 
     def test_empty_dataframe(self):
-        from feature_forge.agents.base import BaseFeatureAgent
+        from feature_forge.methods.malmas.agents.base import BaseFeatureAgent
 
         df = pd.DataFrame()
         desc = BaseFeatureAgent._infer_column_descriptions(df)
         assert desc == {}
 
     def test_cache_key_uses_tuple_not_hash(self):
-        from feature_forge.agents.base import BaseFeatureAgent
+        from feature_forge.methods.malmas.agents.base import BaseFeatureAgent
 
         df = pd.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]})
         _ = BaseFeatureAgent._infer_column_descriptions(df)
@@ -278,7 +280,7 @@ class TestInferColumnDescriptions:
 
 class TestBuildUserPromptAutoEnrichment:
     def test_empty_description_auto_enriched(self):
-        from feature_forge.agents.base import BaseFeatureAgent
+        from feature_forge.methods.malmas.agents.base import BaseFeatureAgent
 
         class DummyAgent(BaseFeatureAgent):
             prompt_key = "unary"
@@ -293,7 +295,7 @@ class TestBuildUserPromptAutoEnrichment:
         assert "a" in prompt
 
     def test_provided_description_not_overwritten(self):
-        from feature_forge.agents.base import BaseFeatureAgent
+        from feature_forge.methods.malmas.agents.base import BaseFeatureAgent
 
         class DummyAgent(BaseFeatureAgent):
             prompt_key = "unary"
@@ -321,6 +323,7 @@ class TestRouterAgentEdgeCases:
             "numerical_columns": ["a"],
             "categorical_columns": [],
             "datetime_columns": [],
+            "single_column_dataset": True,
             "has_enrich_description": False,
         }
         selected = router._data_driven_selection()
@@ -335,6 +338,7 @@ class TestRouterAgentEdgeCases:
             "categorical_columns": ["a", "b"],
             "datetime_columns": ["dt"],
             "has_enrich_description": False,
+            "single_column_dataset": False,
         }
         selected = router._data_driven_selection()
         assert "local_transform" not in selected
@@ -348,6 +352,7 @@ class TestRouterAgentEdgeCases:
             "categorical_columns": [],
             "datetime_columns": [],
             "has_enrich_description": False,
+            "single_column_dataset": False,
         }
         selected = router._data_driven_selection()
         assert "aggregation" not in selected
@@ -361,6 +366,7 @@ class TestRouterAgentEdgeCases:
             "categorical_columns": ["c"],
             "datetime_columns": [],
             "has_enrich_description": False,
+            "single_column_dataset": False,
         }
         selected = router._data_driven_selection()
         assert "local_pattern" not in selected
@@ -374,6 +380,7 @@ class TestRouterAgentEdgeCases:
             "categorical_columns": ["c"],
             "datetime_columns": [],
             "has_enrich_description": True,
+            "single_column_dataset": False,
         }
         selected = router._data_driven_selection()
         assert "local_pattern" in selected
@@ -397,6 +404,7 @@ class TestRouterAgentEdgeCases:
             "categorical_columns": [],
             "datetime_columns": [],
             "has_enrich_description": False,
+            "single_column_dataset": False,
         }
         selected = router._data_driven_selection()
         assert len(selected) >= router.min_agents
@@ -428,6 +436,7 @@ class TestRouterAgentEdgeCases:
             "categorical_columns": [],
             "datetime_columns": [],
             "has_enrich_description": False,
+            "single_column_dataset": False,
         }
         selected = router._hybrid_selection()
         assert len(selected) >= router.min_agents
@@ -442,6 +451,7 @@ class TestRouterAgentEdgeCases:
             "categorical_columns": ["e", "f"],
             "datetime_columns": [],
             "has_enrich_description": False,
+            "single_column_dataset": False,
         }
         selected = router._hybrid_selection()
         assert len(selected) <= 2
@@ -459,6 +469,7 @@ class TestRouterAgentEdgeCases:
             "categorical_columns": ["c"],
             "datetime_columns": [],
             "has_enrich_description": False,
+            "single_column_dataset": False,
         }
         selected = await router.select_agents(round_idx=1)
         assert isinstance(selected[0], str)
@@ -475,6 +486,7 @@ class TestRouterAgentEdgeCases:
             "categorical_columns": ["c"],
             "datetime_columns": [],
             "has_enrich_description": False,
+            "single_column_dataset": False,
         }
         selected = await router.select_agents(round_idx=1)
         assert len(selected) >= 1
@@ -490,6 +502,7 @@ class TestRouterAgentEdgeCases:
             "categorical_columns": ["c"],
             "datetime_columns": [],
             "has_enrich_description": False,
+            "single_column_dataset": False,
         }
         selected = await router.select_agents(round_idx=1)
         assert len(selected) >= router.min_agents
@@ -519,6 +532,7 @@ class TestRouterAgentEdgeCases:
             "categorical_columns": ["c"],
             "datetime_columns": [],
             "has_enrich_description": False,
+            "single_column_dataset": False,
         }
         selected = await router._llm_based_selection(round_idx=0)
         assert "unary" in selected
@@ -547,6 +561,7 @@ class TestRouterAgentEdgeCases:
             "categorical_columns": ["c"],
             "datetime_columns": [],
             "has_enrich_description": False,
+            "single_column_dataset": False,
         }
         selected = await router._llm_based_selection(round_idx=0)
         assert len(selected) >= 1
@@ -562,6 +577,7 @@ class TestRouterAgentEdgeCases:
             "categorical_columns": ["c"],
             "datetime_columns": [],
             "has_enrich_description": False,
+            "single_column_dataset": False,
         }
         selected = await router._llm_based_selection(round_idx=0)
         assert len(selected) >= 1
@@ -577,6 +593,7 @@ class TestRouterAgentEdgeCases:
             "categorical_columns": ["c"],
             "datetime_columns": [],
             "has_enrich_description": False,
+            "single_column_dataset": False,
         }
         ctx = router._build_selection_context(round_idx=0, description=None, task_description=None)
         assert "Current iteration: Round 1" in ctx
@@ -591,6 +608,7 @@ class TestRouterAgentEdgeCases:
             "categorical_columns": ["b"],
             "datetime_columns": [],
             "has_enrich_description": False,
+            "single_column_dataset": False,
         }
         router.agent_performance["unary"] = [0.1, 0.2]
         router.agent_performance["temporal"] = []
@@ -607,6 +625,7 @@ class TestRouterAgentEdgeCases:
             "categorical_columns": ["b"],
             "datetime_columns": [],
             "has_enrich_description": False,
+            "single_column_dataset": False,
         }
         ctx = router._build_selection_context(
             round_idx=0, description=None, task_description="Predict churn"

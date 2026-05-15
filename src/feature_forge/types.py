@@ -11,7 +11,6 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 # Primitive newtypes for domain-specific strings
-AgentName = NewType("AgentName", str)
 DatasetName = NewType("DatasetName", str)
 MetricName = NewType("MetricName", str)
 PromptName = NewType("PromptName", str)

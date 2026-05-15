@@ -91,28 +91,28 @@ class TestArtifactExporterABC:
 
 class TestBaselineArtifacts:
     def test_baseline_has_artifact_config(self):
-        from feature_forge.baselines.llmfe import LLMFEBaseline
+        from feature_forge.methods.llmfe import LLMFEMethod
 
         llm = FakeLLM("def generate_features(df): return df")
-        baseline = LLMFEBaseline(llm_client=llm)
+        baseline = LLMFEMethod(llm_client=llm)
         assert isinstance(baseline.artifact_config, ArtifactConfig)
 
     def test_baseline_get_artifacts_empty_before_fit(self):
-        from feature_forge.baselines.llmfe import LLMFEBaseline
+        from feature_forge.methods.llmfe import LLMFEMethod
 
         llm = FakeLLM("def generate_features(df): return df")
-        baseline = LLMFEBaseline(llm_client=llm)
+        baseline = LLMFEMethod(llm_client=llm)
         assert baseline.get_artifacts() == {}
 
     def test_baseline_inherits_artifact_exporter(self):
-        from feature_forge.baselines.llmfe import LLMFEBaseline
+        from feature_forge.methods.llmfe import LLMFEMethod
 
         llm = FakeLLM("def generate_features(df): return df")
-        baseline = LLMFEBaseline(llm_client=llm)
+        baseline = LLMFEMethod(llm_client=llm)
         assert isinstance(baseline, ArtifactExporter)
 
     def test_llmfe_single_shot_artifacts(self):
-        from feature_forge.baselines.llmfe import LLMFEBaseline
+        from feature_forge.methods.llmfe import LLMFEMethod
 
         code = """
 import pandas as pd
@@ -123,7 +123,7 @@ def generate_features(df):
     return result
 """
         llm = FakeLLM(code)
-        baseline = LLMFEBaseline(llm_client=llm, mode="single_shot")
+        baseline = LLMFEMethod(llm_client=llm, mode="single_shot")
         X = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
         y = pd.Series([0, 1, 0])
         baseline.fit(X, y)
@@ -135,7 +135,7 @@ def generate_features(df):
         assert "sum_ab" in artifacts["generated_code"]
 
     def test_llmfe_generated_scripts_after_fit(self):
-        from feature_forge.baselines.llmfe import LLMFEBaseline
+        from feature_forge.methods.llmfe import LLMFEMethod
 
         code = """
 import pandas as pd
@@ -144,7 +144,7 @@ def generate_features(df):
     return pd.DataFrame({'new': df['a'] * 2}, index=df.index)
 """
         llm = FakeLLM(code)
-        baseline = LLMFEBaseline(llm_client=llm)
+        baseline = LLMFEMethod(llm_client=llm)
         X = pd.DataFrame({"a": [1, 2, 3]})
         y = pd.Series([0, 1, 0])
         baseline.fit(X, y)

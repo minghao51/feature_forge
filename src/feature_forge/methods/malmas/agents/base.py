@@ -1,0 +1,332 @@
+"""Abstract base class for feature generation agents and registry.
+
+All agents must inherit from Agent and implement `generate()`.
+Discovery happens via Python entry points or `AgentRegistry.get_builtin_agents()`.
+"""
+
+from __future__ import annotations
+
+import importlib.metadata
+import json
+import re
+import time
+from abc import ABC, abstractmethod
+from typing import Any, ClassVar
+
+import pandas as pd
+
+from feature_forge.config import Settings
+from feature_forge.exceptions import AgentError
+from feature_forge.llm.base import LLMClient
+from feature_forge.methods.malmas.types import AgentName
+from feature_forge.observability.structlog_config import get_logger
+from feature_forge.prompts import get_registry
+from feature_forge.types import FeatureSpec
+
+logger = get_logger(__name__)
+
+
+class Agent(ABC):
+    """Abstract base for feature generation agents.
+
+    Each agent specializes in a specific type of feature transformation
+    (unary, cross-compositional, aggregation, temporal, local transform,
+    local pattern).
+
+    Attributes:
+        name: Unique agent identifier.
+        config: Global settings instance.
+        llm_client: Async LLM client for generation calls.
+    """
+
+    def __init__(
+        self,
+        name: AgentName,
+        config: Settings,
+        llm_client: LLMClient,
+    ) -> None:
+        self.name = name
+        self.config = config
+        self.llm_client = llm_client
+
+    @property
+    @abstractmethod
+    def system_prompt(self) -> str:
+        """Return the system prompt template for this agent."""
+
+    @abstractmethod
+    async def generate(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        context: dict[str, Any],
+    ) -> list[FeatureSpec]:
+        """Generate feature specifications from input data.
+
+        Args:
+            X: Training features.
+            y: Training target.
+            context: Additional context including:
+                - description: Column metadata dict
+                - memory: Memory context string
+                - round_idx: Current round number
+                - positive_features: List of known good features
+                - negative_features: List of known bad features
+
+        Returns:
+            List of feature specification dicts.
+        """
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(name={self.name!r})"
+
+
+class BaseFeatureAgent(Agent):
+    """Base class for feature agents with common LLM interaction pattern.
+
+    Subclasses must define:
+    - `prompt_key`: Registry key (= yaml filename without extension)
+    - `agent_name`: Unique agent identifier string
+    """
+
+    prompt_key: str = ""
+    agent_name: str = ""
+
+    def __init__(
+        self,
+        config: Settings,
+        llm_client: LLMClient,
+    ) -> None:
+        super().__init__(name=AgentName(self.agent_name), config=config, llm_client=llm_client)
+        self._system_prompt = get_registry().get(self.prompt_key).system
+
+    @property
+    def system_prompt(self) -> str:
+        return self._system_prompt
+
+    def _build_user_prompt(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        context: dict[str, Any],
+    ) -> str:
+        """Build the user prompt from context."""
+        description = context.get("description", {})
+        memory = context.get("memory", "")
+        task = context.get("task", self.config.task)
+        positive = context.get("positive_features", [])
+        negative = context.get("negative_features", [])
+
+        if not description:
+            description = self._infer_column_descriptions(X)
+
+        parts: list[str] = []
+        parts.append(f"Task: {task}")
+        parts.append(f"Dataset columns ({len(X.columns)}):")
+        parts.append(json.dumps(description, indent=2, ensure_ascii=False))
+
+        if memory:
+            parts.append(f"\nMemory Context:\n{memory}")
+        if positive:
+            parts.append(f"\nKnown effective features: {positive}")
+        if negative:
+            parts.append(f"\nKnown ineffective features: {negative}")
+
+        return "\n\n".join(parts)
+
+    _column_desc_cache: ClassVar[
+        dict[tuple[int, int, tuple[str, ...]], dict[str, dict[str, Any]]]
+    ] = {}
+    _CACHE_MAX_SIZE: ClassVar[int] = 64
+
+    @staticmethod
+    def _infer_column_descriptions(X: pd.DataFrame) -> dict[str, dict[str, Any]]:
+        cache_key: tuple[int, int, tuple[str, ...]] = (X.shape[0], X.shape[1], tuple(X.columns))
+        cached = BaseFeatureAgent._column_desc_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        desc: dict[str, dict[str, Any]] = {}
+        for col in X.columns:
+            col_data = X[col]
+            info: dict[str, Any] = {"name": col}
+            if pd.api.types.is_numeric_dtype(col_data):
+                info["type"] = "numerical"
+                info["mean"] = round(float(col_data.mean()), 4)
+                info["std"] = round(float(col_data.std()), 4)
+                info["min"] = round(float(col_data.min()), 4)
+                info["max"] = round(float(col_data.max()), 4)
+                info["missing"] = int(col_data.isna().sum())
+            else:
+                info["type"] = "categorical"
+                info["unique"] = int(col_data.nunique())
+                info["top"] = str(col_data.mode().iloc[0]) if len(col_data) > 0 else ""
+                info["missing"] = int(col_data.isna().sum())
+            desc[col] = info
+
+        BaseFeatureAgent._column_desc_cache[cache_key] = desc
+        if len(BaseFeatureAgent._column_desc_cache) > BaseFeatureAgent._CACHE_MAX_SIZE:
+            BaseFeatureAgent._column_desc_cache.pop(next(iter(BaseFeatureAgent._column_desc_cache)))
+        return desc
+
+    async def generate(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        context: dict[str, Any],
+    ) -> list[FeatureSpec]:
+        """Generate feature specs via LLM."""
+        user_prompt = self._build_user_prompt(X, y, context)
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        logger.info(
+            "agent_generate_start",
+            agent=self.name,
+            num_columns=len(X.columns),
+            round_idx=context.get("round_idx"),
+        )
+        gen_t0 = time.perf_counter()
+        try:
+            response = await self.llm_client.complete_json(
+                messages=messages,
+                schema_description=(
+                    '{"features":[{"base_columns":["col_a"],'
+                    '"derived_features":[{"name":"f","type":"numerical",'
+                    '"transform":"op","logic":"..."}]}]}'
+                ),
+                temperature=self.config.llm.temperature,
+                max_tokens=self.config.llm.agent_max_tokens,
+            )
+            if not isinstance(response, (dict, list, str)):
+                raise AgentError(
+                    f"{self.name} expected JSON object/list/string, got {type(response).__name__}"
+                )
+            specs = self._parse_response(response)
+        except Exception as exc:
+            logger.error("agent_generate_error", agent=self.name, error=str(exc))
+            raise AgentError(f"{self.name} LLM call failed: {exc}") from exc
+        latency_ms = round((time.perf_counter() - gen_t0) * 1000, 1)
+        logger.info(
+            "agent_generate_complete",
+            agent=self.name,
+            num_specs=len(specs),
+            latency_ms=latency_ms,
+        )
+        return specs
+
+    def _parse_response(self, content: str | dict[str, Any] | list[Any]) -> list[FeatureSpec]:
+        if isinstance(content, (dict, list)):
+            data = content
+        else:
+            content = content.strip()
+            json_str = content
+            if content.startswith("```"):
+                json_str = re.sub(r"^```(?:json)?\s*", "", content)
+                json_str = re.sub(r"\s*```$", "", json_str).strip()
+
+            try:
+                data = json.loads(json_str)
+            except json.JSONDecodeError:
+                bracket_match = re.search(r"\[.*\]", content, re.DOTALL)
+                if bracket_match:
+                    try:
+                        data = json.loads(bracket_match.group())
+                    except json.JSONDecodeError as exc:
+                        logger.error(
+                            "agent_parse_error", agent=self.name, response_preview=content[:200]
+                        )
+                        raise AgentError(f"{self.name} invalid JSON: {exc}") from exc
+                else:
+                    logger.error(
+                        "agent_parse_error", agent=self.name, response_preview=content[:200]
+                    )
+                    raise AgentError(f"{self.name} could not extract JSON from response") from None
+
+        if isinstance(data, dict):
+            data = data.get("features", data)
+        if not isinstance(data, list):
+            raise AgentError(f"{self.name} expected JSON list/object, got {type(data).__name__}")
+
+        specs: list[FeatureSpec] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            base_cols = item.get("base_columns", [])
+            if isinstance(base_cols, str):
+                base_cols = [base_cols]
+            for feat in item.get("derived_features", []):
+                if not isinstance(feat, dict):
+                    continue
+                spec = FeatureSpec(
+                    name=feat.get("name", "unknown"),
+                    type=feat.get("type", "numerical"),
+                    transform=feat.get("transform", ""),
+                    logic=feat.get("logic", ""),
+                    base_columns=base_cols,
+                    agent_name=self.name,
+                )
+                specs.append(spec)
+        return specs
+
+
+class AgentRegistry:
+    """Discover agents via Python entry points.
+
+    Built-in agents are always available. Additional agents can be
+    registered by downstream packages via entry points.
+    """
+
+    ENTRY_POINT_GROUP = "feature_forge.methods.malmas.agents"
+
+    @classmethod
+    def discover(cls) -> dict[str, type[Agent]]:
+        """Discover all registered agents from entry points."""
+        agents: dict[str, type[Agent]] = {}
+        for ep in importlib.metadata.entry_points(group=cls.ENTRY_POINT_GROUP):
+            agents[ep.name] = ep.load()
+        return agents
+
+    _BUILTIN_AGENT_MODULES: ClassVar[dict[str, str]] = {
+        "unary": "feature_forge.methods.malmas.agents.unary:UnaryFeatureAgent",
+        "cross_compositional": "feature_forge.methods.malmas.agents.cross_compositional:CrossCompositionalAgent",
+        "aggregation": "feature_forge.methods.malmas.agents.aggregation:AggregationConstructAgent",
+        "temporal": "feature_forge.methods.malmas.agents.temporal:TemporalFeatureAgent",
+        "local_transform": "feature_forge.methods.malmas.agents.local_transform:LocalTransformAgent",
+        "local_pattern": "feature_forge.methods.malmas.agents.local_pattern:LocalPatternAgent",
+    }
+
+    @classmethod
+    def _load_agent(cls, qualified: str) -> type[Agent]:
+        """Import and return an agent class from a ``"module:Class"`` string."""
+        import importlib
+
+        module_path, attr = qualified.rsplit(":", 1)
+        mod = importlib.import_module(module_path)
+        return getattr(mod, attr)  # type: ignore[no-any-return]
+
+    @classmethod
+    def get_builtin_agents(cls) -> dict[str, type[Agent]]:
+        """Return built-in agents without entry point discovery."""
+        return {name: cls._load_agent(q) for name, q in cls._BUILTIN_AGENT_MODULES.items()}
+
+    @classmethod
+    def get_agent(cls, name: str) -> type[Agent]:
+        """Load a single built-in agent by name without importing the rest."""
+        qualified = cls._BUILTIN_AGENT_MODULES.get(name)
+        if qualified is None:
+            raise ValueError(f"Unknown built-in agent: {name}")
+        return cls._load_agent(qualified)
+
+    @classmethod
+    def builtin_agent_names(cls) -> list[str]:
+        """Return names of available built-in agents without importing them."""
+        return list(cls._BUILTIN_AGENT_MODULES.keys())
+
+    @classmethod
+    def get_all_agents(cls) -> dict[str, type[Agent]]:
+        """Return built-in + entry-point registered agents."""
+        agents = cls.get_builtin_agents()
+        agents.update(cls.discover())
+        return agents

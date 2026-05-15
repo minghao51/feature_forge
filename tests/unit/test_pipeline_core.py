@@ -8,8 +8,9 @@ import pandas as pd
 import pytest
 
 from feature_forge.config import Settings
+from feature_forge.exceptions import PipelineError
 from feature_forge.llm.base import LLMClient
-from feature_forge.pipeline.core import CodeGenerator, CorePipeline
+from feature_forge.methods.malmas.pipeline.core import CodeGenerator, CorePipeline
 from feature_forge.types import FeatureSpec
 
 
@@ -65,7 +66,11 @@ def generate_features(df):
     @pytest.mark.llm
     @pytest.mark.asyncio
     async def test_generate_code_sends_specs_in_prompt(self):
-        llm = FakeLLM(responses=["df['x'] = 1"])
+        llm = FakeLLM(
+            responses=[
+                "def generate_features(df):\n    out = df.copy()\n    out['x'] = 1\n    return out"
+            ]
+        )
         gen = CodeGenerator(llm)
         specs = [FeatureSpec(name="x", type="numerical")]
         await gen.generate_code(specs)
@@ -77,6 +82,15 @@ def generate_features(df):
         llm = FakeLLM(responses=[""])
         gen = CodeGenerator(llm)
         assert gen.llm_client is llm
+
+    @pytest.mark.llm
+    @pytest.mark.asyncio
+    async def test_generate_code_raises_after_two_invalid_attempts(self):
+        llm = FakeLLM(responses=["not python code", "still invalid syntax"])
+        gen = CodeGenerator(llm)
+        specs = [FeatureSpec(name="x", type="numerical")]
+        with pytest.raises(PipelineError, match="failed validation after 2 attempts"):
+            await gen.generate_code(specs)
 
 
 class TestCorePipeline:

@@ -95,9 +95,9 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
         import importlib
 
         _PIPELINE_SPEC: dict[str, tuple[str, str]] = {
-            "full": ("feature_forge.pipeline.iterative", "IterativePipeline"),
-            "no_memory": ("feature_forge.pipeline.ablations", "NoMemoryPipeline"),
-            "no_router": ("feature_forge.pipeline.ablations", "NoRouterPipeline"),
+            "full": ("feature_forge.methods.malmas.pipeline.iterative", "IterativePipeline"),
+            "no_memory": ("feature_forge.methods.malmas.pipeline.ablations", "NoMemoryPipeline"),
+            "no_router": ("feature_forge.methods.malmas.pipeline.ablations", "NoRouterPipeline"),
         }
 
         spec = _PIPELINE_SPEC.get(self.mode)
@@ -108,7 +108,7 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
             return cls(self.config, self.llm_client, sandbox=self.sandbox)
 
         if self.mode in _SINGLE_AGENT_MODES:
-            from feature_forge.pipeline.ablations import SingleAgentPipeline
+            from feature_forge.methods.malmas.pipeline.ablations import SingleAgentPipeline
 
             assert self.llm_client is not None
             return SingleAgentPipeline(
@@ -118,7 +118,7 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
                 sandbox=self.sandbox,
             )
 
-        from feature_forge.pipeline.iterative import IterativePipeline
+        from feature_forge.methods.malmas.pipeline.iterative import IterativePipeline
 
         assert self.llm_client is not None
         return IterativePipeline(self.config, self.llm_client, sandbox=self.sandbox)

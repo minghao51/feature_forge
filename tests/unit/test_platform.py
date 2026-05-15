@@ -9,11 +9,11 @@ import pandas as pd
 import pytest
 
 from feature_forge import ExperimentalPlatform
-from feature_forge.baselines import Baseline
 from feature_forge.config import Settings
+from feature_forge.methods import BaseMethod
 
 
-class DummyBaseline(Baseline):
+class DummyBaseline(BaseMethod):
     """A minimal baseline for testing."""
 
     def __init__(self, **kwargs: Any) -> None:
@@ -61,9 +61,9 @@ class TestExperimentalPlatform:
         platform = ExperimentalPlatform(config=settings)
         assert platform._config is settings
 
-    def test_list_baselines(self):
+    def test_list_methods(self):
         platform = ExperimentalPlatform()
-        names = platform.list_baselines()
+        names = platform.list_methods()
         assert "openfe" in names
         assert "caafe" in names
         assert "llmfe" in names
@@ -85,10 +85,10 @@ class TestExperimentalPlatform:
         names = platform.list_metrics()
         assert "auc" in names
 
-    def test_register_baseline(self):
+    def test_register_method(self):
         platform = ExperimentalPlatform()
-        platform.register_baseline("dummy", DummyBaseline)
-        names = platform.list_baselines()
+        platform.register_method("dummy", DummyBaseline)
+        names = platform.list_methods()
         assert "dummy" in names
 
     def test_register_dataset(self):
@@ -111,12 +111,12 @@ class TestExperimentalPlatform:
 
     def test_to_dataframe(self):
         results = [
-            {"dataset": "d1", "baseline": "b1", "cv_score": 0.9},
-            {"dataset": "d1", "baseline": "b2", "cv_score": 0.8},
+            {"dataset": "d1", "method": "b1", "cv_score": 0.9},
+            {"dataset": "d1", "method": "b2", "cv_score": 0.8},
         ]
         df = ExperimentalPlatform.to_dataframe(results)
         assert len(df) == 2
-        assert list(df.columns) == ["dataset", "baseline", "cv_score"]
+        assert list(df.columns) == ["dataset", "method", "cv_score"]
 
     def test_report_empty(self):
         platform = ExperimentalPlatform()
@@ -125,25 +125,25 @@ class TestExperimentalPlatform:
 
     def test_report_best(self):
         results = [
-            {"dataset": "d1", "baseline": "b1", "cv_score": 0.9},
-            {"dataset": "d1", "baseline": "b2", "cv_score": 0.8},
+            {"dataset": "d1", "method": "b1", "cv_score": 0.9},
+            {"dataset": "d1", "method": "b2", "cv_score": 0.8},
         ]
         platform = ExperimentalPlatform()
         best = platform.report_best(results)
         assert len(best) == 1
-        assert best.iloc[0]["baseline"] == "b1"
+        assert best.iloc[0]["method"] == "b1"
 
-    @patch("feature_forge.platform.BaselineRegistry")
+    @patch("feature_forge.platform.MethodRegistry")
     @patch("feature_forge.platform.ExperimentRunner")
     def test_run_basic(self, mock_runner, mock_registry, sample_X, sample_y):
-        mock_registry.get_all_baselines.return_value = {"dummy": DummyBaseline}
+        mock_registry.get_all_methods.return_value = {"dummy": DummyBaseline}
 
         mock_runner_instance = MagicMock()
         mock_runner.return_value = mock_runner_instance
         mock_runner_instance.run.return_value = [
             {
                 "dataset": "titanic",
-                "baseline": "dummy",
+                "method": "dummy",
                 "model": "xgboost",
                 "seed": 42,
                 "cv_score": 0.9,
@@ -169,16 +169,16 @@ class TestExperimentalPlatform:
         }
 
         sample_X["target"] = sample_y
-        results = platform.run(datasets=["titanic"], baselines=["dummy"])
+        results = platform.run(datasets=["titanic"], methods=["dummy"])
         assert len(results) == 1
-        assert results[0]["baseline"] == "dummy"
+        assert results[0]["method"] == "dummy"
 
-    @patch("feature_forge.platform.BaselineRegistry")
-    def test_run_with_extra_baseline(self, mock_registry):
-        mock_registry.get_all_baselines.return_value = {}
+    @patch("feature_forge.platform.MethodRegistry")
+    def test_run_with_extra_method(self, mock_registry):
+        mock_registry.get_all_methods.return_value = {}
 
         platform = ExperimentalPlatform()
-        platform.register_baseline("custom", DummyBaseline)
+        platform.register_method("custom", DummyBaseline)
 
         platform._dataset_registry = MagicMock()
         platform._dataset_registry.list.return_value = []
@@ -194,5 +194,5 @@ class TestExperimentalPlatform:
             "metadata": {},
         }
 
-        names = platform.list_baselines()
+        names = platform.list_methods()
         assert "custom" in names

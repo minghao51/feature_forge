@@ -66,10 +66,10 @@ MALMAS decomposes automated feature engineering into a multi-round, multi-agent 
 
 ### Implementation Files
 
-- Pipeline orchestration: `src/feature_forge/pipeline/core.py`, `src/feature_forge/pipeline/iterative.py`
+- Pipeline orchestration: `src/feature_forge/methods/malmas/pipeline/core.py`, `src/feature_forge/methods/malmas/pipeline/iterative.py`
 - Sklearn-compatible API: `src/feature_forge/api.py`
-- Agent base class: `src/feature_forge/agents/base.py`
-- Agent implementations: `src/feature_forge/agents/unary.py`, `cross_compositional.py`, `aggregation.py`, `temporal.py`, `local_transform.py`, `local_pattern.py`
+- Agent base class: `src/feature_forge/methods/malmas/agents/base.py`
+- Agent implementations: `src/feature_forge/methods/malmas/agents/unary.py`, `cross_compositional.py`, `aggregation.py`, `temporal.py`, `local_transform.py`, `local_pattern.py`
 
 ---
 
@@ -98,7 +98,7 @@ MALMAS decomposes automated feature engineering into a multi-round, multi-agent 
 
 `OpenFEBaseline` wraps the `openfe` Python package with best-effort artifact extraction (selected operators, candidate features, feature importances). Since OpenFE doesn't generate code, artifacts are operator names and importance scores.
 
-**Implementation:** `src/feature_forge/baselines/openfe.py`
+**Implementation:** `src/feature_forge/methods/openfe.py`
 
 ---
 
@@ -129,7 +129,7 @@ CAAFE improved performance on 11/14 benchmark datasets, boosting mean ROC AUC fr
 | `unified` (default) | Reimplementation using our `CVEvaluator` and `SandboxedExecutor` for full artifact control and per-feature gain tracking |
 | `fidelity` | Wraps the original `caafe` library for exact reproduction of published behavior |
 
-**Implementation:** `src/feature_forge/baselines/caafe.py`
+**Implementation:** `src/feature_forge/methods/caafe.py`
 
 ---
 
@@ -159,7 +159,7 @@ LLM-FE outperforms traditional baselines (OCTree) across 19 classification and 1
 - **`single_shot`**: One LLM call generates all features at once.
 - **`iterative`**: Sequential LLM calls with CV-based keep/discard after each iteration.
 
-**Implementation:** `src/feature_forge/baselines/llmfe.py`
+**Implementation:** `src/feature_forge/methods/llmfe.py`
 
 ---
 
@@ -188,7 +188,7 @@ Malmus is not based on a published paper. It is a novel contribution of Feature 
 | `single_shot` | One LLM call generates all features at once |
 | `iterative` | Sequential LLM calls with CV-based keep/discard and feedback loops |
 
-**Implementation:** `src/feature_forge/baselines/malmus.py`
+**Implementation:** `src/feature_forge/methods/malmus.py`
 
 ---
 
@@ -215,7 +215,7 @@ Agents are discoverable via Python entry points (`feature_forge.agents` group), 
 
 **Source:** MALMAS paper, Section 3.2 ("Specialized Feature Generation Agents")
 
-**Implementation:** `src/feature_forge/agents/`
+**Implementation:** `src/feature_forge/methods/malmas/agents/`
 
 ---
 
@@ -242,7 +242,7 @@ The conceptual memory tier uses a two-level LLM summarization process:
 
 This approach prevents prompt length explosion by replacing raw history with compressed heuristics.
 
-**Implementation:** `src/feature_forge/memory/base.py`, `src/feature_forge/memory/conceptual.py`
+**Implementation:** `src/feature_forge/methods/malmas/memory/base.py`, `src/feature_forge/methods/malmas/memory/conceptual.py`
 
 ---
 
@@ -259,7 +259,7 @@ The Router Agent dynamically selects which specialized agents to activate for ea
 
 The router includes a warmup phase (1 round by default) where all agents run to collect initial performance data.
 
-**Implementation:** `src/feature_forge/agents/router.py`
+**Implementation:** `src/feature_forge/methods/malmas/agents/router.py`
 
 ---
 
@@ -279,6 +279,11 @@ Supported metrics: `auc`, `acc`, `f1`, `rmse`, `mae`, `r2`
 1. **AST Validation**: Parses code to block dangerous operations (`import os`, `subprocess`, file I/O, network calls).
 2. **Execution**: Runs validated code in a namespace with only `pandas`, `numpy`, and the input DataFrame.
 3. **Output Validation**: Ensures the result is a pandas DataFrame with matching index.
+
+Threat model and trust boundary:
+- Generated code is treated as potentially untrusted and is only allowed to transform in-memory tabular data.
+- File-system and network operations are blocked by validation/runtime guards.
+- This is incremental hardening, not full container/jail isolation; use an external sandbox boundary for high-risk multi-tenant workloads.
 
 **Implementation:** `src/feature_forge/evaluation/sandbox.py`
 

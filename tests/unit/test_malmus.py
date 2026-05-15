@@ -1,4 +1,4 @@
-"""Tests for MalmusBaseline with structured JSON output."""
+"""Tests for MalmusMethod with structured JSON output."""
 
 from __future__ import annotations
 
@@ -7,14 +7,14 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from feature_forge.baselines import BaselineRegistry
-from feature_forge.baselines.base import Baseline
-from feature_forge.baselines.malmus import (
+from feature_forge.llm.base import LLMResponse
+from feature_forge.methods import MethodRegistry
+from feature_forge.methods.base import BaseMethod
+from feature_forge.methods.malmus import (
     FeatureDefinition,
-    MalmusBaseline,
+    MalmusMethod,
     StructuredFeatureOutput,
 )
-from feature_forge.llm.base import LLMResponse
 
 
 class FakeJsonLLM:
@@ -112,26 +112,26 @@ class TestDefsToCode:
             FeatureDefinition(name="sum_ab", code="df['a'] + df['b']", description="sum"),
             FeatureDefinition(name="log_a", code="np.log1p(df['a'])", description="log"),
         ]
-        code = MalmusBaseline._defs_to_code(defs)
+        code = MalmusMethod._defs_to_code(defs)
         assert "def generate_features(df):" in code
         assert "result['sum_ab'] = df['a'] + df['b']" in code
         assert "result['log_a'] = np.log1p(df['a'])" in code
 
     def test_empty_defs_produces_empty_function(self):
-        code = MalmusBaseline._defs_to_code([])
+        code = MalmusMethod._defs_to_code([])
         assert "def generate_features(df):" in code
 
 
-class TestMalmusBaselineSingleShot:
+class TestMalmusMethodSingleShot:
     def test_init(self):
         llm = FakeJsonLLM(SINGLE_SHOT_JSON)
-        baseline = MalmusBaseline(llm_client=llm)
+        baseline = MalmusMethod(llm_client=llm)
         assert baseline.name == "malmus"
         assert baseline.mode == "single_shot"
 
     def test_fit_transform(self):
         llm = FakeJsonLLM(SINGLE_SHOT_JSON)
-        baseline = MalmusBaseline(llm_client=llm, n_features=2)
+        baseline = MalmusMethod(llm_client=llm, n_features=2)
         X = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
         y = pd.Series([0, 1, 0])
         result = baseline.fit_transform(X, y)
@@ -142,13 +142,13 @@ class TestMalmusBaselineSingleShot:
 
     def test_transform_before_fit_raises(self):
         llm = FakeJsonLLM({})
-        baseline = MalmusBaseline(llm_client=llm)
+        baseline = MalmusMethod(llm_client=llm)
         with pytest.raises(RuntimeError, match="not fitted"):
             baseline.transform(pd.DataFrame())
 
     def test_artifacts_stored(self):
         llm = FakeJsonLLM(SINGLE_SHOT_JSON)
-        baseline = MalmusBaseline(llm_client=llm)
+        baseline = MalmusMethod(llm_client=llm)
         X = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
         y = pd.Series([0, 1])
         baseline.fit(X, y)
@@ -159,7 +159,7 @@ class TestMalmusBaselineSingleShot:
 
     def test_feature_metadata(self):
         llm = FakeJsonLLM(SINGLE_SHOT_JSON)
-        baseline = MalmusBaseline(llm_client=llm)
+        baseline = MalmusMethod(llm_client=llm)
         X = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
         y = pd.Series([0, 1])
         baseline.fit(X, y)
@@ -170,7 +170,7 @@ class TestMalmusBaselineSingleShot:
 
     def test_generated_scripts(self):
         llm = FakeJsonLLM(SINGLE_SHOT_JSON)
-        baseline = MalmusBaseline(llm_client=llm)
+        baseline = MalmusMethod(llm_client=llm)
         X = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
         y = pd.Series([0, 1])
         baseline.fit(X, y)
@@ -180,28 +180,28 @@ class TestMalmusBaselineSingleShot:
 
     def test_invalid_json_raises(self):
         llm = FakeJsonLLM({"not_features": []})
-        baseline = MalmusBaseline(llm_client=llm)
+        baseline = MalmusMethod(llm_client=llm)
         X = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
         y = pd.Series([0, 1])
         with pytest.raises(Exception, match="invalid structured output"):
             baseline.fit(X, y)
 
 
-class TestMalmusBaselineRegistry:
+class TestMalmusMethodRegistry:
     def test_malmus_in_builtin_baselines(self):
-        baselines = BaselineRegistry.get_builtin_baselines()
+        baselines = MethodRegistry.get_builtin_methods()
         assert "malmus" in baselines
-        assert baselines["malmus"] is MalmusBaseline
+        assert baselines["malmus"] is MalmusMethod
 
     def test_malmus_in_all_baselines(self):
-        baselines = BaselineRegistry.get_all_baselines()
+        baselines = MethodRegistry.get_all_methods()
         assert "malmus" in baselines
 
     def test_is_subclass_of_baseline(self):
-        assert issubclass(MalmusBaseline, Baseline)
+        assert issubclass(MalmusMethod, BaseMethod)
 
     def test_existing_baselines_still_registered(self):
-        baselines = BaselineRegistry.get_builtin_baselines()
+        baselines = MethodRegistry.get_builtin_methods()
         assert "openfe" in baselines
         assert "caafe" in baselines
         assert "llmfe" in baselines

@@ -11,7 +11,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from feature_forge.agents.router import RouterAgent
 from feature_forge.config import Settings
 from feature_forge.evaluation.metrics import (
     auc_score,
@@ -22,7 +21,8 @@ from feature_forge.evaluation.metrics import (
 )
 from feature_forge.evaluation.sandbox import SandboxedExecutor, _to_parquet_safe
 from feature_forge.experiment.matrix import ExperimentMatrix
-from feature_forge.memory.base import AgentMemory
+from feature_forge.methods.malmas.agents.router import RouterAgent
+from feature_forge.methods.malmas.memory.base import AgentMemory
 from feature_forge.utils import strip_markdown_fences
 
 pytestmark = pytest.mark.metamorphic

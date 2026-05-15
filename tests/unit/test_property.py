@@ -23,7 +23,7 @@ from feature_forge.evaluation.metrics import (
 from feature_forge.evaluation.sandbox import _to_parquet_safe
 from feature_forge.experiment.matrix import ExperimentMatrix
 from feature_forge.llm.cache import compute_cache_key
-from feature_forge.memory.base import AgentMemory
+from feature_forge.methods.malmas.memory.base import AgentMemory
 from feature_forge.types import FeatureSpec
 from feature_forge.utils import strip_markdown_fences
 from tests.strategies import (

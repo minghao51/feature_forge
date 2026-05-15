@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from feature_forge.evaluation.model_factory import ModelFactory, ModelRegistry
+from feature_forge.exceptions import EvaluationError
 
 
 class TestModelRegistry:
@@ -35,7 +36,7 @@ class TestModelRegistry:
         assert callable(factory)
 
     def test_get_raises_on_unknown(self):
-        with pytest.raises(ValueError, match="Unknown model"):
+        with pytest.raises(EvaluationError, match="Unknown model"):
             ModelRegistry.get("nonexistent_model")
 
     def test_register_adds_model(self):
@@ -60,7 +61,7 @@ class TestModelRegistry:
 
     def test_factory_raises_on_unknown(self):
         factory = ModelFactory(random_state=42)
-        with pytest.raises(ValueError, match="Unknown model"):
+        with pytest.raises(EvaluationError, match="Unknown model"):
             factory.get_model("nonexistent", "classification")
 
     @patch("importlib.metadata.entry_points")

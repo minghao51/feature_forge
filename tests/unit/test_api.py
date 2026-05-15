@@ -103,7 +103,7 @@ class TestFeatureForgeInit:
             llm_client=StubProvider(),
             mode="nonexistent_mode",
         )
-        from feature_forge.pipeline.iterative import IterativePipeline
+        from feature_forge.methods.malmas.pipeline.iterative import IterativePipeline
 
         pipeline = fe._get_pipeline()
         assert isinstance(pipeline, IterativePipeline)

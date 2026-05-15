@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import ast
 import builtins
+import hashlib
 import multiprocessing as mp
 import os
 import queue
+import socket
 import tempfile
 import time
 from dataclasses import dataclass
@@ -137,6 +139,31 @@ class SandboxedExecutor:
         "StopIteration",
     }
     ALLOWED_IMPORTS: ClassVar[set[str]] = {"pandas", "numpy", "math"}
+    BLOCKED_IO_ATTRS: ClassVar[set[str]] = {
+        "read_csv",
+        "read_parquet",
+        "read_json",
+        "read_pickle",
+        "read_table",
+        "read_excel",
+        "read_hdf",
+        "read_sql",
+        "read_sql_query",
+        "read_sql_table",
+        "to_csv",
+        "to_parquet",
+        "to_json",
+        "to_pickle",
+        "to_excel",
+        "to_sql",
+    }
+    BLOCKED_NETWORK_ATTRS: ClassVar[set[str]] = {
+        "urlopen",
+        "request",
+        "requests",
+        "connect",
+        "create_connection",
+    }
 
     def __init__(
         self,
@@ -145,22 +172,47 @@ class SandboxedExecutor:
     ) -> None:
         self.limits = SandboxLimits(timeout_seconds=timeout_seconds, max_memory_mb=max_memory_mb)
 
-    def execute(self, code: str, df: pd.DataFrame) -> pd.DataFrame:
+    def execute(
+        self,
+        code: str,
+        df: pd.DataFrame,
+        *,
+        source: str = "unknown",
+        agent_name: str = "unknown",
+    ) -> pd.DataFrame:
         """Execute feature generation code safely."""
         execute_t0 = time.perf_counter()
-        logger.info("sandbox_execute_start", code_length=len(code), input_shape=df.shape)
+        code_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()[:16]
+        logger.info(
+            "sandbox_execute_start",
+            code_length=len(code),
+            input_shape=df.shape,
+            source=source,
+            agent=agent_name,
+            code_hash=code_hash,
+        )
         tree = self._parse_and_validate(code)
         payload = ast.unparse(tree) if hasattr(ast, "unparse") else code
-        result = self._execute_in_worker(payload, df)
+        result = self._execute_in_worker(payload, df, source=source, agent_name=agent_name)
         latency_ms = round((time.perf_counter() - execute_t0) * 1000, 1)
         logger.info(
             "sandbox_execute_complete",
             result_shape=result.shape,
             latency_ms=latency_ms,
+            source=source,
+            agent=agent_name,
+            code_hash=code_hash,
         )
         return result
 
-    def _execute_in_worker(self, code: str, df: pd.DataFrame) -> pd.DataFrame:
+    def _execute_in_worker(
+        self,
+        code: str,
+        df: pd.DataFrame,
+        *,
+        source: str = "unknown",
+        agent_name: str = "unknown",
+    ) -> pd.DataFrame:
         ctx = mp.get_context("spawn")
         response_queue: mp.Queue[tuple[str, str]] = ctx.Queue(maxsize=1)
         with tempfile.NamedTemporaryFile(
@@ -170,7 +222,7 @@ class SandboxedExecutor:
             input_path = input_file.name
         proc = ctx.Process(
             target=_sandbox_worker_main,
-            args=(code, input_path, self.limits.max_memory_mb, response_queue),
+            args=(code, input_path, self.limits.max_memory_mb, response_queue, source, agent_name),
             daemon=True,
         )
         proc.start()
@@ -253,6 +305,16 @@ class SandboxedExecutor:
                         "sandbox_validation_blocked", reason=f"forbidden_dunder: {node.attr}"
                     )
                     raise SandboxValidationError(f"Forbidden dunder attribute access: {node.attr}")
+                if node.attr in self.BLOCKED_IO_ATTRS:
+                    logger.warning(
+                        "sandbox_validation_blocked", reason=f"blocked_io_attr: {node.attr}"
+                    )
+                    raise SandboxValidationError(f"Blocked file I/O API usage: {node.attr}")
+                if node.attr in self.BLOCKED_NETWORK_ATTRS:
+                    logger.warning(
+                        "sandbox_validation_blocked", reason=f"blocked_network_attr: {node.attr}"
+                    )
+                    raise SandboxValidationError(f"Blocked network API usage: {node.attr}")
 
         return tree
 
@@ -262,13 +324,30 @@ def _sandbox_worker_main(
     input_parquet_path: str,
     max_memory_mb: int,
     response_queue: mp.Queue[tuple[str, str]],
+    source: str = "unknown",
+    agent_name: str = "unknown",
 ) -> None:
     _apply_resource_limits(max_memory_mb=max_memory_mb)
+    code_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()[:16]
+
+    def _blocked_network(*_args: Any, **_kwargs: Any) -> Any:
+        logger.warning(
+            "sandbox_runtime_blocked",
+            category="network",
+            reason="network_blocked",
+            source=source,
+            agent=agent_name,
+            code_hash=code_hash,
+        )
+        raise PermissionError("Network access is blocked in sandbox runtime")
+
     try:
         df = pd.read_parquet(input_parquet_path)
     except Exception as exc:
         response_queue.put(("error", f"Failed to read input data: {exc}"))
         return
+
+    socket.create_connection = _blocked_network
 
     import builtins as _builtins
 

@@ -61,7 +61,7 @@ observability = [
     "opentelemetry-api>=1.20",
     "langfuse>=2.0",
     "wandb>=0.16",
-    "diskcache>=5.6",
+    "diskcache>=5.6.3",
     "pyarrow>=23.0.1",
 ]
 all = [
@@ -75,7 +75,7 @@ all = [
     "litellm>=1.40",
     "opentelemetry-api>=1.20",
     "langfuse>=2.0",
-    "diskcache>=5.6",
+    "diskcache>=5.6.3",
     "pyarrow>=23.0.1",
 ]
 
@@ -107,19 +107,20 @@ dev = [
     "types-pyyaml>=6.0.12.20260510",
 ]
 
-[project.entry-points."feature_forge.agents"]
-unary = "feature_forge.agents.unary:UnaryFeatureAgent"
-cross_compositional = "feature_forge.agents.cross_compositional:CrossCompositionalAgent"
-aggregation = "feature_forge.agents.aggregation:AggregationConstructAgent"
-temporal = "feature_forge.agents.temporal:TemporalFeatureAgent"
-local_transform = "feature_forge.agents.local_transform:LocalTransformAgent"
-local_pattern = "feature_forge.agents.local_pattern:LocalPatternAgent"
+[project.entry-points."feature_forge.methods.malmas.agents"]
+unary = "feature_forge.methods.malmas.agents.unary:UnaryFeatureAgent"
+cross_compositional = "feature_forge.methods.malmas.agents.cross_compositional:CrossCompositionalAgent"
+aggregation = "feature_forge.methods.malmas.agents.aggregation:AggregationConstructAgent"
+temporal = "feature_forge.methods.malmas.agents.temporal:TemporalFeatureAgent"
+local_transform = "feature_forge.methods.malmas.agents.local_transform:LocalTransformAgent"
+local_pattern = "feature_forge.methods.malmas.agents.local_pattern:LocalPatternAgent"
 
-[project.entry-points."feature_forge.baselines"]
-openfe = "feature_forge.baselines.openfe:OpenFEBaseline"
-caafe = "feature_forge.baselines.caafe:CAAFEBaseline"
-llmfe = "feature_forge.baselines.llmfe:LLMFEBaseline"
-malmus = "feature_forge.baselines.malmus:MalmusBaseline"
+[project.entry-points."feature_forge.methods"]
+malmas = "feature_forge.methods.malmas.method:MALMASMethod"
+caafe = "feature_forge.methods.caafe.method:CAAFEMethod"
+llmfe = "feature_forge.methods.llmfe.method:LLMFEMethod"
+openfe = "feature_forge.methods.openfe.method:OpenFEMethod"
+malmus = "feature_forge.methods.malmus.method:MalmusMethod"
 
 [project.entry-points."feature_forge.metrics"]
 auc = "feature_forge.evaluation.metrics:auc_score"
@@ -142,10 +143,10 @@ titanic = "feature_forge.data.registry:titanic_loader"
 house_prices = "feature_forge.data.registry:house_prices_loader"
 
 [project.urls]
-Homepage = "https://github.com/your-org/feature-forge"
+Homepage = "https://github.com/minghao51/feature_forge"
 Documentation = "https://feature-forge.readthedocs.io"
-Repository = "https://github.com/your-org/feature-forge"
-Issues = "https://github.com/your-org/feature-forge/issues"
+Repository = "https://github.com/minghao51/feature_forge"
+Issues = "https://github.com/minghao51/feature_forge/issues"
 
 # ─────────────────────────────────────────────────────────────
 # Tool Configurations
@@ -154,6 +155,7 @@ Issues = "https://github.com/your-org/feature-forge/issues"
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+exclude = ["*.ipynb"]
 
 [tool.ruff.lint]
 select = [
@@ -187,6 +189,10 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 warn_unused_configs = true
 show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true
 
 [[tool.mypy.overrides]]
 module = [

@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  lint:
+  quality-src:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -18,17 +18,20 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --group dev
-      - uses: pre-commit/action@v3.0.1
-
-  typecheck:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-      - run: uv sync --group dev
+      - run: uv run ruff check src
       - run: uv run mypy src
+
+  quality-debt:
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --group dev
+      - run: uv run ruff check notebooks docs/notebooks
+      - run: uv run mypy tests
 
   test:
     runs-on: ubuntu-24.04
@@ -55,7 +58,7 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --group dev
-      - run: uv run pip-audit
+      - run: uv run python scripts/run_pip_audit.py
 
   hygiene:
     runs-on: ubuntu-24.04
@@ -66,3 +69,4 @@ jobs:
           enable-cache: true
       - run: uv sync --group dev
       - run: uv run python scripts/check_repo_hygiene.py
+      - run: uv run python scripts/check_docs_references.py

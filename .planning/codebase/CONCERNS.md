@@ -26,28 +26,28 @@ _Analyzed: 2026-05-12 | ~7,400 LOC across 30+ modules, ~3,300 LOC tests_
 ## High
 
 ### PERF-1: Sequential feature evaluation (N CV runs per round)
-- **File:** `src/feature_forge/pipeline/core.py:200-211`
+- **File:** `src/feature_forge/methods/malmas/pipeline/core.py:200-211`
 - Features are evaluated one at a time in a `for` loop. With 50 candidates × 5 folds = 250 model fits per round.
 - **Recommendation:** Evaluate features in parallel using `asyncio.gather` or batch evaluation.
 
 ### PERF-2: Baseline re-evaluated every round
-- **File:** `src/feature_forge/pipeline/core.py:196`
+- **File:** `src/feature_forge/methods/malmas/pipeline/core.py:196`
 - `evaluate_baseline()` called every round even though `X_train_enhanced` only changes by adding columns.
 - **Recommendation:** Cache baseline when base features haven't changed.
 
 ### ARCH-2: Memoized context built but marginal utility
-- **File:** `src/feature_forge/pipeline/iterative.py:139-142`
+- **File:** `src/feature_forge/methods/malmas/pipeline/iterative.py:139-142`
 - `_build_agent_context` adds `memory`, `positive_features`, `negative_features` to each agent's context, but `BaseFeatureAgent._build_user_prompt` only displays them as text — they never actually influence LLM generation beyond being appended to the prompt.
 
 ### ARCH-3: No retry logic for LLM API calls at provider level
 - The base `LLMClient.complete()`/`complete_json()` methods now support retry via `RetryConfig`, but `_retry()` only activates when a `RetryConfig` is explicitly set on the client.
 
 ### BUG-1: Broad exception catch in router silently swallows errors
-- **File:** `src/feature_forge/agents/router.py:207-208`
+- **File:** `src/feature_forge/methods/malmas/agents/router.py:207-208`
 - `except Exception: pass` silently swallows all LLM errors during agent selection.
 
 ### BUG-2: `NoMemoryPipeline._post_round` still updates router performance
-- **File:** `src/feature_forge/pipeline/ablations.py:36-40`
+- **File:** `src/feature_forge/methods/malmas/pipeline/ablations.py:36-40`
 - The "no memory" ablation still tracks router performance, which may confound results.
 
 ---
@@ -92,7 +92,7 @@ _Analyzed: 2026-05-12 | ~7,400 LOC across 30+ modules, ~3,300 LOC tests_
 ## Low
 
 ### STYLE-3: Inconsistent type annotations in ablations
-- **File:** `src/feature_forge/pipeline/ablations.py:65-68`
+- **File:** `src/feature_forge/methods/malmas/pipeline/ablations.py:65-68`
 - `SingleAgentPipeline._select_agents` uses `*args, **kwargs` without type hints.
 
 ### TD-8: `wandb/` and `htmlcov/` artifacts in working tree
@@ -107,10 +107,10 @@ _Analyzed: 2026-05-12 | ~7,400 LOC across 30+ modules, ~3,300 LOC tests_
 - Missing `__all__` means `from feature_forge import *` imports everything.
 
 ### PERF-4: `MalmusBaseline` iterative mode evaluates features one at a time
-- **File:** `src/feature_forge/baselines/malmus.py:190-199`
+- **File:** `src/feature_forge/methods/malmus.py:190-199`
 
 ### PERF-5: `_infer_column_descriptions` recomputes stats every agent call
-- **File:** `src/feature_forge/agents/base.py:139-159`
+- **File:** `src/feature_forge/methods/malmas/agents/base.py:139-159`
 - Column statistics recomputed 6+ times per round on same data.
 - **Recommendation:** Cache column descriptions per pipeline run.
 

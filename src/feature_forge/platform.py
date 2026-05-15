@@ -1,7 +1,7 @@
 """Unified experimental platform for feature_forge.
 
-Provides a one-liner API for running baseline comparison experiments.
-Wraps DatasetRegistry, BaselineRegistry, CVEvaluator, ModelFactory,
+Provides a one-liner API for running method comparison experiments.
+Wraps DatasetRegistry, MethodRegistry, CVEvaluator, ModelFactory,
 ExperimentRunner, and Reporter.
 """
 
@@ -12,26 +12,26 @@ from typing import Any
 
 import pandas as pd
 
-from feature_forge.baselines import Baseline, BaselineRegistry
 from feature_forge.config import Settings, get_settings
 from feature_forge.data import DatasetRegistry
 from feature_forge.evaluation import CVEvaluator, MetricRegistry, ModelFactory, ModelRegistry
 from feature_forge.exceptions import EvaluationError
 from feature_forge.experiment import ExperimentRunner, ExperimentTracker, NoOpTracker, Reporter
+from feature_forge.methods import BaseMethod, MethodRegistry
 from feature_forge.observability.structlog_config import get_logger
 
 logger = get_logger(__name__)
 
 
 class ExperimentalPlatform:
-    """Unified facade for feature engineering baseline comparison.
+    """Unified facade for feature engineering method comparison.
 
     Usage::
 
         platform = ExperimentalPlatform()
         results = platform.run(
             datasets=["titanic"],
-            baselines=["malmus", "caafe"],
+            methods=["malmus", "caafe"],
             models=["xgboost"],
         )
         platform.report(results)
@@ -44,7 +44,7 @@ class ExperimentalPlatform:
         self._config = config
         self._settings: Settings | None = None
         self._dataset_registry: DatasetRegistry | None = None
-        self._extra_baselines: dict[str, type[Baseline]] = {}
+        self._extra_methods: dict[str, type[BaseMethod]] = {}
         self._extra_models: dict[str, Any] = {}
         self._extra_metrics: dict[str, Any] = {}
 
@@ -76,9 +76,9 @@ class ExperimentalPlatform:
 
     # ── Registration ───────────────────────────────────────────
 
-    def register_baseline(self, name: str, cls: type[Baseline]) -> None:
-        """Register a baseline class programmatically."""
-        self._extra_baselines[name] = cls
+    def register_method(self, name: str, cls: type[BaseMethod]) -> None:
+        """Register a method class programmatically."""
+        self._extra_methods[name] = cls
 
     def register_dataset(self, name: str, info: dict[str, Any]) -> None:
         """Register a dataset programmatically."""
@@ -94,10 +94,10 @@ class ExperimentalPlatform:
 
     # ── Listing ────────────────────────────────────────────────
 
-    def list_baselines(self) -> list[str]:
-        """List all available baselines (built-in + discovered + registered)."""
-        builtin = list(BaselineRegistry.get_all_baselines().keys())
-        extra = list(self._extra_baselines.keys())
+    def list_methods(self) -> list[str]:
+        """List all available methods (built-in + discovered + registered)."""
+        builtin = list(MethodRegistry.get_all_methods().keys())
+        extra = list(self._extra_methods.keys())
         return sorted(set(builtin + extra))
 
     def list_datasets(self) -> list[str]:
@@ -117,7 +117,7 @@ class ExperimentalPlatform:
     def run(
         self,
         datasets: list[str],
-        baselines: list[str],
+        methods: list[str],
         models: list[str] | None = None,
         mode: str | None = None,
         cv_folds: int | None = None,
@@ -126,15 +126,14 @@ class ExperimentalPlatform:
         parallel: bool = False,
         max_workers: int = 1,
         progress: bool = True,
-        **kwargs: Any,
     ) -> list[dict[str, Any]]:
-        """Execute a baseline comparison experiment.
+        """Execute a method comparison experiment.
 
         Args:
             datasets: Dataset names to evaluate on.
-            baselines: Baseline method names to compare.
+            methods: Method names to compare.
             models: Model names for CV evaluation (default: ``['xgboost']``).
-            mode: Baseline-specific mode (e.g. ``'single_shot'``, ``'iterative'``).
+            mode: Method-specific mode (e.g. ``'single_shot'``, ``'iterative'``).
             cv_folds: Override CV folds for this run.
             seeds: Random seeds (default: ``[42]``).
             tracker: Optional experiment tracker (default: ``NoOpTracker``).
@@ -143,26 +142,26 @@ class ExperimentalPlatform:
             progress: Show ``tqdm`` progress bar.
 
         Returns:
-            List of result dicts with keys: dataset, baseline, model, seed,
+            List of result dicts with keys: dataset, method, model, seed,
             cv_score, gain, baseline_score, num_features_generated.
         """
         models = models or ["xgboost"]
         seeds = seeds or [42]
 
-        # Resolve baselines
-        all_baselines = dict(BaselineRegistry.get_all_baselines())
-        all_baselines.update(self._extra_baselines)
+        # Resolve methods
+        all_methods = dict(MethodRegistry.get_all_methods())
+        all_methods.update(self._extra_methods)
 
         # Build config matrix
         configs: list[dict[str, Any]] = []
         for ds_name in datasets:
-            for bl_name in baselines:
+            for method_name in methods:
                 for model_name in models:
                     for seed in seeds:
                         configs.append(
                             {
                                 "dataset": ds_name,
-                                "baseline": bl_name,
+                                "method": method_name,
                                 "model": model_name,
                                 "seed": seed,
                             }
@@ -179,7 +178,7 @@ class ExperimentalPlatform:
 
         def experiment_fn(config: dict[str, Any]) -> dict[str, Any]:
             ds_name = config["dataset"]
-            bl_name = config["baseline"]
+            method_name = config["method"]
             model_name = config["model"]
             seed = config["seed"]
 
@@ -194,28 +193,28 @@ class ExperimentalPlatform:
             y = train_df[target_col]
             X = train_df.drop(columns=[target_col])
 
-            # Resolve baseline
-            bl_cls = all_baselines.get(bl_name)
-            if bl_cls is None:
-                raise EvaluationError(f"Baseline '{bl_name}' not found")
+            # Resolve method
+            method_cls = all_methods.get(method_name)
+            if method_cls is None:
+                raise EvaluationError(f"Method '{method_name}' not found")
 
             # Update random state for this seed
             run_settings.random_state = seed
             model_factory.random_state = seed
 
-            # Construct baseline — pass only supported kwargs
-            bl_kwargs: dict[str, Any] = {}
-            sig = inspect.signature(bl_cls.__init__)
+            # Construct method — pass only supported kwargs
+            method_kwargs: dict[str, Any] = {}
+            sig = inspect.signature(method_cls.__init__)
             if "mode" in sig.parameters and mode is not None:
-                bl_kwargs["mode"] = mode
+                method_kwargs["mode"] = mode
             if "artifact_config" in sig.parameters:
-                bl_kwargs["artifact_config"] = None
-            baseline = bl_cls(**bl_kwargs)
-            baseline.name = bl_name
+                method_kwargs["artifact_config"] = None
+            method = method_cls(**method_kwargs)
+            method.name = method_name
 
-            # Run baseline
-            baseline.fit(X, y)
-            X_transformed = baseline.transform(X)
+            # Run method
+            method.fit(X, y)
+            X_transformed = method.transform(X)
 
             # Evaluate
             baseline_score = cv_evaluator.evaluate_baseline(X, y, model_name=model_name)
@@ -231,7 +230,7 @@ class ExperimentalPlatform:
                 "cv_score": baseline_score + gain,
                 "gain": gain,
                 "baseline_score": baseline_score,
-                "num_features_generated": len(baseline.generated_scripts),
+                "num_features_generated": len(method.generated_scripts),
             }
 
         # Execute

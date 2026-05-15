@@ -5,11 +5,11 @@ from __future__ import annotations
 import pandas as pd
 
 from feature_forge.artifacts.comparison import compare_methods
-from feature_forge.baselines.base import Baseline
 from feature_forge.config import Settings
 from feature_forge.evaluation.cv import CVEvaluator
 from feature_forge.experiment.tracker import NoOpTracker
 from feature_forge.llm.base import LLMResponse
+from feature_forge.methods.base import BaseMethod
 
 
 def _make_llm(code: str):
@@ -44,7 +44,7 @@ def _make_evaluator():
 
 class TestLLMFESingleShotArtifacts:
     def test_artifacts_populated(self):
-        from feature_forge.baselines.llmfe import LLMFEBaseline
+        from feature_forge.methods.llmfe import LLMFEMethod
 
         code = """
 import pandas as pd
@@ -56,7 +56,7 @@ def generate_features(df):
     return result
 """
         llm = _make_llm(code)
-        baseline = LLMFEBaseline(llm_client=llm, mode="single_shot")
+        baseline = LLMFEMethod(llm_client=llm, mode="single_shot")
         X, y = _make_df()
         baseline.fit(X, y)
 
@@ -67,7 +67,7 @@ def generate_features(df):
         assert isinstance(artifacts["generated_code"], str)
 
     def test_transform_after_fit(self):
-        from feature_forge.baselines.llmfe import LLMFEBaseline
+        from feature_forge.methods.llmfe import LLMFEMethod
 
         code = """
 import pandas as pd
@@ -78,7 +78,7 @@ def generate_features(df):
     return result
 """
         llm = _make_llm(code)
-        baseline = LLMFEBaseline(llm_client=llm)
+        baseline = LLMFEMethod(llm_client=llm)
         X, y = _make_df()
         baseline.fit(X, y)
         result = baseline.transform(X)
@@ -87,7 +87,7 @@ def generate_features(df):
 
 class TestLLMFEIterativeArtifacts:
     def test_iterations_list_populated(self):
-        from feature_forge.baselines.llmfe import LLMFEBaseline
+        from feature_forge.methods.llmfe import LLMFEMethod
 
         code = """
 import pandas as pd
@@ -98,7 +98,7 @@ def generate_features(df):
     return result
 """
         llm = _make_llm(code)
-        baseline = LLMFEBaseline(
+        baseline = LLMFEMethod(
             llm_client=llm,
             mode="iterative",
             n_features=2,
@@ -118,7 +118,7 @@ def generate_features(df):
 
 class TestCAAFEUnifiedArtifacts:
     def test_unified_artifacts(self):
-        from feature_forge.baselines.caafe import CAAFEBaseline
+        from feature_forge.methods.caafe import CAAFEMethod
 
         code = """
 import pandas as pd
@@ -129,7 +129,7 @@ def generate_features(df):
     return result
 """
         llm = _make_llm(code)
-        baseline = CAAFEBaseline(
+        baseline = CAAFEMethod(
             llm_client=llm,
             variant="unified",
             iterations=2,
@@ -145,7 +145,7 @@ def generate_features(df):
         assert len(artifacts["iterations"]) == 2
 
     def test_unified_transform(self):
-        from feature_forge.baselines.caafe import CAAFEBaseline
+        from feature_forge.methods.caafe import CAAFEMethod
 
         code = """
 import pandas as pd
@@ -156,7 +156,7 @@ def generate_features(df):
     return result
 """
         llm = _make_llm(code)
-        baseline = CAAFEBaseline(
+        baseline = CAAFEMethod(
             llm_client=llm,
             variant="unified",
             iterations=1,
@@ -170,7 +170,7 @@ def generate_features(df):
 
 class TestCompareMethods:
     def test_compare_returns_all_methods(self):
-        from feature_forge.baselines.llmfe import LLMFEBaseline
+        from feature_forge.methods.llmfe import LLMFEMethod
 
         code = """
 import pandas as pd
@@ -179,7 +179,7 @@ def generate_features(df):
     return pd.DataFrame({'f': df['a'] + 1}, index=df.index)
 """
         llm = _make_llm(code)
-        methods = {"llmfe": LLMFEBaseline(llm_client=llm)}
+        methods = {"llmfe": LLMFEMethod(llm_client=llm)}
         X, y = _make_df()
 
         results = compare_methods(methods, X, y)
@@ -187,7 +187,7 @@ def generate_features(df):
         assert "error" not in results["llmfe"]
 
     def test_compare_with_tracker(self):
-        from feature_forge.baselines.llmfe import LLMFEBaseline
+        from feature_forge.methods.llmfe import LLMFEMethod
 
         code = """
 import pandas as pd
@@ -196,7 +196,7 @@ def generate_features(df):
     return pd.DataFrame({'f': df['a'] * 2}, index=df.index)
 """
         llm = _make_llm(code)
-        methods = {"llmfe": LLMFEBaseline(llm_client=llm)}
+        methods = {"llmfe": LLMFEMethod(llm_client=llm)}
         X, y = _make_df()
         tracker = NoOpTracker(project="test")
 
@@ -204,7 +204,7 @@ def generate_features(df):
         assert "llmfe" in results
 
     def test_compare_handles_errors(self):
-        class FailingBaseline(Baseline):
+        class FailingBaseline(BaseMethod):
             def __init__(self):
                 super().__init__("failing")
 
@@ -245,7 +245,7 @@ class TestDiskModeArtifacts:
     def test_llmfe_disk_mode_returns_lazy_ref(self):
         from feature_forge.artifacts.base import ArtifactConfig
         from feature_forge.artifacts.storage import LazyDataFrameRef
-        from feature_forge.baselines.llmfe import LLMFEBaseline
+        from feature_forge.methods.llmfe import LLMFEMethod
 
         code = """
 import pandas as pd
@@ -256,7 +256,7 @@ def generate_features(df):
 """
         llm = _make_llm(code)
         cfg = ArtifactConfig(storage_mode="disk", storage_format="parquet")
-        baseline = LLMFEBaseline(
+        baseline = LLMFEMethod(
             llm_client=llm,
             mode="iterative",
             n_features=1,
@@ -279,7 +279,7 @@ def generate_features(df):
 
     def test_compare_methods_propagates_artifact_config(self):
         from feature_forge.artifacts.base import ArtifactConfig
-        from feature_forge.baselines.llmfe import LLMFEBaseline
+        from feature_forge.methods.llmfe import LLMFEMethod
 
         code = """
 import pandas as pd
@@ -287,7 +287,7 @@ def generate_features(df):
     return pd.DataFrame({'f': df['a'] + 1}, index=df.index)
 """
         llm = _make_llm(code)
-        methods = {"llmfe": LLMFEBaseline(llm_client=llm)}
+        methods = {"llmfe": LLMFEMethod(llm_client=llm)}
         X, y = _make_df()
         cfg = ArtifactConfig(storage_mode="disk")
         compare_methods(methods, X, y, artifact_config=cfg)

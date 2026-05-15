@@ -2,7 +2,7 @@
 
 > Modular experimentation platform for LLM-based multi-agent automated feature engineering.
 
-[![CI](https://github.com/your-org/feature-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/feature-forge/actions)
+[![CI](https://github.com/minghao51/feature_forge/actions/workflows/ci.yml/badge.svg)](https://github.com/minghao51/feature_forge/actions)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
@@ -25,7 +25,7 @@ Feature Forge is a production-ready refactoring of the MALMAS (Memory-Augmented 
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/feature-forge.git
+git clone https://github.com/minghao51/feature_forge.git
 cd feature-forge
 
 # Install with uv (recommended)
@@ -158,11 +158,15 @@ uv run pytest
 # With coverage report
 uv run pytest --cov=feature_forge --cov-report=html
 
-# Linting
-uv run ruff check src tests
+# Linting (required gate)
+uv run ruff check src
+# Optional debt track visibility
+uv run ruff check notebooks docs/notebooks
 
-# Type checking
+# Type checking (required gate)
 uv run mypy src
+# Optional debt track visibility
+uv run mypy tests
 
 # Pre-commit hooks
 pre-commit install

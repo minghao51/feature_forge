@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from feature_forge.evaluation.metrics import METRIC_REGISTRY, MetricRegistry, get_metric
+from feature_forge.exceptions import EvaluationError
 
 
 class TestMetricRegistry:
@@ -33,7 +34,7 @@ class TestMetricRegistry:
         assert callable(fn)
 
     def test_get_raises_on_unknown(self):
-        with pytest.raises(ValueError, match="Unknown metric"):
+        with pytest.raises(EvaluationError, match="Unknown metric"):
             MetricRegistry.get("nonexistent_metric")
 
     def test_register_adds_metric(self):

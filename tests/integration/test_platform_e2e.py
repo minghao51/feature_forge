@@ -7,10 +7,10 @@ from typing import Any
 import pandas as pd
 
 from feature_forge import ExperimentalPlatform
-from feature_forge.baselines import Baseline
+from feature_forge.methods import BaseMethod
 
 
-class DummyBaseline(Baseline):
+class DummyBaseline(BaseMethod):
     """A minimal baseline for integration testing."""
 
     def __init__(self, **kwargs: Any) -> None:
@@ -36,7 +36,7 @@ class TestPlatformE2E:
 
     def test_run_with_synthetic_data(self, tmp_path):
         platform = ExperimentalPlatform()
-        platform.register_baseline("dummy", DummyBaseline)
+        platform.register_method("dummy", DummyBaseline)
 
         # Create a minimal synthetic CSV dataset
         train_df = pd.DataFrame(
@@ -63,7 +63,7 @@ class TestPlatformE2E:
 
         results = platform.run(
             datasets=["synth"],
-            baselines=["dummy"],
+            methods=["dummy"],
             models=["random_forest"],
             cv_folds=2,
             seeds=[42],
@@ -73,7 +73,7 @@ class TestPlatformE2E:
         assert len(results) == 1
         result = results[0]
         assert result["dataset"] == "synth"
-        assert result["baseline"] == "dummy"
+        assert result["method"] == "dummy"
         assert "cv_score" in result
         assert "gain" in result
         assert "baseline_score" in result
@@ -81,11 +81,11 @@ class TestPlatformE2E:
 
     def test_run_with_missing_dataset(self):
         platform = ExperimentalPlatform()
-        platform.register_baseline("dummy", DummyBaseline)
+        platform.register_method("dummy", DummyBaseline)
 
         results = platform.run(
             datasets=["nonexistent"],
-            baselines=["dummy"],
+            methods=["dummy"],
             models=["random_forest"],
             cv_folds=2,
             seeds=[42],
@@ -96,7 +96,7 @@ class TestPlatformE2E:
         assert "error" in results[0]
         assert "nonexistent" in results[0]["error"]
 
-    def test_run_with_missing_baseline(self, tmp_path):
+    def test_run_with_missing_method(self, tmp_path):
         platform = ExperimentalPlatform()
 
         train_df = pd.DataFrame(
@@ -120,8 +120,8 @@ class TestPlatformE2E:
         )
 
         results = platform.run(
-            datasets=["synth2"],
-            baselines=["nonexistent"],
+            datasets=["nonexistent"],
+            methods=["nonexistent"],
             models=["random_forest"],
             cv_folds=2,
             seeds=[42],
@@ -134,7 +134,7 @@ class TestPlatformE2E:
 
     def test_run_returns_dataframe(self, tmp_path):
         platform = ExperimentalPlatform()
-        platform.register_baseline("dummy", DummyBaseline)
+        platform.register_method("dummy", DummyBaseline)
 
         train_df = pd.DataFrame(
             {
@@ -158,7 +158,7 @@ class TestPlatformE2E:
 
         results = platform.run(
             datasets=["synth3"],
-            baselines=["dummy"],
+            methods=["dummy"],
             models=["random_forest"],
             cv_folds=2,
             seeds=[42],
@@ -172,7 +172,7 @@ class TestPlatformE2E:
 
     def test_run_with_no_progress(self, tmp_path):
         platform = ExperimentalPlatform()
-        platform.register_baseline("dummy", DummyBaseline)
+        platform.register_method("dummy", DummyBaseline)
 
         train_df = pd.DataFrame(
             {
@@ -196,7 +196,7 @@ class TestPlatformE2E:
 
         results = platform.run(
             datasets=["synth4"],
-            baselines=["dummy"],
+            methods=["dummy"],
             models=["random_forest"],
             cv_folds=2,
             seeds=[42],
@@ -208,7 +208,7 @@ class TestPlatformE2E:
 
     def test_report_best_integration(self, tmp_path):
         platform = ExperimentalPlatform()
-        platform.register_baseline("dummy", DummyBaseline)
+        platform.register_method("dummy", DummyBaseline)
 
         train_df = pd.DataFrame(
             {
@@ -232,7 +232,7 @@ class TestPlatformE2E:
 
         results = platform.run(
             datasets=["synth5"],
-            baselines=["dummy"],
+            methods=["dummy"],
             models=["random_forest"],
             cv_folds=2,
             seeds=[42],
@@ -247,7 +247,7 @@ class TestPlatformE2E:
 
         results = platform.run(
             datasets=["nonexistent"],
-            baselines=["dummy"],
+            methods=["dummy"],
             models=["random_forest"],
             cv_folds=2,
             seeds=[42],
@@ -258,11 +258,11 @@ class TestPlatformE2E:
         assert isinstance(df, __import__("pandas").DataFrame)
         assert "error" in df.columns
 
-    def test_run_with_empty_baselines(self, tmp_path):
+    def test_run_with_empty_methods(self, tmp_path):
         platform = ExperimentalPlatform()
         results = platform.run(
             datasets=["nonexistent"],
-            baselines=[],
+            methods=[],
             models=["random_forest"],
             cv_folds=2,
             seeds=[42],
@@ -274,7 +274,7 @@ class TestPlatformE2E:
         from feature_forge.experiment import NoOpTracker
 
         platform = ExperimentalPlatform()
-        platform.register_baseline("dummy", DummyBaseline)
+        platform.register_method("dummy", DummyBaseline)
 
         train_df = pd.DataFrame(
             {
@@ -299,7 +299,7 @@ class TestPlatformE2E:
         tracker = NoOpTracker(project="test-platform")
         results = platform.run(
             datasets=["synth6"],
-            baselines=["dummy"],
+            methods=["dummy"],
             models=["random_forest"],
             cv_folds=2,
             seeds=[42],

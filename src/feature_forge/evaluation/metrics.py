@@ -107,8 +107,18 @@ class MetricRegistry:
     def discover(cls) -> dict[str, Callable[..., Any]]:
         """Discover metrics registered via entry points."""
         discovered: dict[str, Callable[..., Any]] = {}
+        builtin = cls._builtin
         for ep in importlib.metadata.entry_points(group=cls.ENTRY_POINT_GROUP):
-            if ep.name in cls._builtin:
+            try:
+                loaded = ep.load()
+            except Exception as exc:
+                warnings.warn(
+                    f"Failed to load metric entry point '{ep.name}': {exc}",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                continue
+            if ep.name in builtin and builtin[ep.name] is not loaded:
                 warnings.warn(
                     f"Entry point metric '{ep.name}' overrides built-in metric.",
                     RuntimeWarning,
@@ -120,14 +130,7 @@ class MetricRegistry:
                     RuntimeWarning,
                     stacklevel=2,
                 )
-            try:
-                discovered[ep.name] = ep.load()
-            except Exception as exc:
-                warnings.warn(
-                    f"Failed to load metric entry point '{ep.name}': {exc}",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
+            discovered[ep.name] = loaded
         return discovered
 
     @classmethod

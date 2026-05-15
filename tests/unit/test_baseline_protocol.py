@@ -1,4 +1,4 @@
-"""Tests for BaselineProtocol runtime-checkable protocol."""
+"""Tests for MethodProtocol runtime-checkable protocol."""
 
 from __future__ import annotations
 
@@ -6,10 +6,10 @@ from typing import Any
 
 import pandas as pd
 
-from feature_forge.baselines import Baseline, BaselineProtocol
-from feature_forge.baselines.caafe import CAAFEBaseline
-from feature_forge.baselines.malmus import MalmusBaseline
-from feature_forge.baselines.openfe import OpenFEBaseline
+from feature_forge.methods import BaseMethod, MethodProtocol
+from feature_forge.methods.caafe import CAAFEMethod
+from feature_forge.methods.malmus import MalmusMethod
+from feature_forge.methods.openfe import OpenFEMethod
 
 
 class StandaloneBaseline:
@@ -41,21 +41,21 @@ class StandaloneBaseline:
 
 
 class IncompleteBaseline:
-    """A class that does NOT satisfy BaselineProtocol (missing methods)."""
+    """A class that does NOT satisfy MethodProtocol (missing methods)."""
 
     def fit(self, X, y):
         return self
 
 
-class TestBaselineProtocol:
-    """Verify that BaselineProtocol works as a runtime-checkable protocol."""
+class TestMethodProtocol:
+    """Verify that MethodProtocol works as a runtime-checkable protocol."""
 
     def test_standalone_baseline_class_satisfies(self):
-        assert isinstance(StandaloneBaseline(), BaselineProtocol)
+        assert isinstance(StandaloneBaseline(), MethodProtocol)
 
     def test_standalone_baseline_instance_satisfies(self):
         instance = StandaloneBaseline()
-        assert isinstance(instance, BaselineProtocol)
+        assert isinstance(instance, MethodProtocol)
 
     def test_instance_has_required_members(self):
         instance = StandaloneBaseline()
@@ -68,18 +68,18 @@ class TestBaselineProtocol:
         assert hasattr(instance, "get_artifacts")
 
     def test_plain_object_does_not_satisfy(self):
-        assert not isinstance(object(), BaselineProtocol)
+        assert not isinstance(object(), MethodProtocol)
 
     def test_incomplete_class_does_not_satisfy(self):
-        assert not isinstance(IncompleteBaseline(), BaselineProtocol)
+        assert not isinstance(IncompleteBaseline(), MethodProtocol)
 
     def test_baseline_abc_instance_satisfies(self):
         # Cannot instantiate ABC directly, but check the class structure
-        assert hasattr(Baseline, "fit")
-        assert hasattr(Baseline, "transform")
+        assert hasattr(BaseMethod, "fit")
+        assert hasattr(BaseMethod, "transform")
 
     def test_builtin_classes_have_correct_structure(self):
-        for cls in [MalmusBaseline, CAAFEBaseline, OpenFEBaseline]:
+        for cls in [MalmusMethod, CAAFEMethod, OpenFEMethod]:
             assert hasattr(cls, "fit")
             assert hasattr(cls, "transform")
             assert hasattr(cls, "fit_transform")
@@ -87,6 +87,6 @@ class TestBaselineProtocol:
             assert hasattr(cls, "get_artifacts")
 
     def test_baseline_is_protocol(self):
-        # Baseline ABC should produce instances that satisfy the protocol
+        # BaseMethod ABC should produce instances that satisfy the protocol
         # (if it were instantiable — concrete subclasses do)
-        assert hasattr(Baseline, "generated_scripts")
+        assert hasattr(BaseMethod, "generated_scripts")

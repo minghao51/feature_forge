@@ -49,11 +49,6 @@ class DatasetRegistry:
         self._entry_points_loaded = True
         for ep in importlib.metadata.entry_points(group=self.ENTRY_POINT_GROUP):
             if ep.name in self._datasets:
-                warnings.warn(
-                    f"Entry point dataset '{ep.name}' skipped — built-in/local dataset already exists.",
-                    RuntimeWarning,
-                    stacklevel=3,
-                )
                 continue
             try:
                 loader = ep.load()

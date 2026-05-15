@@ -204,6 +204,27 @@ def generate_features(df):
         with pytest.raises(CodeExecutionError, match="Invalid syntax"):
             executor.execute("def generate_features(df", pd.DataFrame())
 
+    def test_blocked_file_io_api_usage(self):
+        executor = SandboxedExecutor()
+        code = """
+def generate_features(df):
+    out = df.copy()
+    out.to_csv("x.csv")
+    return out
+"""
+        with pytest.raises(SandboxValidationError, match="Blocked file I/O API usage"):
+            executor.execute(code, pd.DataFrame({"a": [1, 2, 3]}))
+
+    def test_blocked_network_api_usage(self):
+        executor = SandboxedExecutor()
+        code = """
+def generate_features(df):
+    df.create_connection()
+    return df
+"""
+        with pytest.raises(SandboxValidationError, match="Blocked network API usage"):
+            executor.execute(code, pd.DataFrame({"a": [1, 2, 3]}))
+
     def test_missing_generate_features_in_worker(self):
         executor = SandboxedExecutor(timeout_seconds=2.0)
         code = "x = 42"
@@ -213,9 +234,8 @@ def generate_features(df):
     def test_temp_file_cleanup(self):
         executor = SandboxedExecutor(timeout_seconds=2.0)
         code = """
-import pandas as pd
 def generate_features(df):
-    result = pd.DataFrame(index=df.index)
+    result = df.copy()
     result['x'] = df['a'] * 2
     return result
 """
