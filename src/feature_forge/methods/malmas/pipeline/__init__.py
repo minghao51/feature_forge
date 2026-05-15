@@ -2,6 +2,7 @@
 
 from feature_forge.methods.malmas.pipeline.ablations import (
     NoMemoryPipeline,
+    NoMemoryStaticRouterPipeline,
     NoRouterPipeline,
     SingleAgentPipeline,
 )
@@ -12,6 +13,7 @@ __all__ = [
     "CorePipeline",
     "IterativePipeline",
     "NoMemoryPipeline",
+    "NoMemoryStaticRouterPipeline",
     "NoRouterPipeline",
     "SingleAgentPipeline",
 ]

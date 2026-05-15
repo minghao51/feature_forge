@@ -71,10 +71,10 @@ cached_client = LangfuseLLMWrapper(client, cache=DiskCache())
 
 ### Prompt Registry
 
-YAML-driven prompt templates loaded from `config/prompts/*.yaml`.
+YAML-driven prompt templates loaded from method-local `prompts/*.yaml` packages.
 
 ```python
-from feature_forge.prompts import get_registry
+from feature_forge.methods.malmas.prompts import get_registry
 
 registry = get_registry()
 prompt = registry.get("unary")

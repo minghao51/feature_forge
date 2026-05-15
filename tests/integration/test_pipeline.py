@@ -11,7 +11,11 @@ from feature_forge.api import FeatureForge
 from feature_forge.config import Settings
 from feature_forge.llm.base import LLMClient, LLMResponse
 from feature_forge.methods.malmas.agents.base import Agent
-from feature_forge.methods.malmas.pipeline.ablations import NoRouterPipeline, SingleAgentPipeline
+from feature_forge.methods.malmas.pipeline.ablations import (
+    NoMemoryStaticRouterPipeline,
+    NoRouterPipeline,
+    SingleAgentPipeline,
+)
 from feature_forge.methods.malmas.pipeline.core import CodeGenerator, CorePipeline
 from feature_forge.methods.malmas.pipeline.iterative import IterativePipeline
 
@@ -463,6 +467,10 @@ def generate_features(df):
         pipeline = fe._get_pipeline()
         assert pipeline.__class__.__name__ == "NoMemoryPipeline"
 
+        fe = FeatureForge(llm_client=FakeLLM([]), mode="no_memory_static_router")
+        pipeline = fe._get_pipeline()
+        assert pipeline.__class__.__name__ == "NoMemoryStaticRouterPipeline"
+
         fe = FeatureForge(llm_client=FakeLLM([]), mode="no_router")
         pipeline = fe._get_pipeline()
         assert pipeline.__class__.__name__ == "NoRouterPipeline"
@@ -488,3 +496,15 @@ def generate_features(df):
         fe.selected_features = ["f1", "f2"]
         names = fe.get_feature_names_out(["a", "b"])
         assert names == ["a", "b", "f1", "f2"]
+
+    @pytest.mark.asyncio
+    async def test_no_memory_static_router_does_not_update_router_performance(self):
+        pipeline = NoMemoryStaticRouterPipeline(
+            config=Settings(task="classification", metric="auc", n_rounds=1),
+            llm_client=FakeLLM([]),
+        )
+        pipeline.router.update_performance("unary", 0.1)
+        before = pipeline.router.agent_performance["unary"][:]
+        await pipeline._post_round([], {"agent_gains": {}}, round_idx=0)
+        after = pipeline.router.agent_performance["unary"][:]
+        assert after == before

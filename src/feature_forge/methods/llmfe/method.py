@@ -19,6 +19,11 @@ from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.llm.base import LLMClient
 from feature_forge.llm.factory import create_llm_client
 from feature_forge.methods.base import BaseMethod
+from feature_forge.methods.llmfe.prompts import (
+    LLMFEIterativeParams,
+    LLMFESingleShotParams,
+    get_registry,
+)
 from feature_forge.observability.structlog_config import get_logger
 from feature_forge.utils import run_coro_sync, strip_markdown_fences
 
@@ -73,7 +78,13 @@ class LLMFEMethod(BaseMethod):
             await self._fit_single_shot(X_train, y_train)
 
     async def _fit_single_shot(self, X: pd.DataFrame, y: pd.Series) -> None:
-        prompt = self._build_prompt(X, y)
+        template = get_registry().get("single_shot").system
+        params = LLMFESingleShotParams(
+            columns=", ".join(X.columns),
+            task="classification" if y.nunique() <= 10 else "regression",
+            n_features=self.n_features,
+        )
+        prompt = params.render(template)
         raw_response = await self._call_llm(prompt)
         code = strip_markdown_fences(raw_response)
         self._iteration_codes = [code]
@@ -82,12 +93,6 @@ class LLMFEMethod(BaseMethod):
         self._artifacts["generated_code"] = code
 
     async def _fit_iterative(self, X: pd.DataFrame, y: pd.Series) -> None:
-        """Iterative feature generation with CV-based keep/discard.
-
-        Each iteration generates one feature block, evaluates each new
-        column against the *original* feature set, and keeps columns
-        with positive gain.
-        """
         evaluator = self.evaluator or CVEvaluator()
         baseline_score = evaluator.evaluate_baseline(X, y)
         self._artifacts["baseline_score"] = baseline_score
@@ -95,9 +100,21 @@ class LLMFEMethod(BaseMethod):
         iterations: list[dict[str, Any]] = []
         cumulative_cols: list[str] = []
         iteration_codes: list[str] = []
+        task: Literal["classification", "regression"] = (
+            "classification" if y.nunique() <= 10 else "regression"
+        )
+        cols = ", ".join(X.columns)
 
         for i in range(self.n_features):
-            prompt = self._build_iterative_prompt(X, y, cumulative_cols, i)
+            template = get_registry().get("iterative").system
+            params = LLMFEIterativeParams(
+                columns=cols,
+                task=task,
+                n_iterations=self.n_features,
+                iteration=i + 1,
+                existing_features=", ".join(cumulative_cols) if cumulative_cols else "none",
+            )
+            prompt = params.render(template)
             raw_response = await self._call_llm(prompt)
             code_block = strip_markdown_fences(raw_response)
             iteration_record: dict[str, Any] = {
@@ -207,40 +224,6 @@ class LLMFEMethod(BaseMethod):
                     }
                 )
         return records
-
-    def _build_prompt(self, X: pd.DataFrame, y: pd.Series) -> str:
-        cols = ", ".join(X.columns)
-        task = "classification" if y.nunique() <= 10 else "regression"
-        return (
-            f"You are a feature engineering assistant. "
-            f"Given a dataset with columns: {cols}, "
-            f"and a {task} task, "
-            f"generate {self.n_features} new features that could improve model performance.\n\n"
-            f"Write a Python function `generate_features(df)` that returns a pandas DataFrame "
-            f"with only the new features. Use only pandas and numpy.\n\n"
-            f"Output ONLY the code, no explanation."
-        )
-
-    def _build_iterative_prompt(
-        self,
-        X: pd.DataFrame,
-        y: pd.Series,
-        existing_cols: list[str],
-        iteration: int,
-    ) -> str:
-        cols = ", ".join(X.columns)
-        task = "classification" if y.nunique() <= 10 else "regression"
-        existing = ", ".join(existing_cols) if existing_cols else "none"
-        return (
-            f"You are a feature engineering assistant. "
-            f"Given a dataset with columns: {cols}, "
-            f"and a {task} task, "
-            f"generate exactly ONE new feature (iteration {iteration + 1}/{self.n_features}).\n"
-            f"Already created features: {existing}.\n\n"
-            f"Write a Python function `generate_features(df)` that returns a pandas DataFrame "
-            f"with only the new feature(s) for this iteration. Use only pandas and numpy.\n\n"
-            f"Output ONLY the code, no explanation."
-        )
 
     async def _call_llm(self, prompt: str) -> str:
         response = await self.llm_client.complete(

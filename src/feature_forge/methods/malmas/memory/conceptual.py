@@ -8,6 +8,10 @@ from typing import Any
 
 from feature_forge.llm.base import LLMClient
 from feature_forge.methods.malmas.memory.base import AgentMemory
+from feature_forge.methods.malmas.memory.prompts import (
+    SummarizeAgentParams,
+    SummarizeGlobalParams,
+)
 from feature_forge.observability.structlog_config import get_logger
 
 logger = get_logger(__name__)
@@ -68,19 +72,13 @@ class ConceptualMemory:
         examples_text = json.dumps(effective_examples, ensure_ascii=False, indent=2)
         stats_text = json.dumps(stats, ensure_ascii=False, indent=2)
 
-        system_prompt = (
-            f"You are {memory.agent_name} agent, an expert feature engineering assistant. "
-            "You will receive a list of effective features and statistics about their patterns. "
-            "Your task is to generate effective, high-quality conceptual rules using concise language "
-            "that can guide future feature generation. Rules should directly reflect the statistics and examples. "
-            "Avoid any irrelevant information."
+        params = SummarizeAgentParams(
+            agent_name=memory.agent_name,
+            examples_text=examples_text,
+            stats_text=stats_text,
         )
-        user_prompt = (
-            f"Here are the effective feature examples:\n\n{examples_text}\n\n"
-            f"Here are the statistics about effective features:\n\n{stats_text}\n\n"
-            "Based on both the examples and the statistics, summarize 1 to 3 concise and actionable "
-            "conceptual rules to optimize future feature generation. Rules should be in clear bullet points."
-        )
+        system_prompt = params.render_system()
+        user_prompt = params.render_user()
 
         response = await self.llm_client.complete(
             messages=[
@@ -128,18 +126,12 @@ class ConceptualMemory:
             )
 
         combined_prompt = "\n\n".join(sections)
-        system_prompt = (
-            "You are a senior AutoML optimization assistant. "
-            "You will receive conceptual summaries and statistics from multiple feature engineering agents. "
-            "Your task is to synthesize these into 2 to 5 concise, effective, high-level conceptual rules "
-            "that can guide future global feature derivation tasks across all agents. Avoid any irrelevant information."
+        params = SummarizeGlobalParams(
+            combined_prompt=combined_prompt,
+            task_description=task_description,
         )
-        user_prompt = (
-            f"The description of this dataset is:\n{task_description}\n"
-            f"Here are the conceptual summaries and statistics from all agents:\n\n{combined_prompt}\n\n"
-            "Based on the above, summarize 2 to 5 concise, actionable, high-level conceptual rules "
-            "for optimizing future feature generation across all agents. Rules should be in clear bullet points."
-        )
+        system_prompt = params.render_system()
+        user_prompt = params.render_user()
 
         response = await self.llm_client.complete(
             messages=[

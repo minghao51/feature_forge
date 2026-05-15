@@ -26,6 +26,11 @@ from feature_forge.exceptions import EvaluationError
 from feature_forge.llm.base import LLMClient
 from feature_forge.llm.factory import create_llm_client
 from feature_forge.methods.base import BaseMethod
+from feature_forge.methods.malmus.prompts import (
+    MalmusIterativeParams,
+    MalmusSingleShotParams,
+    get_registry,
+)
 from feature_forge.observability.structlog_config import get_logger
 from feature_forge.utils import run_coro_sync
 
@@ -149,7 +154,13 @@ class MalmusMethod(BaseMethod):
             await self._fit_single_shot(X_train, y_train)
 
     async def _fit_single_shot(self, X: pd.DataFrame, y: pd.Series) -> None:
-        prompt = self._build_prompt(X, y)
+        template = get_registry().get("single_shot").system
+        params = MalmusSingleShotParams(
+            columns=", ".join(X.columns),
+            task="classification" if y.nunique() <= 10 else "regression",
+            n_features=self.n_features,
+        )
+        prompt = params.render(template)
         raw_json = await self.llm_client.complete_json(
             messages=[{"role": "user", "content": prompt}],
             schema_description=FEATURE_SCHEMA_DESCRIPTION,
@@ -173,9 +184,22 @@ class MalmusMethod(BaseMethod):
         cumulative_cols: list[str] = []
         all_defs: list[FeatureDefinition] = []
         feedback_str = ""
+        task: Literal["classification", "regression"] = (
+            "classification" if y.nunique() <= 10 else "regression"
+        )
+        cols = ", ".join(X.columns)
 
         for i in range(self.n_features):
-            prompt = self._build_iterative_prompt(X, y, cumulative_cols, i, feedback_str)
+            template = get_registry().get("iterative").system
+            params = MalmusIterativeParams(
+                columns=cols,
+                task=task,
+                n_iterations=self.n_features,
+                iteration=i + 1,
+                existing_features=", ".join(cumulative_cols) if cumulative_cols else "none",
+                feedback=feedback_str,
+            )
+            prompt = params.render(template)
             raw_json = await self.llm_client.complete_json(
                 messages=[{"role": "user", "content": prompt}],
                 schema_description=ITERATIVE_FEATURE_SCHEMA_DESCRIPTION,
@@ -346,49 +370,3 @@ class MalmusMethod(BaseMethod):
             lines.append(f"    result['{feat.name}'] = {feat.code}")
         lines.append("    return result")
         return "\n".join(lines)
-
-    def _build_prompt(self, X: pd.DataFrame, y: pd.Series) -> str:
-        cols = ", ".join(X.columns)
-        task = "classification" if y.nunique() <= 10 else "regression"
-        return (
-            f"You are a feature engineering assistant. "
-            f"Given a dataset with columns: {cols}, "
-            f"and a {task} task, "
-            f"generate {self.n_features} new features that could improve model performance.\n\n"
-            f"For each feature provide:\n"
-            f"- name: a valid Python identifier (snake_case)\n"
-            f"- code: a Python expression using 'df' as the input DataFrame "
-            f"(e.g. df['col_a'] * df['col_b'])\n"
-            f"- description: what the feature captures\n"
-            f"- libraries: list of required libraries (e.g. ['pandas', 'numpy'])\n\n"
-            f"The code expressions must use only pandas and numpy.\n"
-            f"Each expression will be assigned as: result['<name>'] = <code>"
-        )
-
-    def _build_iterative_prompt(
-        self,
-        X: pd.DataFrame,
-        y: pd.Series,
-        existing_cols: list[str],
-        iteration: int,
-        feedback: str,
-    ) -> str:
-        cols = ", ".join(X.columns)
-        task = "classification" if y.nunique() <= 10 else "regression"
-        existing = ", ".join(existing_cols) if existing_cols else "none"
-        prompt = (
-            f"You are a feature engineering assistant. "
-            f"Given a dataset with columns: {cols}, "
-            f"and a {task} task, "
-            f"generate exactly ONE new feature (iteration {iteration + 1}/{self.n_features}).\n"
-            f"Already created features: {existing}.\n\n"
-            f"For the feature provide:\n"
-            f"- name: a valid Python identifier (snake_case)\n"
-            f"- code: a Python expression using 'df' as the input DataFrame\n"
-            f"- description: what the feature captures\n"
-            f"- libraries: list of required libraries\n\n"
-            f"The code expression will be assigned as: result['<name>'] = <code>"
-        )
-        if feedback:
-            prompt += f"\n\n{feedback}"
-        return prompt

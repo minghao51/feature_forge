@@ -169,13 +169,13 @@ Agent prompts migrated from `.txt` files to YAML-backed registry:
 # Before: loaded from file path relative to package
 prompt_path = Path(__file__).parent / "prompts/unary.txt"
 
-# After: loaded from YAML registry
-from feature_forge.prompts import get_registry
+# After: loaded from method-local YAML registry
+from feature_forge.methods.malmas.prompts import get_registry
 prompt = get_registry().get("unary")
 system_text = prompt.system
 ```
 
-Prompt YAML files live in `config/prompts/` (e.g., `config/prompts/unary.yaml`).
+Prompt YAML files live in method packages (e.g., `src/feature_forge/methods/malmas/prompts/unary.yaml`).
 
 ## Breaking Changes
 

@@ -11,6 +11,7 @@ import json
 import re
 import time
 from abc import ABC, abstractmethod
+from hashlib import sha256
 from typing import Any, ClassVar
 
 import pandas as pd
@@ -18,9 +19,9 @@ import pandas as pd
 from feature_forge.config import Settings
 from feature_forge.exceptions import AgentError
 from feature_forge.llm.base import LLMClient
+from feature_forge.methods.malmas.prompts import get_registry
 from feature_forge.methods.malmas.types import AgentName
 from feature_forge.observability.structlog_config import get_logger
-from feature_forge.prompts import get_registry
 from feature_forge.types import FeatureSpec
 
 logger = get_logger(__name__)
@@ -135,13 +136,30 @@ class BaseFeatureAgent(Agent):
         return "\n\n".join(parts)
 
     _column_desc_cache: ClassVar[
-        dict[tuple[int, int, tuple[str, ...]], dict[str, dict[str, Any]]]
+        dict[tuple[int, int, tuple[str, ...], tuple[str, ...], str], dict[str, dict[str, Any]]]
     ] = {}
     _CACHE_MAX_SIZE: ClassVar[int] = 64
 
     @staticmethod
+    def _column_fingerprint(X: pd.DataFrame) -> str:
+        """Build a lightweight deterministic fingerprint of dataframe values."""
+        if X.empty:
+            return "empty"
+        sample = X.head(256).copy()
+        # Hash object representation to support mixed dtypes consistently.
+        hashed = pd.util.hash_pandas_object(sample.astype(str), index=True).to_numpy()
+        return sha256(hashed.tobytes()).hexdigest()[:16]
+
+    @staticmethod
     def _infer_column_descriptions(X: pd.DataFrame) -> dict[str, dict[str, Any]]:
-        cache_key: tuple[int, int, tuple[str, ...]] = (X.shape[0], X.shape[1], tuple(X.columns))
+        dtype_signature = tuple(str(X[col].dtype) for col in X.columns)
+        cache_key: tuple[int, int, tuple[str, ...], tuple[str, ...], str] = (
+            X.shape[0],
+            X.shape[1],
+            tuple(X.columns),
+            dtype_signature,
+            BaseFeatureAgent._column_fingerprint(X),
+        )
         cached = BaseFeatureAgent._column_desc_cache.get(cache_key)
         if cached is not None:
             return cached
@@ -160,7 +178,8 @@ class BaseFeatureAgent(Agent):
             else:
                 info["type"] = "categorical"
                 info["unique"] = int(col_data.nunique())
-                info["top"] = str(col_data.mode().iloc[0]) if len(col_data) > 0 else ""
+                mode = col_data.mode(dropna=True)
+                info["top"] = str(mode.iloc[0]) if not mode.empty else ""
                 info["missing"] = int(col_data.isna().sum())
             desc[col] = info
 

@@ -335,12 +335,12 @@ The 6 specialized agents are based on the MALMAS agent taxonomy:
 
 | Agent | Specialization | Prompt File |
 |-------|---------------|-------------|
-| **Unary Feature** | Single-column transforms: log, sqrt, binning, encoding | `config/prompts/unary.yaml` |
-| **Cross-Compositional** | Multi-column interactions: ratios, products, differences | `config/prompts/cross_compositional.yaml` |
-| **Aggregation Construct** | GroupBy aggregations: mean/count/sum per category | `config/prompts/aggregation.yaml` |
-| **Temporal Feature** | Date/time features: day-of-week, elapsed, cyclical encoding | `config/prompts/temporal.yaml` |
-| **Local Transform** | Local numerical transforms: rolling, diff, lag | `config/prompts/local_transform.yaml` |
-| **Local Pattern** | Distributional patterns: outlier flags, quantile ranks, z-scores | `config/prompts/local_pattern.yaml` |
+| **Unary Feature** | Single-column transforms: log, sqrt, binning, encoding | `src/feature_forge/methods/malmas/prompts/unary.yaml` |
+| **Cross-Compositional** | Multi-column interactions: ratios, products, differences | `src/feature_forge/methods/malmas/prompts/cross_compositional.yaml` |
+| **Aggregation Construct** | GroupBy aggregations: mean/count/sum per category | `src/feature_forge/methods/malmas/prompts/aggregation.yaml` |
+| **Temporal Feature** | Date/time features: day-of-week, elapsed, cyclical encoding | `src/feature_forge/methods/malmas/prompts/temporal.yaml` |
+| **Local Transform** | Local numerical transforms: rolling, diff, lag | `src/feature_forge/methods/malmas/prompts/local_transform.yaml` |
+| **Local Pattern** | Distributional patterns: outlier flags, quantile ranks, z-scores | `src/feature_forge/methods/malmas/prompts/local_pattern.yaml` |
 
 Each agent:
 1. Receives dataset column metadata + memory context + positive/negative feature lists
@@ -407,6 +407,20 @@ The router includes a warmup phase (1 round by default) where all agents run to 
 
 Entry point group: `feature_forge.methods.malmas.agents`
 
+### Ablation Mode Semantics
+
+The MALMAS pipeline includes explicit ablation modes in `feature_forge.api.FeatureForge(mode=...)`:
+
+| Mode | Semantics |
+|------|-----------|
+| `full` | Router + memory enabled |
+| `no_memory` | Memory disabled, router still adapts using observed gains |
+| `no_memory_static_router` | Memory disabled and router performance state is frozen across rounds |
+| `no_router` | Router disabled (all built-in agents run each round) |
+| `<agent_name>` | Single-agent ablation (e.g. `unary`) |
+
+Use `no_memory_static_router` for cleaner studies where memory effects must be isolated from router adaptation effects.
+
 ---
 
 ## 6. Evaluation & Sandboxing
@@ -443,7 +457,7 @@ Feature Forge manages LLM prompts as YAML files with a centralized registry.
 
 ### Prompt Files
 
-Prompts are stored in `config/prompts/*.yaml`. Each YAML file has:
+Prompts are stored in each method's `prompts/*.yaml` package. Each YAML file has:
 - `system` (required): The system prompt text
 - `description` (optional): A human-readable description of the prompt's purpose
 
@@ -455,7 +469,7 @@ The `Prompt` Pydantic model validates prompt files:
 
 ### PromptRegistry
 
-`PromptRegistry` provides lazy loading from the `config/prompts/` directory. It is accessed as a singleton via `get_registry()`.
+`PromptRegistry` provides lazy loading from the method-local prompts directory. It is accessed as a singleton via `get_registry()`.
 
 ### Available Prompts
 
@@ -473,13 +487,14 @@ The `Prompt` Pydantic model validates prompt files:
 ### Usage
 
 ```python
-from feature_forge.prompts import get_registry
+from feature_forge.methods.malmas.prompts import get_registry
+
 registry = get_registry()
 prompt = registry.get("unary")
 print(prompt.system)
 ```
 
-> **Note:** The top-level `feature_forge.prompts` module provides the registry. MALMAS-specific prompts are stored alongside the shared config in `config/prompts/`.
+> **Note:** Registries are method-scoped (for example, MALMAS prompts are loaded from `feature_forge.methods.malmas.prompts`).
 
 ---
 

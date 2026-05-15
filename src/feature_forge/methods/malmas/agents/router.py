@@ -12,9 +12,9 @@ import pandas as pd
 
 from feature_forge.config import Settings
 from feature_forge.llm.base import LLMClient
+from feature_forge.methods.malmas.prompts import get_registry
 from feature_forge.methods.malmas.types import AgentName
 from feature_forge.observability.structlog_config import get_logger
-from feature_forge.prompts import get_registry
 
 logger = get_logger(__name__)
 

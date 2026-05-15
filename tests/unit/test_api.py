@@ -9,6 +9,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from feature_forge.api import FeatureForge
 from feature_forge.config import Settings
 from feature_forge.llm.base import LLMClient, LLMResponse
+from feature_forge.types import FeatureSpec
 
 
 class StubProvider(LLMClient):
@@ -188,6 +189,33 @@ class TestFeatureForgeEdgeCases:
         assert len(records) == 1
         assert records[0]["feature_name"] == "f1"
 
+    def test_provenance_records_with_model_specs(self):
+        fe = FeatureForge(config=_make_config(), llm_client=StubProvider())
+        fe.pipeline_result = {
+            "round_artifacts": [
+                {
+                    "round": 1,
+                    "agents": ["unary"],
+                    "gains": {"f1": 0.05},
+                    "generated_code": "def foo(): pass",
+                    "specs": [
+                        FeatureSpec(
+                            name="f1",
+                            type="numerical",
+                            transform="x*2",
+                            logic="double x",
+                            base_columns=["x"],
+                            agent_name="unary",
+                        )
+                    ],
+                }
+            ]
+        }
+        records = fe.provenance_records
+        assert len(records) == 1
+        assert records[0]["feature_name"] == "f1"
+        assert records[0]["source_agent"] == "unary"
+
     def test_get_artifacts_with_round_data(self):
         fe = FeatureForge(config=_make_config(), llm_client=StubProvider())
         fe.selected_features = ["f1"]
@@ -217,3 +245,31 @@ class TestFeatureForgeEdgeCases:
         fe.feature_codes = ["invalid python {"]
         with pytest.raises(CodeExecutionError):
             fe.transform(pd.DataFrame({"x": [1, 2, 3]}))
+
+    def test_transform_applies_only_selected_features(self):
+        fe = FeatureForge(config=_make_config(), llm_client=StubProvider())
+        fe.selected_features = ["double_x"]
+        fe.feature_codes = [
+            (
+                "import pandas as pd\n"
+                "def generate_features(df):\n"
+                "    result = pd.DataFrame(index=df.index)\n"
+                "    result['double_x'] = df['x'] * 2\n"
+                "    result['triple_x'] = df['x'] * 3\n"
+                "    return result\n"
+            )
+        ]
+        fe.pipeline_result = {
+            "round_artifacts": [
+                {
+                    "round": 1,
+                    "generated_code": fe.feature_codes[0],
+                    "selected_features_train": pd.DataFrame(columns=["double_x"]),
+                }
+            ]
+        }
+
+        X = pd.DataFrame({"x": [1.0, 2.0, 3.0]})
+        X_out = fe.transform(X)
+        assert "double_x" in X_out.columns
+        assert "triple_x" not in X_out.columns

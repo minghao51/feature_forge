@@ -48,7 +48,8 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
     Parameters:
         config: feature_forge Settings instance.
         llm_client: LLM client for generation.
-        mode: Pipeline mode — 'full', 'no_memory', 'no_router', or agent name.
+        mode: Pipeline mode — 'full', 'no_memory', 'no_memory_static_router',
+            'no_router', or agent name.
         artifact_config: Configuration for artifact storage.
     """
 
@@ -97,6 +98,10 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
         _PIPELINE_SPEC: dict[str, tuple[str, str]] = {
             "full": ("feature_forge.methods.malmas.pipeline.iterative", "IterativePipeline"),
             "no_memory": ("feature_forge.methods.malmas.pipeline.ablations", "NoMemoryPipeline"),
+            "no_memory_static_router": (
+                "feature_forge.methods.malmas.pipeline.ablations",
+                "NoMemoryStaticRouterPipeline",
+            ),
             "no_router": ("feature_forge.methods.malmas.pipeline.ablations", "NoRouterPipeline"),
         }
 
@@ -160,12 +165,38 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
         logger.info("transform_start", input_shape=X.shape, num_codes=len(self.feature_codes))
         X_out = X.copy()
         self.transform_failures = []
-        for code in self.feature_codes:
+        selected_by_code: list[set[str]] = []
+        if self.pipeline_result:
+            for ra in self.pipeline_result.get("round_artifacts", []):
+                code = ra.get("generated_code", "")
+                if not code:
+                    continue
+                selected_train = ra.get("selected_features_train")
+                if isinstance(selected_train, pd.DataFrame):
+                    selected_by_code.append(set(selected_train.columns))
+                else:
+                    selected_by_code.append(set())
+
+        for idx, code in enumerate(self.feature_codes):
             if not code:
                 continue
+            selected_cols = (
+                selected_by_code[idx]
+                if idx < len(selected_by_code)
+                else set(self.selected_features)
+            )
             try:
                 features = self.sandbox.execute(code, X_out)
+                if selected_cols:
+                    missing = sorted(col for col in selected_cols if col not in features.columns)
+                    if missing:
+                        logger.warning(
+                            "transform_selected_features_missing",
+                            missing_features=missing,
+                        )
                 for col in features.columns:
+                    if selected_cols and col not in selected_cols:
+                        continue
                     if col not in X_out.columns:
                         X_out[col] = features[col].values
             except Exception as exc:
@@ -227,20 +258,31 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
             specs = ra.get("specs", [])
             for spec in specs:
                 if isinstance(spec, dict):
-                    feat_name = spec.get("name", "")
-                    agent = spec.get("agent", agents[0] if agents else None)
-                    gain = gains.get(feat_name) if isinstance(gains, dict) else None
-                    records.append(
-                        {
-                            "feature_name": feat_name,
-                            "source_method": "malmas",
-                            "source_agent": agent,
-                            "round_index": round_idx,
-                            "iteration_index": None,
-                            "generated_code": code,
-                            "cv_gain": gain,
-                        }
+                    spec_data: dict[str, Any] = spec
+                elif hasattr(spec, "model_dump") and callable(spec.model_dump):
+                    spec_data = spec.model_dump()
+                else:
+                    logger.warning(
+                        "provenance_spec_unsupported_type", spec_type=type(spec).__name__
                     )
+                    continue
+
+                feat_name = spec_data.get("name", "")
+                agent = spec_data.get("agent_name") or spec_data.get("agent")
+                if not agent:
+                    agent = agents[0] if agents else None
+                gain = gains.get(feat_name) if isinstance(gains, dict) else None
+                records.append(
+                    {
+                        "feature_name": feat_name,
+                        "source_method": "malmas",
+                        "source_agent": agent,
+                        "round_index": round_idx,
+                        "iteration_index": None,
+                        "generated_code": code,
+                        "cv_gain": gain,
+                    }
+                )
         return records
 
     def get_artifacts(self) -> dict[str, Any]:

@@ -25,8 +25,8 @@ from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.exceptions import PipelineError
 from feature_forge.llm.base import LLMClient
 from feature_forge.methods.malmas.agents.base import Agent
+from feature_forge.methods.malmas.prompts import get_registry
 from feature_forge.observability.structlog_config import get_logger
-from feature_forge.prompts import get_registry
 from feature_forge.types import FeatureSpec
 from feature_forge.utils import strip_markdown_fences
 
@@ -401,25 +401,57 @@ class CorePipeline:
 
         features_test = pd.DataFrame()
         if X_test is not None:
+
+            async def _exec_for_agent_test(
+                agent_name: str, agent_code: str
+            ) -> tuple[str, pd.DataFrame] | None:
+                sandbox_t0 = time.perf_counter()
+                try:
+                    part = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            self.sandbox.execute,
+                            agent_code,
+                            X_test,
+                            source="malmas_core_test",
+                            agent_name=agent_name,
+                        ),
+                        timeout=max(sandbox_timeout * 2, 30.0),
+                    )
+                    logger.info(
+                        "agent_sandbox_complete_test",
+                        agent=agent_name,
+                        result_shape=part.shape,
+                        latency_ms=round((time.perf_counter() - sandbox_t0) * 1000, 1),
+                    )
+                    return (agent_name, part)
+                except TimeoutError:
+                    logger.warning(
+                        "agent_sandbox_timeout_test",
+                        agent=agent_name,
+                        timeout=sandbox_timeout * 2,
+                    )
+                    return None
+                except Exception as exc:
+                    logger.warning(
+                        "agent_code_execution_failed_test",
+                        agent=agent_name,
+                        error=str(exc)[:200],
+                    )
+                    return None
+
             test_exec_tasks = [
-                asyncio.wait_for(
-                    asyncio.to_thread(
-                        self.sandbox.execute,
-                        agent_code,
-                        X_test,
-                        source="malmas_core_test",
-                        agent_name=_agent_name,
-                    ),
-                    timeout=max(sandbox_timeout * 2, 30.0),
-                )
+                _exec_for_agent_test(_agent_name, agent_code)
                 for _agent_name, agent_code in all_code_parts
             ]
-            test_exec_results = await asyncio.gather(*test_exec_tasks)
+            test_exec_results = await asyncio.gather(*test_exec_tasks, return_exceptions=True)
 
             features_test_parts: list[pd.DataFrame] = []
             for test_result in test_exec_results:
-                if isinstance(test_result, pd.DataFrame):
-                    features_test_parts.append(test_result)
+                if isinstance(test_result, BaseException):
+                    logger.warning("agent_test_execution_task_failed", error=str(test_result)[:200])
+                    continue
+                if test_result is not None:
+                    features_test_parts.append(test_result[1])
             if features_test_parts:
                 features_test = (
                     pd.concat(features_test_parts, axis=1)

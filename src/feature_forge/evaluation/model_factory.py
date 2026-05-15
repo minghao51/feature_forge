@@ -38,7 +38,7 @@ def create_lightgbm(task: str, random_state: int = 42) -> Any:
         from lightgbm import LGBMClassifier, LGBMRegressor
     except ImportError as exc:
         raise EvaluationError("lightgbm not installed") from exc
-    kwargs = {
+    kwargs: dict[str, Any] = {
         "n_estimators": 500,
         "learning_rate": 0.02,
         "random_state": random_state,

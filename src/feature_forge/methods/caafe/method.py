@@ -20,6 +20,7 @@ from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.exceptions import EvaluationError
 from feature_forge.llm.base import LLMClient
 from feature_forge.methods.base import BaseMethod
+from feature_forge.methods.caafe.prompts import CAAFEUnifiedParams, get_registry
 from feature_forge.observability.structlog_config import get_logger
 from feature_forge.utils import run_coro_sync, strip_markdown_fences
 
@@ -120,13 +121,15 @@ class CAAFEMethod(BaseMethod):
         feedback_str = ""
 
         for i in range(self.iterations):
-            prompt = self._build_caafe_prompt(
-                X_train,
-                description,
-                i,
-                cumulative_cols,
-                feedback_str,
+            template = get_registry().get("unified").system
+            params = CAAFEUnifiedParams(
+                description=description,
+                iterations=self.iterations,
+                iteration=i + 1,
+                existing=", ".join(cumulative_cols) if cumulative_cols else "none",
+                feedback=feedback_str,
             )
+            prompt = params.render(template)
             raw_response = await self.llm_client.complete(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
@@ -272,28 +275,3 @@ class CAAFEMethod(BaseMethod):
             sample = X[col].dropna().head(3).tolist()
             lines.append(f"  {col}: dtype={dtype}, nan%={nan_pct:.1f}, sample={sample}")
         return "\n".join(lines)
-
-    def _build_caafe_prompt(
-        self,
-        X: pd.DataFrame,
-        description: str,
-        iteration: int,
-        existing_cols: list[str],
-        feedback: str,
-    ) -> str:
-        existing = ", ".join(existing_cols) if existing_cols else "none"
-        prompt = (
-            f"You are a feature engineering assistant using CAAFE methodology.\n\n"
-            f"Dataset description:\n{description}\n\n"
-            f"Iteration {iteration + 1}/{self.iterations}.\n"
-            f"Already created features: {existing}.\n"
-        )
-        if feedback:
-            prompt += f"\n{feedback}\n"
-        prompt += (
-            "\nGenerate new features using pandas operations.\n"
-            "Write a Python function `generate_features(df)` that returns a DataFrame "
-            "with only the new features.\n\n"
-            "Output ONLY the code, no explanation."
-        )
-        return prompt

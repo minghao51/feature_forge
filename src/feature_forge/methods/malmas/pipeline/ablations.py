@@ -40,6 +40,23 @@ class NoMemoryPipeline(IterativePipeline):
                 self.router.update_performance(agent.name, avg_gain)
 
 
+class NoMemoryStaticRouterPipeline(NoMemoryPipeline):
+    """No-memory ablation with static router behavior.
+
+    Unlike ``NoMemoryPipeline``, this variant keeps router performance
+    state fixed across rounds for cleaner ablation semantics.
+    """
+
+    async def _post_round(
+        self,
+        agents: list[Agent],
+        core_results: dict[str, Any],
+        round_idx: int,
+    ) -> None:
+        del agents, core_results, round_idx
+        return None
+
+
 class SingleAgentPipeline(BaseIterativePipeline):
     """Ablated pipeline using only a single agent type.
 

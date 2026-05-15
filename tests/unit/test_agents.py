@@ -271,11 +271,31 @@ class TestInferColumnDescriptions:
     def test_cache_key_uses_tuple_not_hash(self):
         from feature_forge.methods.malmas.agents.base import BaseFeatureAgent
 
+        BaseFeatureAgent._column_desc_cache.clear()
         df = pd.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]})
         _ = BaseFeatureAgent._infer_column_descriptions(df)
         cache = BaseFeatureAgent._column_desc_cache
-        expected_key = (2, 2, ("a", "b"))
-        assert any(k == expected_key for k in cache), f"Expected key {expected_key} in cache"
+        expected_prefix = (2, 2, ("a", "b"), ("float64", "float64"))
+        assert any(k[:4] == expected_prefix for k in cache), (
+            f"Expected prefix {expected_prefix} in cache"
+        )
+
+    def test_cache_key_changes_with_values(self):
+        from feature_forge.methods.malmas.agents.base import BaseFeatureAgent
+
+        BaseFeatureAgent._column_desc_cache.clear()
+        df1 = pd.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]})
+        df2 = pd.DataFrame({"a": [10.0, 20.0], "b": [30.0, 40.0]})
+        _ = BaseFeatureAgent._infer_column_descriptions(df1)
+        _ = BaseFeatureAgent._infer_column_descriptions(df2)
+        assert len(BaseFeatureAgent._column_desc_cache) == 2
+
+    def test_categorical_all_nan_top_is_empty_string(self):
+        from feature_forge.methods.malmas.agents.base import BaseFeatureAgent
+
+        df = pd.DataFrame({"cat": [None, None, None]})
+        desc = BaseFeatureAgent._infer_column_descriptions(df)
+        assert desc["cat"]["top"] == ""
 
 
 class TestBuildUserPromptAutoEnrichment:

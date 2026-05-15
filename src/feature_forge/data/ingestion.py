@@ -35,8 +35,10 @@ class KaggleFetcher:
         """
         try:
             import kaggle
-        except ImportError as exc:
-            raise DatasetError("kaggle package not installed. Run: uv pip install kaggle") from exc
+        except (ImportError, SystemExit) as exc:
+            raise DatasetError(
+                "kaggle package not installed or not authenticated. Run: uv pip install kaggle"
+            ) from exc
 
         dataset_path = self.cache_dir / dataset_slug.replace("/", "_")
         dataset_path.mkdir(parents=True, exist_ok=True)

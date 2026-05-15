@@ -10,6 +10,7 @@ import pytest
 from feature_forge.config import Settings
 from feature_forge.exceptions import PipelineError
 from feature_forge.llm.base import LLMClient
+from feature_forge.methods.malmas.agents.base import Agent
 from feature_forge.methods.malmas.pipeline.core import CodeGenerator, CorePipeline
 from feature_forge.types import FeatureSpec
 
@@ -204,3 +205,76 @@ class TestColumnDedup:
         deduped = df.loc[:, ~df.columns.duplicated()]
         assert list(deduped.columns) == ["a", "b"]
         assert deduped["a"].tolist() == [1, 2]
+
+
+class _StubAgent(Agent):
+    @property
+    def system_prompt(self) -> str:
+        return "stub"
+
+    def __init__(self, name: str, specs: list[dict[str, object]]) -> None:
+        super().__init__(name=name, config=Settings(), llm_client=FakeLLM(responses=["{}"]))
+        self._specs = specs
+
+    async def generate(self, X, y, context):
+        del X, y, context
+        return self._specs
+
+
+class _FaultyTestSandbox:
+    def execute(self, code, df, *, source="unknown", agent_name="unknown"):
+        if source == "malmas_core_test" and agent_name == "bad_agent":
+            raise RuntimeError("simulated test-time failure")
+        result = pd.DataFrame(index=df.index)
+        if "good_feature" in code:
+            result["good_feature"] = 1.0
+        if "bad_feature" in code:
+            result["bad_feature"] = 2.0
+        return result
+
+
+class _DeterministicCodeGenerator:
+    async def generate_code(self, specs, schema=None, error_feedback=None):
+        del schema, error_feedback
+        names = ",".join(s.name for s in specs)
+        return f"def generate_features(df):\n    # {names}\n    return df\n"
+
+
+class TestCorePipelineXTestFaultTolerance:
+    @pytest.mark.asyncio
+    async def test_x_test_execution_continues_on_per_agent_failure(self):
+        config = Settings(
+            task="classification", metric="auc", n_rounds=1, evaluation={"cv_folds": 2}
+        )
+        pipeline = CorePipeline(
+            config=config,
+            llm_client=FakeLLM(responses=["{}"]),
+            sandbox=_FaultyTestSandbox(),  # type: ignore[arg-type]
+            code_generator=_DeterministicCodeGenerator(),  # type: ignore[arg-type]
+        )
+
+        # Monkey patch deterministic code bodies keyed by agent specs names.
+        async def _gen(specs, schema=None, error_feedback=None):
+            del schema, error_feedback
+            first = specs[0].name
+            if first == "good_feature":
+                return "good_feature"
+            return "bad_feature"
+
+        pipeline.code_generator.generate_code = _gen  # type: ignore[method-assign]
+
+        good_agent = _StubAgent(
+            "good_agent",
+            [{"name": "good_feature", "type": "numerical", "transform": "id", "logic": "good"}],
+        )
+        bad_agent = _StubAgent(
+            "bad_agent",
+            [{"name": "bad_feature", "type": "numerical", "transform": "id", "logic": "bad"}],
+        )
+
+        X_train = pd.DataFrame({"a": [0, 1, 0, 1, 0, 1]})
+        y = pd.Series([0, 1, 0, 1, 0, 1])
+        X_test = X_train.copy()
+
+        result = await pipeline.run([good_agent, bad_agent], X_train, y, X_test=X_test)
+        assert "good_feature" in result["features_test"].columns
