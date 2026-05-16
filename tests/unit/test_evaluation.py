@@ -342,7 +342,7 @@ class TestCVPreprocessNoLeakage:
     def test_fit_uses_own_medians(self):
         evaluator = CVEvaluator(config=Settings(task="regression", metric="rmse"))
         train = pd.DataFrame({"a": [1.0, 2.0, 3.0, np.nan]})
-        result, _state = evaluator._preprocess(train, fit=True)
+        result, _state = evaluator._fit_preprocess(train)
         assert result["a"].isna().sum() == 0
         assert result["a"].iloc[3] == 2.0
 
@@ -350,16 +350,16 @@ class TestCVPreprocessNoLeakage:
         evaluator = CVEvaluator(config=Settings(task="regression", metric="rmse"))
         train = pd.DataFrame({"a": [10.0, 20.0, 30.0]})
         val = pd.DataFrame({"a": [1.0, np.nan]})
-        _, state = evaluator._preprocess(train, fit=True)
-        val_proc = evaluator._preprocess(val, fit=False, ref_state=state)
+        _, state = evaluator._fit_preprocess(train)
+        val_proc = evaluator._transform_preprocess(val, state)
         assert val_proc["a"].iloc[1] == 20.0
 
     def test_transform_categorical_uses_ref_categories(self):
         evaluator = CVEvaluator(config=Settings(task="classification", metric="auc"))
         train = pd.DataFrame({"cat": ["a", "b", "c"]})
         val = pd.DataFrame({"cat": ["a", "d"]})
-        train_proc, state = evaluator._preprocess(train, fit=True)
-        val_proc = evaluator._preprocess(val, fit=False, ref_state=state)
+        train_proc, state = evaluator._fit_preprocess(train)
+        val_proc = evaluator._transform_preprocess(val, state)
         assert val_proc["cat"].iloc[0] == train_proc["cat"].iloc[0]
         assert val_proc["cat"].iloc[1] == -1
 
@@ -414,11 +414,11 @@ class TestCVEvaluatorEdgeCases:
     def test_preprocess_transform_missing_ref_state(self):
         evaluator = CVEvaluator(config=Settings(task="regression", metric="rmse"))
         val = pd.DataFrame({"a": [1.0, float("nan")]})
-        result = evaluator._preprocess(val, fit=False, ref_state={})
+        result = evaluator._transform_preprocess(val, ref_state={})
         assert result["a"].isna().sum() == 0  # falls back to val median
 
     def test_preprocess_transform_missing_categorical_ref(self):
         evaluator = CVEvaluator(config=Settings(task="classification", metric="auc"))
         val = pd.DataFrame({"cat": ["x", "y"]})
-        result = evaluator._preprocess(val, fit=False, ref_state={})
+        result = evaluator._transform_preprocess(val, ref_state={})
         assert "cat" in result.columns

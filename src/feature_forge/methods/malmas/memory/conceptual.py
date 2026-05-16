@@ -80,21 +80,29 @@ class ConceptualMemory:
         system_prompt = params.render_system()
         user_prompt = params.render_user()
 
-        response = await self.llm_client.complete(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.6,
-            max_tokens=1024,
-        )
-        memory.conceptual_summary = response.content
+        try:
+            response = await self.llm_client.complete(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.6,
+                max_tokens=1024,
+            )
+            memory.conceptual_summary = response.content
+        except Exception as exc:
+            logger.warning(
+                "conceptual_summarize_failed",
+                agent=memory.agent_name,
+                error=str(exc)[:200],
+            )
+            memory.conceptual_summary = "Failed to generate conceptual summary due to LLM error."
         memory.record_conceptual(memory.conceptual_summary)
         latency_ms = round((time.perf_counter() - summary_t0) * 1000, 1)
         logger.info(
             "conceptual_summarize_complete",
             agent=memory.agent_name,
-            summary_length=len(response.content),
+            summary_length=len(memory.conceptual_summary),
             latency_ms=latency_ms,
         )
         return memory.conceptual_summary
@@ -133,17 +141,26 @@ class ConceptualMemory:
         system_prompt = params.render_system()
         user_prompt = params.render_user()
 
-        response = await self.llm_client.complete(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.6,
-            max_tokens=1024,
-        )
-        global_summary = response.content
+        try:
+            response = await self.llm_client.complete(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.6,
+                max_tokens=1024,
+            )
+            global_summary = response.content
+        except Exception as exc:
+            logger.warning(
+                "conceptual_global_summarize_failed",
+                error=str(exc)[:200],
+            )
+            global_summary = "Failed to generate global summary due to LLM error."
         for memory in memories.values():
             memory.global_summary.append(global_summary)
+            if len(memory.global_summary) > memory._max_global_summaries:
+                memory.global_summary.pop(0)
         latency_ms = round((time.perf_counter() - global_t0) * 1000, 1)
         logger.info(
             "conceptual_global_summarize_complete",

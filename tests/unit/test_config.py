@@ -79,12 +79,17 @@ class TestRouterConfig:
         with pytest.raises(ValidationError, match="min_agents"):
             RouterConfig(min_agents=0)
 
+    def test_warmup_rounds_validation(self):
+        with pytest.raises(ValidationError, match="warmup_rounds"):
+            RouterConfig(warmup_rounds=-1)
+
 
 class TestEvaluationConfig:
     def test_default_values(self):
         cfg = EvaluationConfig()
         assert cfg.cv_folds == 5
         assert cfg.test_size == 0.4
+        assert cfg.feature_eval_backend == "threading"
 
     def test_cv_folds_validation(self):
         with pytest.raises(ValidationError, match="cv_folds"):
@@ -95,6 +100,14 @@ class TestEvaluationConfig:
             EvaluationConfig(test_size=0.0)
         with pytest.raises(ValidationError, match="test_size"):
             EvaluationConfig(test_size=1.0)
+
+    def test_feature_eval_backend_validation(self):
+        with pytest.raises(ValidationError, match="feature_eval_backend"):
+            EvaluationConfig(feature_eval_backend="invalid")
+
+    def test_max_cv_workers_validation(self):
+        with pytest.raises(ValidationError, match="max_cv_workers"):
+            EvaluationConfig(max_cv_workers=0)
 
 
 class TestSettings:

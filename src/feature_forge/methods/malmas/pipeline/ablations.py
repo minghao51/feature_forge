@@ -52,9 +52,7 @@ class NoMemoryStaticRouterPipeline(NoMemoryPipeline):
         agents: list[Agent],
         core_results: dict[str, Any],
         round_idx: int,
-    ) -> None:
-        del agents, core_results, round_idx
-        return None
+    ) -> None: ...
 
 
 class SingleAgentPipeline(BaseIterativePipeline):

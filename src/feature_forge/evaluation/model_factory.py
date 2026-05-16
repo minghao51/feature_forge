@@ -5,7 +5,6 @@ Supports XGBoost, LightGBM, CatBoost, Random Forest, and MLP.
 
 from __future__ import annotations
 
-import importlib.metadata
 import warnings
 from collections.abc import Callable
 from typing import Any, ClassVar
@@ -115,32 +114,9 @@ class ModelRegistry:
     @classmethod
     def discover(cls) -> dict[str, Callable[..., Any]]:
         """Discover models registered via entry points."""
-        discovered: dict[str, Callable[..., Any]] = {}
-        builtin = cls.get_builtin()
-        for ep in importlib.metadata.entry_points(group=cls.ENTRY_POINT_GROUP):
-            try:
-                loaded = ep.load()
-            except Exception as exc:
-                warnings.warn(
-                    f"Failed to load model entry point '{ep.name}': {exc}",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-                continue
-            if ep.name in builtin and builtin[ep.name] is not loaded:
-                warnings.warn(
-                    f"Entry point model '{ep.name}' overrides built-in model.",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-            if ep.name in discovered:
-                warnings.warn(
-                    f"Duplicate model entry point name '{ep.name}'. Last registered wins.",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-            discovered[ep.name] = loaded
-        return discovered
+        from feature_forge.evaluation.registry_utils import discover_entry_points
+
+        return discover_entry_points(cls.ENTRY_POINT_GROUP, builtins=cls.get_builtin())
 
     @classmethod
     def get_all(cls) -> dict[str, Callable[..., Any]]:

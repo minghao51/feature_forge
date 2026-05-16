@@ -1,4 +1,4 @@
-"""Fail CI when core docs reference removed legacy module paths."""
+"""Fail CI when docs contain stale paths or broken local @references."""
 
 from __future__ import annotations
 
@@ -8,7 +8,10 @@ DOCS_TO_CHECK = [
     Path("README.md"),
     Path("docs/index.md"),
     Path("docs/methods.md"),
-    Path(".planning/codebase/ARCHITECTURE.md"),
+    Path("AGENTS.md"),
+    Path(".planning/OVERVIEW.md"),
+    Path(".planning/STYLE.md"),
+    Path(".planning/STATE.md"),
 ]
 
 LEGACY_PATH_HINTS = {
@@ -28,6 +31,21 @@ def main() -> int:
         for legacy, replacement in LEGACY_PATH_HINTS.items():
             if legacy in text:
                 violations.append(f"{doc_path}: replace '{legacy}' with '{replacement}'")
+
+        for raw_line in text.splitlines():
+            if "@" not in raw_line:
+                continue
+            for token in raw_line.split():
+                if not token.startswith("@"):
+                    continue
+                maybe_path = token[1:].strip(",:;()[]{}<>\"'")
+                if not maybe_path:
+                    continue
+                if "/" not in maybe_path and "." not in maybe_path:
+                    continue
+                ref_path = Path(maybe_path)
+                if not ref_path.exists():
+                    violations.append(f"{doc_path}: broken local reference '@{maybe_path}'")
 
     if violations:
         print("Found stale documentation references:")

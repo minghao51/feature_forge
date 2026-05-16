@@ -11,6 +11,7 @@ from feature_forge.config import Settings
 from feature_forge.exceptions import PipelineError
 from feature_forge.llm.base import LLMClient
 from feature_forge.methods.malmas.agents.base import Agent
+from feature_forge.methods.malmas.pipeline import core as core_module
 from feature_forge.methods.malmas.pipeline.core import CodeGenerator, CorePipeline
 from feature_forge.types import FeatureSpec
 
@@ -278,3 +279,175 @@ class TestCorePipelineXTestFaultTolerance:
 
         result = await pipeline.run([good_agent, bad_agent], X_train, y, X_test=X_test)
         assert "good_feature" in result["features_test"].columns
+
+
+class _CountingEvaluator:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def evaluate_baseline(self, X_train, y_train):
+        del X_train, y_train
+        self.calls += 1
+        return 0.5
+
+    def evaluate_feature(self, X_train, y_train, feature_df, baseline_score):
+        del X_train, y_train, feature_df, baseline_score
+        return 0.1
+
+
+class TestCorePipelineBaselineCache:
+    def test_baseline_cache_key_changes_when_train_schema_changes(self):
+        config = Settings(evaluation={"feature_eval_backend": "threading"})
+        evaluator = _CountingEvaluator()
+        pipeline = CorePipeline(
+            config=config, llm_client=FakeLLM(responses=["{}"]), evaluator=evaluator
+        )
+
+        X_train = pd.DataFrame({"a": [1, 2, 3, 4]})
+        y_train = pd.Series([0, 1, 0, 1])
+        features = pd.DataFrame({"f1": [0.2, 0.3, 0.4, 0.5]})
+
+        pipeline._evaluate_and_select(
+            features_train=features,
+            features_test=pd.DataFrame(),
+            X_train=X_train,
+            y_train=y_train,
+            X_test=None,
+            all_specs=[],
+            agents=[],
+            code="",
+        )
+        assert evaluator.calls == 1
+
+        # In-place schema mutation should invalidate baseline cache key.
+        X_train["b"] = [10, 20, 30, 40]
+
+        pipeline._evaluate_and_select(
+            features_train=features,
+            features_test=pd.DataFrame(),
+            X_train=X_train,
+            y_train=y_train,
+            X_test=None,
+            all_specs=[],
+            agents=[],
+            code="",
+        )
+        assert evaluator.calls == 2
+
+
+class TestFeatureEvalBackendSelection:
+    def test_parallel_uses_threading_backend(self, monkeypatch):
+        config = Settings(
+            evaluation={"feature_eval_backend": "threading", "max_cv_workers": 2},
+        )
+        evaluator = _CountingEvaluator()
+        pipeline = CorePipeline(
+            config=config, llm_client=FakeLLM(responses=["{}"]), evaluator=evaluator
+        )
+        X_train = pd.DataFrame({"a": [1, 2, 3, 4]})
+        y_train = pd.Series([0, 1, 0, 1])
+        features = pd.DataFrame({"f1": [0.1, 0.2, 0.3, 0.4], "f2": [1.1, 1.2, 1.3, 1.4]})
+
+        captured: dict[str, object] = {}
+
+        def _fake_parallel(*, n_jobs, backend):
+            captured["n_jobs"] = n_jobs
+            captured["backend"] = backend
+
+            def _runner(tasks):
+                return [task() for task in tasks]
+
+            return _runner
+
+        monkeypatch.setattr(core_module, "Parallel", _fake_parallel)
+        monkeypatch.setattr(core_module, "delayed", lambda fn: lambda *a, **k: lambda: fn(*a, **k))
+
+        result = pipeline._evaluate_and_select(
+            features_train=features,
+            features_test=pd.DataFrame(),
+            X_train=X_train,
+            y_train=y_train,
+            X_test=None,
+            all_specs=[],
+            agents=[],
+            code="",
+        )
+        assert captured["backend"] == "threading"
+        assert captured["n_jobs"] == 2
+        assert "f1" in result["gains"]
+
+    def test_parallel_uses_loky_backend(self, monkeypatch):
+        config = Settings(
+            evaluation={"feature_eval_backend": "loky", "max_cv_workers": 3},
+        )
+        evaluator = _CountingEvaluator()
+        pipeline = CorePipeline(
+            config=config, llm_client=FakeLLM(responses=["{}"]), evaluator=evaluator
+        )
+        X_train = pd.DataFrame({"a": [1, 2, 3, 4]})
+        y_train = pd.Series([0, 1, 0, 1])
+        features = pd.DataFrame({"f1": [0.1, 0.2, 0.3, 0.4], "f2": [1.1, 1.2, 1.3, 1.4]})
+
+        captured: dict[str, object] = {}
+
+        def _fake_parallel(*, n_jobs, backend):
+            captured["n_jobs"] = n_jobs
+            captured["backend"] = backend
+
+            def _runner(tasks):
+                return [task() for task in tasks]
+
+            return _runner
+
+        monkeypatch.setattr(core_module, "Parallel", _fake_parallel)
+        monkeypatch.setattr(core_module, "delayed", lambda fn: lambda *a, **k: lambda: fn(*a, **k))
+
+        result = pipeline._evaluate_and_select(
+            features_train=features,
+            features_test=pd.DataFrame(),
+            X_train=X_train,
+            y_train=y_train,
+            X_test=None,
+            all_specs=[],
+            agents=[],
+            code="",
+        )
+        assert captured["backend"] == "loky"
+        assert captured["n_jobs"] == 3
+        assert "f2" in result["gains"]
+
+    def test_baseline_cache_key_changes_when_target_values_change(self):
+        config = Settings(evaluation={"feature_eval_backend": "threading"})
+        evaluator = _CountingEvaluator()
+        pipeline = CorePipeline(
+            config=config, llm_client=FakeLLM(responses=["{}"]), evaluator=evaluator
+        )
+
+        X_train = pd.DataFrame({"a": [1, 2, 3, 4]})
+        y_train = pd.Series([0, 1, 0, 1])
+        features = pd.DataFrame({"f1": [0.2, 0.3, 0.4, 0.5]})
+
+        pipeline._evaluate_and_select(
+            features_train=features,
+            features_test=pd.DataFrame(),
+            X_train=X_train,
+            y_train=y_train,
+            X_test=None,
+            all_specs=[],
+            agents=[],
+            code="",
+        )
+        assert evaluator.calls == 1
+
+        y_train = pd.Series([1, 0, 1, 0])
+        pipeline._evaluate_and_select(
+            features_train=features,
+            features_test=pd.DataFrame(),
+            X_train=X_train,
+            y_train=y_train,
+            X_test=None,
+            all_specs=[],
+            agents=[],
+            code="",
+        )
+        assert evaluator.calls == 2

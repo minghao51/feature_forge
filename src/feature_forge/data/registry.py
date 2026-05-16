@@ -66,7 +66,12 @@ class DatasetRegistry:
                 sample = loader()
                 target = sample.get("target")
                 task = sample.get("metadata", {}).get("task", "classification")
-            except Exception:
+            except Exception as exc:
+                warnings.warn(
+                    f"Failed to extract metadata from entry-point '{ep.name}': {exc}",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
                 target = None
                 task = "classification"
             self._datasets[ep.name] = {

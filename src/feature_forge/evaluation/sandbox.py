@@ -18,9 +18,12 @@ import socket
 import tempfile
 import time
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from feature_forge.evaluation.cv import CVEvaluator
 import pandas as pd
 
 from feature_forge.exceptions import (
@@ -54,15 +57,18 @@ def _to_parquet_safe(df: pd.DataFrame) -> pd.DataFrame:
                     df[col] = numeric.astype(float)
                 else:
                     df[col] = series.astype(str)
-            except Exception:
+            except Exception as exc:
+                logger.debug(
+                    "parquet_conversion_numeric_extract_failed", column=col, error=str(exc)
+                )
                 df[col] = series.astype(str)
-        # Object columns may contain complex types
         elif series.dtype == object:
             try:
                 df[col] = pd.to_numeric(series, errors="coerce")
                 if df[col].isna().all() and series.notna().any():
                     df[col] = series.astype(str)
-            except Exception:
+            except Exception as exc:
+                logger.debug("parquet_conversion_coerce_failed", column=col, error=str(exc))
                 df[col] = series.astype(str)
         # Any unrecognized extension type → float or string
         elif not pd.api.types.is_numeric_dtype(series) and not pd.api.types.is_bool_dtype(series):
@@ -125,8 +131,6 @@ class SandboxedExecutor:
         "set",
         "frozenset",
         "isinstance",
-        "hasattr",
-        "type",
         "ValueError",
         "TypeError",
         "KeyError",
@@ -171,6 +175,16 @@ class SandboxedExecutor:
         max_memory_mb: int = 512,
     ) -> None:
         self.limits = SandboxLimits(timeout_seconds=timeout_seconds, max_memory_mb=max_memory_mb)
+
+    @staticmethod
+    def from_evaluator(evaluator: CVEvaluator | None) -> SandboxedExecutor:
+        if evaluator is not None:
+            cfg = evaluator.config.evaluation
+            return SandboxedExecutor(
+                timeout_seconds=cfg.sandbox_timeout_seconds,
+                max_memory_mb=cfg.sandbox_max_memory_mb,
+            )
+        return SandboxedExecutor(timeout_seconds=5.0, max_memory_mb=512)
 
     def execute(
         self,
@@ -348,6 +362,7 @@ def _sandbox_worker_main(
         return
 
     socket.create_connection = _blocked_network
+    socket.socket = _blocked_network  # type: ignore[assignment,misc]
 
     import builtins as _builtins
 

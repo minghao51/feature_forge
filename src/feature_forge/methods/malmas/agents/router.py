@@ -6,6 +6,8 @@ selection strategies.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from enum import StrEnum
 from typing import Any, ClassVar
 
 import pandas as pd
@@ -17,6 +19,16 @@ from feature_forge.methods.malmas.types import AgentName
 from feature_forge.observability.structlog_config import get_logger
 
 logger = get_logger(__name__)
+
+
+class ExclusionReason(StrEnum):
+    """Type-safe exclusion reasons for agent selection."""
+
+    NO_DATETIME_COLUMNS = "no_datetime_columns"
+    SINGLE_COLUMN_DATASET = "single_column_dataset"
+    NO_NUMERICAL_COLUMNS = "no_numerical_columns"
+    NO_CATEGORICAL_FOR_GROUPING = "no_categorical_for_grouping"
+    NO_SINGLE_COLUMN_FEATURES = "no_single_column_features"
 
 
 class RouterAgent:
@@ -33,28 +45,28 @@ class RouterAgent:
         "unary": {
             "description": "Generates features from single columns",
             "required_column_types": ["numerical", "categorical"],
-            "excluded_if": ["no_single_column_features"],
+            "excluded_if": [ExclusionReason.NO_SINGLE_COLUMN_FEATURES],
         },
         "cross_compositional": {
             "description": "Generates cross features between 2+ columns",
             "required_column_types": ["numerical", "categorical"],
             "min_columns": 2,
-            "excluded_if": ["single_column_dataset"],
+            "excluded_if": [ExclusionReason.SINGLE_COLUMN_DATASET],
         },
         "aggregation": {
             "description": "Generates aggregation-based features",
             "required_column_types": ["categorical", "groupable"],
-            "excluded_if": ["no_categorical_for_grouping"],
+            "excluded_if": [ExclusionReason.NO_CATEGORICAL_FOR_GROUPING],
         },
         "temporal": {
             "description": "Generates time-based features",
             "required_column_types": ["datetime", "temporal"],
-            "excluded_if": ["no_datetime_columns"],
+            "excluded_if": [ExclusionReason.NO_DATETIME_COLUMNS],
         },
         "local_transform": {
             "description": "Generates local transformation features",
             "required_column_types": ["numerical"],
-            "excluded_if": ["no_numerical_columns"],
+            "excluded_if": [ExclusionReason.NO_NUMERICAL_COLUMNS],
         },
         "local_pattern": {
             "description": "Generates features based on distributional patterns",
@@ -73,9 +85,13 @@ class RouterAgent:
         self.llm_client = llm_client
         self.agent_names = list(self.AGENT_CAPABILITIES.keys())
         self.strategy = config.router.strategy
-        self.min_agents = config.router.min_agents or 1
-        self.max_agents = config.router.max_agents or len(self.agent_names)
-        self.warmup_rounds = 1
+        self.min_agents = config.router.min_agents if config.router.min_agents is not None else 1
+        self.max_agents = (
+            config.router.max_agents
+            if config.router.max_agents is not None
+            else len(self.agent_names)
+        )
+        self.warmup_rounds = config.router.warmup_rounds
         self.use_llm = self.strategy == "llm"
 
         self.agent_performance: dict[str, list[float]] = {name: [] for name in self.agent_names}
@@ -111,6 +127,13 @@ class RouterAgent:
                     characteristics["datetime_columns"].append(col_name)
         return characteristics
 
+    _EXCLUSION_CONDITIONS: ClassVar[dict[str, Callable[[dict[str, Any]], bool]]] = {
+        "no_datetime_columns": lambda chars: not chars["datetime_columns"],
+        "single_column_dataset": lambda chars: chars.get("single_column_dataset", False),
+        "no_numerical_columns": lambda chars: not chars["numerical_columns"],
+        "no_categorical_for_grouping": lambda chars: len(chars["categorical_columns"]) < 1,
+    }
+
     def _data_driven_selection(self) -> list[str]:
         """Select agents based on dataset characteristics."""
         if self.dataset_characteristics is None:
@@ -120,23 +143,16 @@ class RouterAgent:
         chars = self.dataset_characteristics
         for agent_name in self.agent_names:
             capabilities = self.AGENT_CAPABILITIES.get(agent_name, {})
-            should_include = True
             excluded_if = capabilities.get("excluded_if", [])
-            if "no_datetime_columns" in excluded_if and not chars["datetime_columns"]:
-                should_include = False
-            if "single_column_dataset" in excluded_if and chars.get("single_column_dataset", False):
-                should_include = False
-            if "no_numerical_columns" in excluded_if and not chars["numerical_columns"]:
-                should_include = False
-            if (
-                "no_categorical_for_grouping" in excluded_if
-                and len(chars["categorical_columns"]) < 1
-            ):
-                should_include = False
             if capabilities.get("requires_enrich") and not chars["has_enrich_description"]:
-                should_include = False
-            if should_include:
-                selected.append(agent_name)
+                continue
+            if any(
+                self._EXCLUSION_CONDITIONS[cond](chars)
+                for cond in excluded_if
+                if cond in self._EXCLUSION_CONDITIONS
+            ):
+                continue
+            selected.append(agent_name)
 
         if len(selected) < self.min_agents:
             for agent in self.agent_names:
@@ -290,12 +306,8 @@ class RouterAgent:
         if agent_name in self.agent_performance:
             self.agent_performance[agent_name].append(gain)
             self.agent_performance[agent_name] = self.agent_performance[agent_name][-10:]
-        avg_gain = (
-            sum(self.agent_performance.get(agent_name, []))
-            / len(self.agent_performance.get(agent_name, []))
-            if self.agent_performance.get(agent_name)
-            else 0.0
-        )
+        gains = self.agent_performance.get(agent_name, [])
+        avg_gain = sum(gains) / len(gains) if gains else 0.0
         logger.debug(
             "router_performance_update",
             agent=agent_name,

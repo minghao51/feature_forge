@@ -116,9 +116,8 @@ class CVEvaluator:
             X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
             y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
 
-            # Simple preprocessing: fillna for numerical, ordinal encode categoricals
-            X_train_proc, train_state = self._preprocess(X_train, fit=True)
-            X_val_proc = self._preprocess(X_val, fit=False, ref_state=train_state)  # type: ignore[arg-type]
+            X_train_proc, train_state = self._fit_preprocess(X_train)
+            X_val_proc = self._transform_preprocess(X_val, train_state)
 
             try:
                 with warnings.catch_warnings():
@@ -137,45 +136,36 @@ class CVEvaluator:
 
         return float(np.mean(scores))
 
-    def _preprocess(
-        self,
-        X: pd.DataFrame,
-        fit: bool = True,
-        ref_state: dict[str, Any] | None = None,
-    ) -> tuple[pd.DataFrame, dict[str, Any]] | pd.DataFrame:
-        """Minimal preprocessing: fill NA, encode categoricals.
+    def _fit_preprocess(self, X: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, Any]]:
+        """Fit preprocessing: compute medians and category mappings from X.
 
-        When ``fit=True``, computes medians and category mappings from ``X``
-        and returns ``(processed_df, state_dict)``.
-
-        When ``fit=False``, uses values from ``ref_state`` (the training fold)
-        to avoid data leakage between train and validation splits.
-        Returns only the processed DataFrame.
+        Returns (processed_df, state_dict) where state_dict captures
+        statistics computed from this training fold to reuse on validation folds.
         """
         X = X.copy()
         state: dict[str, Any] = {}
         for col in X.columns:
             if X[col].dtype == "object" or X[col].dtype.name == "category":
-                if fit:
-                    cat_series = X[col].astype("category")
-                    state[f"{col}_categories"] = cat_series.cat.categories
-                    X[col] = cat_series.cat.codes
-                else:
-                    ref_categories = (ref_state or {}).get(f"{col}_categories")
-                    if ref_categories is not None:
-                        X[col] = (
-                            X[col].astype("category").cat.set_categories(ref_categories).cat.codes
-                        )
-                    else:
-                        X[col] = X[col].astype("category").cat.codes
+                cat_series = X[col].astype("category")
+                state[f"{col}_categories"] = cat_series.cat.categories
+                X[col] = cat_series.cat.codes
             else:
-                if fit:
-                    median = X[col].median()
-                    state[f"{col}_median"] = median
-                    X[col] = X[col].fillna(median)
+                median = X[col].median()
+                state[f"{col}_median"] = median
+                X[col] = X[col].fillna(median)
+        return X, state
+
+    def _transform_preprocess(self, X: pd.DataFrame, ref_state: dict[str, Any]) -> pd.DataFrame:
+        """Transform preprocessing: apply previously fitted state to avoid data leakage."""
+        X = X.copy()
+        for col in X.columns:
+            if X[col].dtype == "object" or X[col].dtype.name == "category":
+                ref_categories = ref_state.get(f"{col}_categories")
+                if ref_categories is not None:
+                    X[col] = X[col].astype("category").cat.set_categories(ref_categories).cat.codes
                 else:
-                    fill_value = (ref_state or {}).get(f"{col}_median", X[col].median())
-                    X[col] = X[col].fillna(fill_value)
-        if fit:
-            return X, state
+                    X[col] = X[col].astype("category").cat.codes
+            else:
+                fill_value = ref_state.get(f"{col}_median", X[col].median())
+                X[col] = X[col].fillna(fill_value)
         return X

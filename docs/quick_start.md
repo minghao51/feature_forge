@@ -70,7 +70,7 @@ my_method = "my_package:MyMethod"
 from feature_forge.methods.malmas.agents import Agent, BaseFeatureAgent
 
 class MyAgent(BaseFeatureAgent):
-    prompt_filename = "my_prompt"
+    prompt_key = "my_prompt"
     agent_name = "my_agent"
 ```
 

@@ -50,6 +50,12 @@ repos:
         language: system
         pass_filenames: false
 
+      - id: docs-references
+        name: Docs references (legacy + broken local @paths)
+        entry: uv run python scripts/check_docs_references.py
+        language: system
+        pass_filenames: false
+
       - id: mypy
         name: mypy
         entry: uv run mypy

@@ -31,6 +31,7 @@ This document outlines the comprehensive implementation plan for `feature_forge`
 | `09_baseline_selection.md` | Why MALMAS + OpenFE + CAAFE + LLM-FE |
 | `10_experimental_platform_refactor.md` | Hybrid plugin platform refactor: `ExperimentalPlatform` API + entry point hooks for baselines/datasets/models/metrics |
 | `11_platform_refactor_review.md` | Post-implementation review, gaps identified, and fixes applied |
+| `17_code_simplification.md` | Full `src/` code simplification — dedup sandbox init, iterative helpers, parse guards, router conditions, registry discovery |
 
 ## Research Basis
 

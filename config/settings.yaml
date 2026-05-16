@@ -36,3 +36,4 @@ memory:
 evaluation:
   cv_folds: 5
   test_size: 0.4
+  feature_eval_backend: "threading"

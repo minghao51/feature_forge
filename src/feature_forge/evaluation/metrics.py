@@ -5,7 +5,6 @@ Supports both classification (AUC, ACC, F1) and regression (RMSE, MAE, R2).
 
 from __future__ import annotations
 
-import importlib.metadata
 import warnings
 from collections.abc import Callable
 from typing import Any, ClassVar
@@ -106,32 +105,9 @@ class MetricRegistry:
     @classmethod
     def discover(cls) -> dict[str, Callable[..., Any]]:
         """Discover metrics registered via entry points."""
-        discovered: dict[str, Callable[..., Any]] = {}
-        builtin = cls._builtin
-        for ep in importlib.metadata.entry_points(group=cls.ENTRY_POINT_GROUP):
-            try:
-                loaded = ep.load()
-            except Exception as exc:
-                warnings.warn(
-                    f"Failed to load metric entry point '{ep.name}': {exc}",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-                continue
-            if ep.name in builtin and builtin[ep.name] is not loaded:
-                warnings.warn(
-                    f"Entry point metric '{ep.name}' overrides built-in metric.",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-            if ep.name in discovered:
-                warnings.warn(
-                    f"Duplicate metric entry point name '{ep.name}'. Last registered wins.",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-            discovered[ep.name] = loaded
-        return discovered
+        from feature_forge.evaluation.registry_utils import discover_entry_points
+
+        return discover_entry_points(cls.ENTRY_POINT_GROUP, builtins=cls._builtin)
 
     @classmethod
     def get_builtin(cls) -> dict[str, Callable[..., Any]]:

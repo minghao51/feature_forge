@@ -15,6 +15,9 @@ import pandas as pd
 from feature_forge.artifacts.base import ArtifactConfig
 from feature_forge.exceptions import EvaluationError
 from feature_forge.methods.base import BaseMethod
+from feature_forge.observability.structlog_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class OpenFEMethod(BaseMethod):
@@ -120,8 +123,9 @@ class OpenFEMethod(BaseMethod):
 
             arr = np.asarray(importances)
             return pd.DataFrame({"rank": range(len(arr)), "importance": arr})
-        except Exception:
-            return None
+        except Exception as exc:
+            logger.warning("openfe_importance_extraction_failed", error=str(exc))
+            return pd.DataFrame()
 
     @property
     def generated_scripts(self) -> list[str]:

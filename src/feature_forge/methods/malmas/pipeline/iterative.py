@@ -16,6 +16,7 @@ from feature_forge.methods.malmas.agents.router import RouterAgent
 from feature_forge.methods.malmas.memory.base import AgentMemory
 from feature_forge.methods.malmas.pipeline.core import CodeGenerator, CorePipeline
 from feature_forge.observability.structlog_config import get_logger
+from feature_forge.types import FeatureSpec
 
 if TYPE_CHECKING:
     from feature_forge.methods.malmas.memory.conceptual import ConceptualMemory
@@ -298,6 +299,42 @@ class IterativePipeline(BaseIterativePipeline):
             "negative_features": neg,
         }
 
+    @staticmethod
+    def _record_feature_in_memory(
+        memory: AgentMemory,
+        spec: FeatureSpec,
+        gain: float,
+        round_idx: int,
+        metric: str,
+    ) -> None:
+        memory.record_procedure(
+            base_columns=spec.base_columns,
+            transform=spec.transform,
+            feature_name=spec.name,
+            ty=spec.type,
+            description=spec.logic,
+            round_idx=round_idx,
+        )
+        effective = gain > 0
+        memory.record_feedback(
+            feature_name=spec.name,
+            metric=metric,
+            value=gain,
+            effective=effective,
+            round_idx=round_idx,
+            base=spec.base_columns,
+            ty=spec.type,
+        )
+        if not effective:
+            memory.record_unused_procedure(
+                base_columns=spec.base_columns,
+                transform=spec.transform,
+                feature_name=spec.name,
+                ty=spec.type,
+                description=spec.logic,
+                round_idx=round_idx,
+            )
+
     async def _post_round(
         self,
         agents: list[Agent],
@@ -308,42 +345,18 @@ class IterativePipeline(BaseIterativePipeline):
             memory = self._get_memory(agent.name)
             agent_gain_df = core_results["agent_gains"].get(agent.name, pd.DataFrame())
             for _, row in agent_gain_df.iterrows():
-                fname = row["feature"]
-                gain = row["gain"]
-                spec = next((s for s in core_results["specs"] if s.name == fname), None)
+                spec = next((s for s in core_results["specs"] if s.name == row["feature"]), None)
                 if spec:
-                    memory.record_procedure(
-                        base_columns=spec.base_columns,
-                        transform=spec.transform,
-                        feature_name=fname,
-                        ty=spec.type,
-                        description=spec.logic,
-                        round_idx=round_idx,
+                    self._record_feature_in_memory(
+                        memory,
+                        spec,
+                        row["gain"],
+                        round_idx,
+                        self.config.metric,
                     )
-                    effective = gain > 0
-                    memory.record_feedback(
-                        feature_name=fname,
-                        metric=self.config.metric,
-                        value=gain,
-                        effective=effective,
-                        round_idx=round_idx,
-                        base=spec.base_columns,
-                        ty=spec.type,
-                    )
-                    if not effective:
-                        memory.record_unused_procedure(
-                            base_columns=spec.base_columns,
-                            transform=spec.transform,
-                            feature_name=fname,
-                            ty=spec.type,
-                            description=spec.logic,
-                            round_idx=round_idx,
-                        )
             memory.save()
-
             if not agent_gain_df.empty:
-                avg_gain = agent_gain_df["gain"].mean()
-                self.router.update_performance(agent.name, avg_gain)
+                self.router.update_performance(agent.name, agent_gain_df["gain"].mean())
 
     def _get_memory(self, agent_name: str) -> AgentMemory:
         if agent_name not in self.memories:

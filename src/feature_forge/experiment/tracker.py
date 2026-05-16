@@ -6,10 +6,13 @@ Supports WandB (default) and MLflow (optional) backends.
 from __future__ import annotations
 
 import json
+import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
 import pandas as pd
+
+_logger = logging.getLogger(__name__)
 
 
 class ExperimentTracker(ABC):
@@ -62,7 +65,8 @@ class ExperimentTracker(ABC):
         elif hasattr(value, "load") and callable(value.load):
             try:
                 self._log_dataframe(key, value.load())
-            except Exception:
+            except Exception as exc:
+                _logger.debug("artifact_load_failed", extra={"key": key, "error": str(exc)})
                 self.log_params({key: f"<LazyDataFrameRef: {getattr(value, 'path', '?')}>"})
         elif isinstance(value, str) and self._looks_like_code(key, value):
             self._log_code(key, value)

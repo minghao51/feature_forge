@@ -20,7 +20,7 @@ class LangfuseLLMWrapper(LLMClient):
     """Wrapper that adds Langfuse tracing + caching to any LLMClient.
 
     Usage:
-        base = OpenAIProvider(api_key="sk-...")
+        base = OpenAIProvider(api_key="your-api-key")
         client = LangfuseLLMWrapper(base, cache=DiskCache())
         response = await client.complete(messages=[...])
     """

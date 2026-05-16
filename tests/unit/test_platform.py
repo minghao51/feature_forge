@@ -10,6 +10,7 @@ import pytest
 
 from feature_forge import ExperimentalPlatform
 from feature_forge.config import Settings
+from feature_forge.exceptions import EvaluationError
 from feature_forge.methods import BaseMethod
 
 
@@ -196,3 +197,79 @@ class TestExperimentalPlatform:
 
         names = platform.list_methods()
         assert "custom" in names
+
+    @patch("feature_forge.platform.MethodRegistry")
+    @patch("feature_forge.platform.ExperimentRunner")
+    def test_run_executes_experiment_fn_path(self, mock_runner, mock_registry):
+        mock_registry.get_all_methods.return_value = {"dummy": DummyBaseline}
+        mock_runner_instance = MagicMock()
+        mock_runner.return_value = mock_runner_instance
+        mock_runner_instance.run.side_effect = lambda configs, experiment_fn, progress=True: [
+            {**cfg, **experiment_fn(cfg)} for cfg in configs
+        ]
+
+        platform = ExperimentalPlatform(config=Settings(evaluation={"cv_folds": 2}))
+        platform._dataset_registry = MagicMock()
+        platform._dataset_registry.load.return_value = {
+            "train": pd.DataFrame({"a": [1, 2, 3, 4], "target": [0, 1, 0, 1]}),
+            "target": "target",
+            "test": pd.DataFrame(),
+            "metadata": {"task": "classification"},
+        }
+
+        with (
+            patch("feature_forge.platform.CVEvaluator.evaluate_baseline", return_value=0.6),
+            patch("feature_forge.platform.CVEvaluator.evaluate_feature", return_value=0.1),
+        ):
+            results = platform.run(datasets=["demo"], methods=["dummy"], progress=False)
+
+        assert len(results) == 1
+        assert results[0]["dataset"] == "demo"
+        assert results[0]["method"] == "dummy"
+        assert results[0]["cv_score"] == 0.7
+        assert results[0]["gain"] == 0.1
+        assert results[0]["baseline_score"] == 0.6
+
+    @patch("feature_forge.platform.MethodRegistry")
+    @patch("feature_forge.platform.ExperimentRunner")
+    def test_run_raises_when_dataset_has_no_target(self, mock_runner, mock_registry):
+        mock_registry.get_all_methods.return_value = {"dummy": DummyBaseline}
+        mock_runner_instance = MagicMock()
+        mock_runner.return_value = mock_runner_instance
+        mock_runner_instance.run.side_effect = lambda configs, experiment_fn, progress=True: [
+            experiment_fn(cfg) for cfg in configs
+        ]
+
+        platform = ExperimentalPlatform()
+        platform._dataset_registry = MagicMock()
+        platform._dataset_registry.load.return_value = {
+            "train": pd.DataFrame({"a": [1, 2]}),
+            "target": None,
+            "test": pd.DataFrame(),
+            "metadata": {},
+        }
+
+        with pytest.raises(EvaluationError, match="has no target column"):
+            platform.run(datasets=["demo"], methods=["dummy"], progress=False)
+
+    @patch("feature_forge.platform.MethodRegistry")
+    @patch("feature_forge.platform.ExperimentRunner")
+    def test_run_raises_when_method_not_found(self, mock_runner, mock_registry):
+        mock_registry.get_all_methods.return_value = {}
+        mock_runner_instance = MagicMock()
+        mock_runner.return_value = mock_runner_instance
+        mock_runner_instance.run.side_effect = lambda configs, experiment_fn, progress=True: [
+            experiment_fn(cfg) for cfg in configs
+        ]
+
+        platform = ExperimentalPlatform()
+        platform._dataset_registry = MagicMock()
+        platform._dataset_registry.load.return_value = {
+            "train": pd.DataFrame({"a": [1, 2], "target": [0, 1]}),
+            "target": "target",
+            "test": pd.DataFrame(),
+            "metadata": {},
+        }
+
+        with pytest.raises(EvaluationError, match="not found"):
+            platform.run(datasets=["demo"], methods=["missing"], progress=False)

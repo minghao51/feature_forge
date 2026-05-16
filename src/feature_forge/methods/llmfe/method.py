@@ -60,11 +60,7 @@ class LLMFEMethod(BaseMethod):
         self.n_features = n_features
         self.mode = mode
         self.evaluator = evaluator
-        eval_cfg = evaluator.config.evaluation if evaluator else None
-        self.sandbox = SandboxedExecutor(
-            timeout_seconds=eval_cfg.sandbox_timeout_seconds if eval_cfg else 5.0,
-            max_memory_mb=eval_cfg.sandbox_max_memory_mb if eval_cfg else 512,
-        )
+        self.sandbox = SandboxedExecutor.from_evaluator(evaluator)
         self._iteration_codes: list[str] = []
 
     def fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> LLMFEMethod:
@@ -163,21 +159,7 @@ class LLMFEMethod(BaseMethod):
         self._artifacts["generated_code"] = "\n\n".join(iteration_codes)
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        if not self._iteration_codes:
-            raise RuntimeError("LLMFEMethod not fitted yet")
-        result = X.copy()
-        for code in self._iteration_codes:
-            try:
-                features = self.sandbox.execute(code, result)
-                for col in features.columns:
-                    if col not in result.columns:
-                        result[col] = features[col].values
-            except Exception as exc:
-                logger.warning("llmfe_transform_step_failed", error=str(exc))
-                if self.evaluator and self.evaluator.config.evaluation.fail_on_feature_error:
-                    raise
-        new_cols = [c for c in result.columns if c not in X.columns]
-        return result[new_cols]
+        return self._transform_via_iteration_codes(X)
 
     @property
     def generated_scripts(self) -> list[str]:
@@ -185,21 +167,8 @@ class LLMFEMethod(BaseMethod):
 
     @property
     def feature_metadata(self) -> list[dict[str, Any]]:
-        iterations = self._artifacts.get("iterations")
-        if iterations:
-            meta = []
-            for it in iterations:
-                for col, gain in it.get("gains", {}).items():
-                    meta.append(
-                        {
-                            "name": col,
-                            "method": "llmfe",
-                            "iteration": it.get("iteration"),
-                            "gain": gain,
-                            "kept": it.get("kept", False),
-                            "code": it.get("generated_code", ""),
-                        }
-                    )
+        meta = self._iterative_feature_metadata("llmfe")
+        if meta:
             return meta
         code = self._artifacts.get("generated_code", "")
         if code:
@@ -208,22 +177,7 @@ class LLMFEMethod(BaseMethod):
 
     @property
     def provenance_records(self) -> list[dict[str, Any]]:
-        iterations = self._artifacts.get("iterations")
-        if not iterations:
-            return []
-        records = []
-        for it in iterations:
-            for col, gain in it.get("gains", {}).items():
-                records.append(
-                    {
-                        "feature_name": col,
-                        "source_method": "llmfe",
-                        "iteration_index": it.get("iteration"),
-                        "generated_code": it.get("generated_code", ""),
-                        "cv_gain": gain,
-                    }
-                )
-        return records
+        return self._iterative_provenance_records("llmfe")
 
     async def _call_llm(self, prompt: str) -> str:
         response = await self.llm_client.complete(

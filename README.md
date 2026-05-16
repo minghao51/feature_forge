@@ -16,7 +16,7 @@ Feature Forge is a production-ready refactoring of the MALMAS (Memory-Augmented 
 - **Enforced LLM Caching**: DiskCache with SHA-256 keys prevents accidental API costs
 - **Sandboxed Execution**: AST-validated code execution for LLM-generated features
 - **Experiment Matrix**: Cartesian product of datasets × methods × seeds × models × rounds
-- **Baselines**: OpenFE [[2]](#ref-2), CAAFE [[3]](#ref-3), LLM-FE [[4]](#ref-4), Malmus (structured JSON)
+- **Methods**: OpenFE [[2]](#ref-2), CAAFE [[3]](#ref-3), LLM-FE [[4]](#ref-4), Malmus, MALMAS (structured JSON, plugin arch)
 - **Observability**: structlog + Langfuse + OpenTelemetry
 - **Tracking**: WandB (default) + MLflow (optional)
 - **Sklearn Compatible**: `FeatureForge` inherits `BaseEstimator` + `TransformerMixin`
@@ -66,7 +66,7 @@ platform = ExperimentalPlatform()
 
 results = platform.run(
     datasets=["titanic", "house_prices"],
-    baselines=["malmus", "caafe", "openfe", "llmfe"],
+    methods=["malmus", "caafe", "openfe", "llmfe"],
     models=["xgboost"],
     mode="single_shot",
     cv_folds=5,
@@ -74,7 +74,7 @@ results = platform.run(
 
 print(platform.report(results))
 # ┌──────────┬──────────┬──────────┬──────────┬──────────┐
-# │ dataset  │ baseline │ model    │ cv_score │ gain     │
+# │ dataset  │ method   │ model    │ cv_score │ gain     │
 # ├──────────┼──────────┼──────────┼──────────┼──────────┤
 # │ titanic  │ malmus   │ xgboost  │ 0.8523   │ +0.0312  │
 # │ ...      │ ...      │ ...      │ ...      │ ...      │
@@ -108,16 +108,16 @@ print(reporter.to_markdown())
 ### Custom Agent
 
 ```python
-from feature_forge.agents import BaseFeatureAgent
+from feature_forge.methods.malmas.agents import BaseFeatureAgent
 
 class DomainAgent(BaseFeatureAgent):
-    prompt_filename = "domain.txt"
+    prompt_key = "domain"
     agent_name = "domain"
 ```
 
 Register in your `pyproject.toml`:
 ```toml
-[project.entry-points."feature_forge.agents"]
+[project.entry-points."feature_forge.methods.malmas.agents"]
 domain = "my_package:DomainAgent"
 ```
 
@@ -140,9 +140,10 @@ export FF_TRACKER__PROJECT=my-project
 
 ```
 Experiment Layer    → ExperimentMatrix, ExperimentRunner, Tracker, Reporter
+Methods Layer       → MethodRegistry, BaseMethod, 5 method packages (malmas, caafe, llmfe, malmus, openfe)
 Pipeline Layer      → FeatureForge, CorePipeline, IterativePipeline
-Agent Layer         → 6 Agents + Router + Registry
-Memory Layer        → Procedural, Feedback, Conceptual
+Agent Layer         → 6 Agents + Router + Registry (MALMAS-specific)
+Memory Layer        → Procedural, Feedback, Conceptual (MALMAS-specific)
 LLM Layer           → LLMClient, DiskCache, LangfuseWrapper
 Evaluation Layer    → Metrics, CV, ModelFactory, Sandbox
 Data Layer          → KaggleFetcher, DatasetRegistry

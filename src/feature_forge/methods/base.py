@@ -11,6 +11,13 @@ import pandas as pd
 
 from feature_forge.artifacts.base import ArtifactConfig, ArtifactExporter
 from feature_forge.artifacts.storage import DataFrameStorage
+from feature_forge.observability.structlog_config import get_logger
+
+logger = get_logger(__name__)
+
+
+class _FeatureExecutionProtocol(Protocol):
+    def execute(self, code: str, df: pd.DataFrame) -> pd.DataFrame: ...
 
 
 @runtime_checkable
@@ -82,6 +89,72 @@ class BaseMethod(ArtifactExporter):
         """Return generated code blocks."""
         code = self._artifacts.get("generated_code", "")
         return [code] if code else []
+
+    def _iterative_feature_metadata(self, method_name: str) -> list[dict[str, Any]]:
+        iterations = self._artifacts.get("iterations")
+        if not iterations:
+            return []
+        meta: list[dict[str, Any]] = []
+        for it in iterations:
+            for col, gain in it.get("gains", {}).items():
+                meta.append(
+                    {
+                        "name": col,
+                        "method": method_name,
+                        "iteration": it.get("iteration"),
+                        "gain": gain,
+                        "kept": gain > 0,
+                        "code": it.get("generated_code", ""),
+                    }
+                )
+        return meta
+
+    def _iterative_provenance_records(self, method_name: str) -> list[dict[str, Any]]:
+        iterations = self._artifacts.get("iterations")
+        if not iterations:
+            return []
+        records: list[dict[str, Any]] = []
+        for it in iterations:
+            for col, gain in it.get("gains", {}).items():
+                records.append(
+                    {
+                        "feature_name": col,
+                        "source_method": method_name,
+                        "iteration_index": it.get("iteration"),
+                        "generated_code": it.get("generated_code", ""),
+                        "cv_gain": gain,
+                    }
+                )
+        return records
+
+    def _should_raise_on_feature_error(self) -> bool:
+        return (
+            hasattr(self, "evaluator")
+            and self.evaluator is not None
+            and self.evaluator.config.evaluation.fail_on_feature_error
+        )
+
+    def _transform_via_iteration_codes(self, X: pd.DataFrame) -> pd.DataFrame:
+        iteration_codes = getattr(self, "_iteration_codes", None)
+        if not iteration_codes:
+            raise RuntimeError(f"{self.name} not fitted yet")
+        sandbox = getattr(self, "sandbox", None)
+        if sandbox is None or not hasattr(sandbox, "execute"):
+            raise RuntimeError(f"{self.name} missing sandbox executor")
+        result = X.copy()
+        for code in iteration_codes:
+            try:
+                sandbox_exec: _FeatureExecutionProtocol = sandbox
+                features = sandbox_exec.execute(code, result)
+                for col in features.columns:
+                    if col not in result.columns:
+                        result[col] = features[col].values
+            except Exception as exc:
+                logger.warning("transform_step_failed", method=self.name, error=str(exc))
+                if self._should_raise_on_feature_error():
+                    raise
+        new_cols = [c for c in result.columns if c not in X.columns]
+        return result[new_cols]
 
 
 class MethodRegistry:

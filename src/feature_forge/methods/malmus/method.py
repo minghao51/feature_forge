@@ -136,11 +136,7 @@ class MalmusMethod(BaseMethod):
         self.n_features = n_features
         self.mode = mode
         self.evaluator = evaluator
-        eval_cfg = evaluator.config.evaluation if evaluator else None
-        self.sandbox = SandboxedExecutor(
-            timeout_seconds=eval_cfg.sandbox_timeout_seconds if eval_cfg else 5.0,
-            max_memory_mb=eval_cfg.sandbox_max_memory_mb if eval_cfg else 512,
-        )
+        self.sandbox = SandboxedExecutor.from_evaluator(evaluator)
         self._feature_defs: list[FeatureDefinition] = []
 
     def fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> MalmusMethod:
@@ -259,7 +255,7 @@ class MalmusMethod(BaseMethod):
                     ]
                     feedback_str = "Previous iteration feedback: " + "; ".join(feedback_parts)
 
-            except (EvaluationError, Exception) as exc:
+            except Exception as exc:
                 iteration_record["error"] = str(exc)
                 iteration_record["kept"] = False
                 feedback_str = f"Previous iteration failed: {exc}"
@@ -327,25 +323,22 @@ class MalmusMethod(BaseMethod):
 
     @property
     def provenance_records(self) -> list[dict[str, Any]]:
-        iterations = self._artifacts.get("iterations")
-        if not iterations:
+        base = self._iterative_provenance_records("malmus")
+        if not base:
             return []
-        records: list[dict[str, Any]] = []
-        for it in iterations:
-            for col, gain in it.get("gains", {}).items():
-                defs = it.get("feature_definitions", [])
-                matching: dict[str, Any] = next((d for d in defs if d.get("name") == col), {})
-                records.append(
-                    {
-                        "feature_name": col,
-                        "source_method": "malmus",
-                        "iteration_index": it.get("iteration"),
-                        "description": matching.get("description", ""),
-                        "libraries": matching.get("libraries", []),
-                        "cv_gain": gain,
-                    }
-                )
-        return records
+        iterations = self._artifacts.get("iterations", [])
+        for record, iteration in zip(
+            base,
+            [it for it in iterations for _ in it.get("gains", {})],
+            strict=True,
+        ):
+            defs = iteration.get("feature_definitions", [])
+            matching: dict[str, Any] = next(
+                (d for d in defs if d.get("name") == record["feature_name"]), {}
+            )
+            record["description"] = matching.get("description", "")
+            record["libraries"] = matching.get("libraries", [])
+        return base
 
     @staticmethod
     def _parse_response(raw_json: dict[str, Any]) -> StructuredFeatureOutput:

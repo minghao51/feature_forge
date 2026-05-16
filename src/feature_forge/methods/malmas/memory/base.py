@@ -36,8 +36,12 @@ class AgentMemory:
         self.feedback: list[dict[str, Any]] = []
         self.conceptual: list[str] = []
         self.global_summary: list[str] = []
+        self._max_global_summaries: int = 20
         self.stats: dict[str, Any] = {}
         self.conceptual_summary: str = ""
+        self._procedural_names: set[str] = set()
+        self._unused_procedural_names: set[str] = set()
+        self._feedback_names: set[str] = set()
         self._load()
 
     def _load(self) -> None:
@@ -51,6 +55,7 @@ class AgentMemory:
             self.global_summary = data.get("global_summary", [])
             self.stats = data.get("stats", {})
             self.conceptual_summary = data.get("conceptual_summary", "")
+            self._rebuild_indices()
 
     def save(self) -> None:
         """Persist current memory state."""
@@ -66,6 +71,12 @@ class AgentMemory:
             }
         )
 
+    def _rebuild_indices(self) -> None:
+        """Rebuild lookup indices from loaded data."""
+        self._procedural_names = {p["feature_name"] for p in self.procedural}
+        self._unused_procedural_names = {p["feature_name"] for p in self.unused_procedural}
+        self._feedback_names = {f["feature_name"] for f in self.feedback}
+
     # ── Procedural Memory ───────────────────────────────────────────
 
     def record_procedure(
@@ -78,8 +89,9 @@ class AgentMemory:
         round_idx: int,
     ) -> None:
         """Record a successfully generated feature transform."""
-        if any(item["feature_name"] == feature_name for item in self.procedural):
+        if feature_name in self._procedural_names:
             return
+        self._procedural_names.add(feature_name)
         self.procedural.append(
             {
                 "base_columns": base_columns,
@@ -102,8 +114,9 @@ class AgentMemory:
         round_idx: int,
     ) -> None:
         """Record an ineffective feature transform."""
-        if any(item["feature_name"] == feature_name for item in self.unused_procedural):
+        if feature_name in self._unused_procedural_names:
             return
+        self._unused_procedural_names.add(feature_name)
         self.unused_procedural.append(
             {
                 "base_columns": base_columns,
@@ -129,8 +142,9 @@ class AgentMemory:
         ty: str,
     ) -> None:
         """Record evaluation feedback for a feature."""
-        if any(item["feature_name"] == feature_name for item in self.feedback):
+        if feature_name in self._feedback_names:
             return
+        self._feedback_names.add(feature_name)
         self.feedback.append(
             {
                 "feature_name": feature_name,
@@ -203,14 +217,14 @@ class AgentMemory:
         effective_transforms: dict[str, int] = {}
         effective_fields: dict[str, int] = {}
         effective_types: dict[str, int] = {}
+        procedural_by_name: dict[str, dict[str, Any]] = {
+            p["feature_name"]: p for p in self.procedural
+        }
 
         for fb in self.feedback:
             if not fb.get("effective", False):
                 continue
-            proc = next(
-                (p for p in self.procedural if p["feature_name"] == fb["feature_name"]),
-                None,
-            )
+            proc = procedural_by_name.get(fb["feature_name"])
             if proc:
                 tf = proc["transform"]
                 effective_transforms[tf] = effective_transforms.get(tf, 0) + 1

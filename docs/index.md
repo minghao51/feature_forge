@@ -106,7 +106,7 @@ my_method = "my_package:MyMethod"
 from feature_forge.methods.malmas.agents import BaseFeatureAgent
 
 class DomainAgent(BaseFeatureAgent):
-    prompt_filename = "domain"
+    prompt_key = "domain"
     agent_name = "domain"
 ```
 

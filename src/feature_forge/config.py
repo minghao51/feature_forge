@@ -109,17 +109,26 @@ class RouterConfig(BaseModel):
         strategy: How to select agents each round.
         max_agents: Maximum agents to activate (None = dynamic).
         min_agents: Minimum agents to activate.
+        warmup_rounds: Number of initial rounds where all agents are active.
     """
 
     strategy: Literal["data_driven", "performance_driven", "hybrid", "llm"] = "hybrid"
     max_agents: int | None = None
     min_agents: int = 1
+    warmup_rounds: int = 1
 
     @field_validator("min_agents")
     @classmethod
     def _validate_min_agents(cls, v: int) -> int:
         if v < 1:
             raise ValueError(f"min_agents must be >= 1, got {v}")
+        return v
+
+    @field_validator("warmup_rounds")
+    @classmethod
+    def _validate_warmup_rounds(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError(f"warmup_rounds must be >= 0, got {v}")
         return v
 
 
@@ -192,6 +201,8 @@ class EvaluationConfig(BaseModel):
     sandbox_timeout_seconds: float = 5.0
     sandbox_max_memory_mb: int = 512
     max_candidate_features: int = 50
+    max_cv_workers: int | None = None
+    feature_eval_backend: Literal["threading", "loky"] = "threading"
 
     @field_validator("cv_folds")
     @classmethod
@@ -226,6 +237,13 @@ class EvaluationConfig(BaseModel):
     def _validate_max_candidate_features(cls, v: int) -> int:
         if v < 1:
             raise ValueError(f"max_candidate_features must be >= 1, got {v}")
+        return v
+
+    @field_validator("max_cv_workers")
+    @classmethod
+    def _validate_max_cv_workers(cls, v: int | None) -> int | None:
+        if v is not None and v < 1:
+            raise ValueError(f"max_cv_workers must be >= 1 when set, got {v}")
         return v
 
 

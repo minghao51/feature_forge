@@ -29,10 +29,6 @@
 
 ## Project Context References
 
-- Architecture & modules: @.planning/codebase/ARCHITECTURE.md
-- Directory structure: @.planning/codebase/STRUCTURE.md
-- Tech stack & dependencies: @.planning/codebase/STACK.md
-- Coding conventions: @.planning/codebase/CONVENTIONS.md
-- External integrations: @.planning/codebase/INTEGRATIONS.md
-- Testing practices: @.planning/codebase/TESTING.md
-- Known concerns & risks: @.planning/codebase/CONCERNS.md
+- Architecture, modules, and stack: @.planning/OVERVIEW.md
+- Current status and risks: @.planning/STATE.md
+- Coding conventions and workflow: @.planning/STYLE.md

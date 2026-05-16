@@ -147,3 +147,6 @@ mlruns/
 
 # MkDocs
 .cache/mkdocs-jupyter/
+
+.claude/
+.feature_forge_artifacts/

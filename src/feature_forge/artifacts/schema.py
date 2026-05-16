@@ -6,6 +6,7 @@ iteration logs, and full artifact bundles.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -137,10 +138,10 @@ class ArtifactBundle(BaseModel):
     @field_validator("generated_scripts")
     @classmethod
     def _dedup_scripts(cls, v: list[str]) -> list[str]:
-        seen: set[int] = set()
+        seen: set[str] = set()
         out: list[str] = []
         for s in v:
-            h = hash(s)
+            h = hashlib.sha256(s.encode()).hexdigest()
             if h not in seen:
                 seen.add(h)
                 out.append(s)

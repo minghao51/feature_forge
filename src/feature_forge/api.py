@@ -71,8 +71,12 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
         if llm_client is None:
             try:
                 self.llm_client = self._default_llm_client()
-            except Exception:
-                pass  # will be caught at fit() time
+            except Exception as exc:
+                logger.warning(
+                    "llm_client_init_failed",
+                    error=str(exc),
+                    hint="Set DEEPSEEK_API_KEY or pass llm_client= to constructor",
+                )
         self.selected_features: list[str] = []
         self.feature_codes: list[str] = []
         self.sandbox = SandboxedExecutor(
