@@ -18,7 +18,7 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --group dev
-      - run: uv run ruff check src
+      - run: uv run ruff check src tests
       - run: uv run mypy src
 
   quality-debt:

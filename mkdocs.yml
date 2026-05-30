@@ -77,6 +77,14 @@ nav:
       - 07 Observability: plan/07_observability.md
       - 08 Experiment Tracking: plan/08_experiment_tracking.md
       - 09 Baseline Selection: plan/09_baseline_selection.md
+      - 10 Platform Refactor: plan/10_experimental_platform_refactor.md
+      - 11 Platform Review: plan/11_platform_refactor_review.md
+      - 12 Code Gen Improvements: plan/12_code_generation_improvements.md
+      - 13 Methods Restructure: plan/13_methods_restructure.md
+      - 14 Parallelize Code Gen: plan/14_parallelize_code_generation.md
+      - 15 Notebook Updates: plan/15_notebook_updates_handoff.md
+      - 16 Prompt Colocation: plan/16_prompt_colocation_pydantic.md
+      - 17 Code Simplification: plan/17_code_simplification.md
   - Notebooks:
       - Overview: notebooks/index.md
       - 01 Getting Started: notebooks/01_getting_started.ipynb

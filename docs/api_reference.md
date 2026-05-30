@@ -51,11 +51,10 @@ print(settings.llm.model)  # 'deepseek-chat'
 Abstract base for LLM providers.
 
 ```python
-from feature_forge.llm import LLMClient, DiskCache, LangfuseLLMWrapper
+from feature_forge.llm import LLMClient, DiskCache
 from feature_forge.llm.providers import OpenAIProvider, DeepSeekProvider, AnthropicProvider
 
-client = DeepSeekProvider(api_key="sk-...")
-cached_client = LangfuseLLMWrapper(client, cache=DiskCache())
+client = DeepSeekProvider(api_key="sk-...", cache=DiskCache(), tracing_enabled=True)
 ```
 
 **Providers:**
@@ -100,15 +99,22 @@ Abstract base for feature generation agents.
 from feature_forge.methods.malmas.agents import Agent, AgentRegistry
 ```
 
-Agents are MALMAS-specific and discovered via the `feature_forge.methods.malmas.agents` entry-point group.
+Agents are MALMAS-specific and discovered via the `feature_forge.methods.malmas.agents` entry-point group. Agents are generated dynamically via `_make_prompt_agent()` and accessed by name through the registry.
 
-**Built-in agents:**
-- `UnaryFeatureAgent`: Single-column transformations
-- `CrossCompositionalAgent`: Cross-column features
-- `AggregationConstructAgent`: Group-by aggregations
-- `TemporalFeatureAgent`: Time-based features
-- `LocalTransformAgent`: Quantile/rank/outlier transforms
-- `LocalPatternAgent`: Distribution pattern features
+**Built-in agent names:**
+- `unary`: Single-column transformations
+- `cross_compositional`: Cross-column features
+- `aggregation`: Group-by aggregations
+- `temporal`: Time-based features
+- `local_transform`: Quantile/rank/outlier transforms
+- `local_pattern`: Distribution pattern features
+
+```python
+from feature_forge.methods.malmas.agents import AgentRegistry
+
+agents = AgentRegistry.get_builtin_agents()
+agent_cls = AgentRegistry.get_agent("unary")
+```
 
 ### `RouterAgent`
 
@@ -270,4 +276,31 @@ results = platform.run(
 - `register_method(name, cls)` — Register a custom method where `cls` is `type[BaseMethod]`
 - `list_methods()` — List available methods
 
+Behavior notes:
+- `parallel=True` uses process-pool execution via top-level worker seam; methods must be registry-discovered (entry points / built-ins).
+- `register_method(...)` methods are instance-local and rejected when `parallel=True`.
+- `run(...)` returns normalized case results with keys:
+  - `dataset`, `method`, `model`, `seed`
+  - `cv_score`, `gain`, `baseline_score`, `num_features_generated`
+  - `error` (nullable; set when case execution fails)
+
 Result dict key is `method` (not `baseline`).
+
+### Execution Primitives
+
+```python
+from feature_forge.experiment import (
+    ExperimentCase,
+    ExperimentResult,
+    ExecutionBackend,
+    SequentialExecutionAdapter,
+    ProcessPoolExecutionAdapter,
+    ExperimentCaseExecutor,
+)
+```
+
+- `ExperimentCase`: serializable run-unit dataclass.
+- `ExperimentResult`: normalized output dataclass (includes nullable `error`).
+- `ExecutionBackend`: backend seam interface.
+- `SequentialExecutionAdapter` / `ProcessPoolExecutionAdapter`: concrete execution adapters.
+- `ExperimentCaseExecutor`: orchestrates per-case execution with tracker side effects.

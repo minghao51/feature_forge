@@ -36,13 +36,10 @@ response = generate_response(model, api_key, base_url, prompt, user_msg, temp)
 
 **After:**
 ```python
-from feature_forge.llm import LangfuseLLMWrapper, DiskCache
+from feature_forge.llm import DiskCache
 from feature_forge.llm.providers import DeepSeekProvider
 
-client = LangfuseLLMWrapper(
-    DeepSeekProvider(api_key="sk-..."),
-    cache=DiskCache(),
-)
+client = DeepSeekProvider(api_key="sk-...", cache=DiskCache(), tracing_enabled=True)
 response = await client.complete(messages=[...])
 ```
 
@@ -56,7 +53,7 @@ response = await client.complete(messages=[...])
 
 **After:**
 ```python
-from feature_forge.methods.malmas.agents import AgentRegistry, UnaryFeatureAgent
+from feature_forge.methods.malmas.agents import AgentRegistry
 
 agents = AgentRegistry.get_builtin_agents()
 agent = agents["unary"](config, llm_client)
@@ -161,6 +158,13 @@ platform.register_method("custom", MyMethod)
 platform.list_methods()
 ```
 
+### ExperimentalPlatform Execution Seam Changes
+
+- `ExperimentalPlatform.run()` now executes through `ExperimentCase` + `ExperimentCaseExecutor` + `ExecutionBackend`.
+- Parallel mode uses process-pool execution via top-level `run_case(payload)`.
+- `parallel=True` accepts registry-discovered methods and rejects instance-local `register_method(...)` methods due to process serialization boundaries.
+- Run outputs are normalized to `ExperimentResult` shape and now include nullable `error`.
+
 ### Prompt Migration
 
 Agent prompts migrated from `.txt` files to YAML-backed registry:
@@ -189,3 +193,5 @@ Prompt YAML files live in method packages (e.g., `src/feature_forge/methods/malm
 8. **Import paths restructured** — `agents/`, `baselines/`, `memory/`, `pipeline/` merged into `methods/` namespace
 9. **Entry point groups renamed** — `feature_forge.baselines` → `feature_forge.methods`, `feature_forge.agents` → `feature_forge.methods.malmas.agents`
 10. **ExperimentalPlatform API** — `baselines=` → `methods=`, `list_baselines()` → `list_methods()`, `register_baseline()` → `register_method()`
+11. **Parallel seam constraint** — `parallel=True` disallows instance-local `register_method(...)` methods; use entry-point/registry methods or set `parallel=False`.
+12. **Result normalization** — Case results follow `ExperimentResult` shape with nullable `error`.

@@ -71,7 +71,7 @@ MALMAS decomposes automated feature engineering into a multi-round, multi-agent 
 - Pipeline orchestration: `src/feature_forge/methods/malmas/pipeline/core.py`, `src/feature_forge/methods/malmas/pipeline/iterative.py`
 - Sklearn-compatible API: `src/feature_forge/api.py`
 - Agent base class: `src/feature_forge/methods/malmas/agents/base.py`
-- Agent implementations: `src/feature_forge/methods/malmas/agents/unary.py`, `cross_compositional.py`, `aggregation.py`, `temporal.py`, `local_transform.py`, `local_pattern.py`
+- Agent implementations: `src/feature_forge/methods/malmas/agents/base.py` (agents generated dynamically via `_make_prompt_agent()`)
 
 ### Methods Plugin Architecture
 
@@ -358,7 +358,8 @@ Agents are discoverable via Python entry points (`feature_forge.methods.malmas.a
 
 **Import example:**
 ```python
-from feature_forge.methods.malmas.agents import UnaryFeatureAgent, CrossCompositionalAgent
+from feature_forge.methods.malmas.agents import AgentRegistry
+unary_cls = AgentRegistry.get_agent("unary")
 ```
 
 ---

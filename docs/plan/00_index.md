@@ -31,7 +31,14 @@ This document outlines the comprehensive implementation plan for `feature_forge`
 | `09_baseline_selection.md` | Why MALMAS + OpenFE + CAAFE + LLM-FE |
 | `10_experimental_platform_refactor.md` | Hybrid plugin platform refactor: `ExperimentalPlatform` API + entry point hooks for baselines/datasets/models/metrics |
 | `11_platform_refactor_review.md` | Post-implementation review, gaps identified, and fixes applied |
+| `12_code_generation_improvements.md` | Code generation improvements and schema enforcement |
+| `13_methods_restructure.md` | Restructure methods into plugin-based architecture |
+| `14_parallelize_code_generation.md` | Parallel code generation across agents |
+| `15_notebook_updates_handoff.md` | Notebook updates and documentation handoff |
+| `16_prompt_colocation_pydantic.md` | YAML prompt colocation + Pydantic model migration |
 | `17_code_simplification.md` | Full `src/` code simplification — dedup sandbox init, iterative helpers, parse guards, router conditions, registry discovery |
+| `18_sage_inspired_memory_evolution.md` | SAGE-inspired memory evolution: graph memory, structured retrieval, self-evolution loop, cross-dataset transfer |
+| `19_ux_improvements.md` | UX improvements: CLI tool, config wizard, progress display, dashboard, feature explorer |
 
 ## Research Basis
 

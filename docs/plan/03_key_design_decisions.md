@@ -318,6 +318,36 @@ from typing import TypeVar, NewType
 import pandas as pd
 
 FeatureSpec = dict[str, any]  # {"name": str, "code": str, "logic": str}
+
+---
+
+## 8. Execution-Seam Refactor for ExperimentalPlatform
+
+### Why
+- Separate orchestration side effects (tracker + registry wiring) from pure case computation.
+- Support both sequential and process-pool execution with one normalized result shape.
+- Make process serialization boundaries explicit and testable.
+
+### Implementation
+
+- `ExperimentCase` dataclass: serializable run unit (`dataset`, `method`, `model`, `seed`, optional `mode`, `cv_folds`, `run_id`).
+- `ExperimentResult` dataclass: normalized output with nullable `error`.
+- `ExperimentCaseExecutor`: owns tracker lifecycle + case execution behavior in the main process.
+- `ExecutionBackend` seam:
+  - `SequentialExecutionAdapter` for in-process execution.
+  - `ProcessPoolExecutionAdapter` for process-pool execution.
+- Top-level `run_case(payload)` process seam for parallel workers.
+
+### Tradeoff / Constraint
+
+- `parallel=True` requires process-safe payloads and callable boundaries.
+- Instance-local methods from `platform.register_method(...)` are not serializable across the process seam and are rejected.
+- Parallel execution expects methods discoverable from method registry/entry points.
+
+### Compatibility Decision
+
+- `ExperimentRunner` remains in place for matrix-only workflows and legacy compatibility.
+- `ExperimentalPlatform.run()` now prefers the case-executor + backend seam for unified behavior.
 AgentName = NewType("AgentName", str)
 DatasetName = NewType("DatasetName", str)
 MetricName = NewType("MetricName", str)

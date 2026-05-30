@@ -53,7 +53,14 @@ No mutable global state. All configuration is instance-based, validated at start
 ┌─────────────────────────────────────────────────────────────┐
 │  EXPERIMENT LAYER                                           │
 │  - ExperimentMatrix (Cartesian product definitions)         │
-│  - ExperimentRunner (execution engine)                      │
+│  - ExperimentCase (serializable unit)                       │
+│  - ExperimentCaseExecutor (behavior + tracker side effects) │
+│  - ExecutionBackend seam                                    │
+│    - SequentialExecutionAdapter                             │
+│    - ProcessPoolExecutionAdapter                            │
+│  - run_case(payload) top-level process seam                 │
+│  - ExperimentResult (normalized output, nullable error)     │
+│  - ExperimentRunner (legacy matrix runner, still supported) │
 │  - ExperimentTracker (WandB/MLflow abstraction)             │
 │  - Reporter (auto-generated markdown/HTML reports)          │
 ├─────────────────────────────────────────────────────────────┤
@@ -166,6 +173,28 @@ Experiment Tracker (WandB)
     ├─→ Log LLM costs per agent per round
     └─→ Generate comparison visualizations
 ```
+
+## ExperimentalPlatform Execution Seam
+
+```
+ExperimentalPlatform.run()
+    │
+    ├─→ Build list[ExperimentCase]
+    │
+    ├─→ Create ExperimentCaseExecutor(settings, tracker, extra registries)
+    │
+    ├─→ Select ExecutionBackend
+    │    ├─→ SequentialExecutionAdapter: executor.execute(case)
+    │    └─→ ProcessPoolExecutionAdapter: run_case(CaseComputationInput)
+    │
+    └─→ Collect list[ExperimentResult] and return dict payloads
+```
+
+### Serialization boundary constraint
+
+- `parallel=True` uses process workers and therefore requires top-level pickleable payloads/functions.
+- Registry-discovered methods are supported in parallel mode.
+- Instance-local methods registered with `platform.register_method(...)` are intentionally rejected in parallel mode and must run with `parallel=False`.
 
 ## Security Model
 

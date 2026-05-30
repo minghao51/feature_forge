@@ -5,105 +5,85 @@
 ### Where Things Go
 
 ```
-feature_forge/
-  src/feature_forge/              # Main package
-    api.py                        # Public sklearn-compatible API (FeatureForge class)
-    platform.py                   # ExperimentalPlatform facade
-    config.py                     # Pydantic-settings (Settings, LLMConfig, etc.)
-    types.py                      # Shared NewTypes, TypeVars, FeatureSpec model
-    exceptions.py                 # Exception hierarchy (FeatureForgeError base)
-    utils.py                      # Cross-cutting helpers (run_coro_sync, etc.)
-    __init__.py                   # Package init with lazy __getattr__ exports
-    py.typed                      # PEP 561 marker
-    methods/                      # Feature engineering methods
-      base.py                     # BaseMethod ABC, MethodProtocol, MethodRegistry
-      _prompting.py               # PromptRegistry, Prompt model (YAML-backed)
-      malmas/                     # MALMAS multi-agent method
-        method.py                 # MALMASMethod adapter (wraps FeatureForge)
-        types.py                  # AgentName NewType
-        agents/                   # Agent classes
-          base.py                 # Agent ABC, BaseFeatureAgent, AgentRegistry
-          unary.py                # UnaryFeatureAgent
-          cross_compositional.py  # CrossCompositionalAgent
-          aggregation.py          # AggregationConstructAgent
-          temporal.py             # TemporalFeatureAgent
-          local_transform.py      # LocalTransformAgent
-          local_pattern.py        # LocalPatternAgent
-          router.py               # RouterAgent
-        pipeline/                 # Pipeline orchestration
-          core.py                 # CorePipeline, CodeGenerator
-          iterative.py            # IterativePipeline (multi-round)
-          ablations.py            # Ablation variants (NoMemory, SingleAgent, etc.)
-        memory/                   # Agent memory subsystem
-          base.py                 # Memory ABC
-          conceptual.py           # ConceptualMemory
-          persistence.py          # Disk persistence
-          prompts.py              # Memory-related prompts
-        prompts/                  # YAML prompt templates per agent
-          <agent_name>.yaml
-      caafe/                      # CAAFE method
-      llmfe/                      # LLMFE method
-      openfe/                     # OpenFE wrapper method
-      malmus/                     # Malmus method
-    llm/                          # LLM abstraction layer
-      base.py                     # LLMClient ABC, LLMResponse
-      factory.py                  # create_llm_client() factory
-      cache.py                    # Response caching
-      retry.py                    # Tenacity-based retry
-      langfuse_wrapper.py         # Langfuse tracing wrapper
-      providers/                  # Provider implementations
-        openai.py                 # OpenAIProvider
-        deepseek.py               # DeepSeekProvider
-        anthropic.py              # AnthropicProvider
-        litellm_provider.py       # LiteLLMProvider
-    evaluation/                   # Model evaluation
-      cv.py                       # CVEvaluator
-      metrics.py                  # Metric functions + MetricRegistry
-      model_factory.py            # ModelFactory + ModelRegistry
-      sandbox.py                  # SandboxedExecutor
-    experiment/                   # Experiment tracking
-      runner.py                   # ExperimentRunner (serial + parallel)
-      tracker.py                  # ExperimentTracker ABC, NoOpTracker
-      wandb_backend.py            # WandB tracker
-      mlflow_backend.py           # MLflow tracker
-      reporter.py                 # Reporter (markdown tables)
-      matrix.py                   # Config matrix builder
-    artifacts/                    # Artifact storage & export
-      base.py                     # ArtifactExporter ABC, ArtifactConfig
-      storage.py                  # DataFrameStorage, LazyDataFrameRef
-      schema.py                   # Pydantic schemas (ArtifactBundle, etc.)
-      diff.py                     # Artifact diffing
-      comparison.py               # Method comparison
-      dashboard.py                # Dashboard generation
-    data/                         # Dataset handling
-      registry.py                 # DatasetRegistry
-      ingestion.py                # Data loading & validation
-    observability/                # Logging & tracing
-      structlog_config.py         # Structlog setup, get_logger()
-      langfuse_tracer.py          # Langfuse tracing
-  tests/                          # Test suite
-    conftest.py                   # Shared fixtures (FakeLLM, sample data)
-    strategies.py                 # Hypothesis strategies for property tests
-    unit/                         # Fast isolated tests
-    integration/                  # Cross-module / plugin discovery tests
-    benchmarks/                   # Performance smoke tests
-  config/                         # Configuration files
-    settings.yaml                 # Default settings
-    logging.yaml                  # Logging config
-    experiments/                  # Experiment YAML configs
-  scripts/                        # Dev/CI scripts
-    check_repo_hygiene.py
-    check_docs_references.py
-    run_pip_audit.py
-  docs/                           # MkDocs documentation source
-  notebooks/                      # Quarto notebooks (.qmd)
-  data/                           # Raw and sample datasets
-    raw/
-    samples/
-  experiments/                    # Experiment output directories
-  memory_files/                   # Agent memory persistence
-    agent_memories/
-    llm_cache/
+src/feature_forge/              # Main package
+  __init__.py                   # Public API re-exports (ExperimentalPlatform, __version__)
+  api.py                        # Sklearn-compatible transformer (FeatureForge)
+  platform.py                   # Experiment facade (ExperimentalPlatform)
+  config.py                     # pydantic-settings (Settings, LLMConfig, etc.)
+  types.py                      # Shared NewTypes, FeatureSpec, TypeVars
+  exceptions.py                 # Exception hierarchy (FeatureForgeError → subclasses)
+  utils.py                      # Shared utilities (run_coro_sync, strip_markdown_fences)
+  methods/                      # Feature engineering methods (BaseMethod + registry)
+    base.py                     # BaseMethod, MethodProtocol, MethodRegistry
+    _prompting.py               # Shared PromptRegistry + Prompt model
+    malmas/                     # Multi-agent method
+      agents/                   # 6 feature agents + RouterAgent + AgentRegistry
+        base.py                 # Agent (ABC), BaseFeatureAgent, AgentRegistry
+        router.py               # RouterAgent
+        unary.py                # UnaryFeatureAgent (example thin subclass)
+      pipeline/                 # Core → Iterative + ablation variants
+        core.py                 # CorePipeline (single-round)
+        iterative.py            # BaseIterativePipeline → IterativePipeline
+        ablations.py            # NoMemoryPipeline, SingleAgentPipeline, etc.
+      memory/                   # 3-tier memory (procedural, feedback, conceptual)
+      prompts/                  # YAML prompt templates (one per agent)
+      types.py                  # AgentName NewType
+    caafe/                      # CAAFE method (unified + fidelity variants)
+    llmfe/                      # LLMFE method (single_shot + iterative)
+    malmus/                     # Malmus method (JSON-mode structured output)
+    openfe/                     # OpenFE method (non-LLM baseline wrapper)
+  llm/                          # LLM abstraction layer
+    base.py                     # LLMClient (ABC), LLMResponse
+    factory.py                  # create_llm_client() provider factory
+    cache.py                    # DiskCache with SHA-256 keys
+    retry.py                    # Tenacity async retry builder
+    providers/                  # DeepSeek, OpenAI, Anthropic, LiteLLM
+  evaluation/                   # Model evaluation
+    cv.py                       # CVEvaluator (k-fold cross-validation)
+    sandbox.py                  # SandboxedExecutor (AST validation + subprocess)
+    metrics.py                  # Metric functions + MetricRegistry
+    model_factory.py            # Model factories + ModelRegistry
+  data/                         # Dataset management
+    registry.py                 # DatasetRegistry (entry-point + Kaggle + local)
+    ingestion.py                # Data loading and validation
+  experiment/                   # Experiment harness
+    runner.py                   # ExperimentRunner
+    tracker.py                  # ExperimentTracker + NoOpTracker
+    reporter.py                 # Markdown report generation
+    matrix.py                   # ExperimentMatrix (cartesian product)
+    case_executor.py            # ExperimentCaseExecutor
+    execution.py                # Sequential + ProcessPool adapters
+  observability/                # Logging and tracing
+    structlog_config.py         # structlog setup (TTY pretty / JSON)
+    langfuse_tracer.py          # Langfuse integration
+  artifacts/                    # Artifact storage and comparison
+    base.py                     # ArtifactExporter ABC, ArtifactConfig
+    storage.py                  # DataFrameStorage (memory/disk/hybrid)
+    schema.py                   # Pydantic schemas for artifact validation
+    comparison.py               # Method comparison artifacts
+    diff.py                     # Artifact diffing
+    dashboard.py                # Dashboard generation
+
+config/                         # Non-secret configuration
+  settings.yaml                 # Default settings (committed in plaintext)
+  logging.yaml                  # Logging configuration
+  experiments/                  # Experiment config files
+
+tests/                          # Test suite
+  conftest.py                   # Shared fixtures (FakeLLM, sample_data)
+  strategies.py                 # Shared Hypothesis strategies
+  unit/                         # Fast isolated tests (auto-marked `pytest.mark.unit`)
+  integration/                  # Integration tests (auto-marked `pytest.mark.integration`)
+  benchmarks/                   # Performance smoke tests
+
+notebooks/                      # Jupyter notebooks + shared utils
+scripts/                        # Utility scripts (lint, audit, hygiene)
+docs/                           # MkDocs documentation source
+data/                           # Data files
+  raw/                          # Raw datasets
+  samples/                      # Sample datasets
+experiments/                    # Experiment ablation directories
+.planning/                      # Agent context files (OVERVIEW, STYLE, STATE)
 ```
 
 ## Naming Conventions
@@ -112,146 +92,156 @@ feature_forge/
 
 | Element | Convention | Example |
 |---------|-----------|---------|
-| Package dirs | `snake_case` | `methods/malmas/`, `llm/providers/` |
-| Module files | `snake_case` | `model_factory.py`, `structlog_config.py` |
-| Classes | `PascalCase` | `FeatureForge`, `CVEvaluator`, `BaseMethod` |
-| Abstract classes | `Base` or `ABC` prefix | `BaseMethod`, `Agent(ABC)`, `ArtifactExporter(ABC)` |
-| Pydantic models | `PascalCase` | `FeatureSpec`, `LLMConfig`, `ArtifactBundle` |
-| Functions / methods | `snake_case` | `run_coro_sync()`, `evaluate_baseline()` |
-| Private methods | `_leading_underscore` | `_build_user_prompt()`, `_validate_code_ast()` |
-| Constants | `UPPER_SNAKE_CASE` | `_BANNED_IMPORTS`, `_SINGLE_AGENT_MODES` |
-| Type aliases | `PascalCase` | `DatasetName`, `MetricName`, `TaskType` |
-| NewType aliases | `PascalCase` | `AgentName`, `Seed`, `RoundNumber` |
-| Entry point groups | `dot.separated` | `feature_forge.methods`, `feature_forge.metrics` |
-| Test files | `test_<module>.py` | `test_agents.py`, `test_pipeline_core.py` |
+| Package | `snake_case` | `feature_forge` |
+| Module files | `snake_case.py` | `model_factory.py`, `cv.py`, `base.py` |
+| Classes | `PascalCase` | `FeatureForge`, `BaseMethod`, `LLMClient` |
+| Pydantic config models | `PascalCase` + `Config` suffix | `LLMConfig`, `RouterConfig`, `EvaluationConfig` |
+| Pydantic data models | `PascalCase` | `FeatureSpec`, `Prompt`, `ArtifactBundle` |
+| ABC classes | `PascalCase` + `Base` prefix or `ABC` suffix | `BaseMethod`, `BaseFeatureAgent`, `LLMClient(ABC)` |
+| Registry classes | `PascalCase` + `Registry` suffix | `MethodRegistry`, `AgentRegistry`, `MetricRegistry` |
+| Functions / methods | `snake_case` | `get_settings()`, `fit_transform()`, `create_llm_client()` |
+| Private methods | `_leading_underscore` | `_build_user_prompt()`, `_extract_content()`, `_do_complete()` |
+| Class-level constants | `_UPPER_SNAKE_CASE` | `_SINGLE_AGENT_MODES`, `_BUILTIN_PROMPT_AGENTS` |
+| Module-level constants | `UPPER_SNAKE_CASE` | `ENTRY_POINT_GROUP` |
+| NewTypes | `PascalCase` | `DatasetName`, `MetricName`, `AgentName`, `Seed` |
+| Type aliases | `PascalCase` | `JSONValue`, `TaskType`, `TrackerBackend` |
+| TypeVars | `PascalCase` (single letter or short) | `T`, `XType`, `YType` |
+| Test files | `test_<module>.py` | `test_agents.py`, `test_property.py` |
+| Test classes | `Test<Feature>` | `TestAgentRegistry`, `TestStripMarkdownFencesProperties` |
+| Test methods | `test_<behavior>` | `test_idempotent()`, `test_get_builtin_agents()` |
+| Pytest markers | `snake_case` | `@pytest.mark.slow`, `@pytest.mark.property` |
 | Fixtures | `snake_case` | `fake_llm`, `sample_config`, `sample_dataframe` |
-| Prompt YAML files | `snake_case.yaml` | `unary.yaml`, `code_generation.yaml` |
+| Prompt YAML files | `snake_case.yaml` | `unary.yaml`, `cross_compositional.yaml` |
 | Config YAML files | `snake_case.yaml` | `settings.yaml`, `logging.yaml` |
-
-### YAML (Prompts)
-
-| Element | Convention | Example |
-|---------|-----------|---------|
-| Filename | `<agent_or_purpose>.yaml` | `unary.yaml`, `router.yaml` |
-| Top-level keys | `system`, `description` | `system: "You are..."` |
+| Entry point groups | `dotted.path` | `feature_forge.methods`, `feature_forge.metrics` |
 
 ## Python Patterns
 
-### Configuration (pydantic-settings)
-- Root `Settings(BaseSettings)` with `env_prefix="FF_"` and `env_nested_delimiter="__"`
-- Nested config via `BaseModel` subclasses: `LLMConfig`, `TrackerConfig`, `RouterConfig`, `MemoryConfig`, `RetryConfig`, `EvaluationConfig`
-- Validation via `@field_validator` class methods with `_validate_` prefix
-- Config priority: constructor args > env vars (FF_*) > YAML (`config/settings.yaml`)
-- Factory function `get_settings()` for convenience
+### Module Boilerplate
+- Every source file starts with `from __future__ import annotations`
+- Module docstring follows immediately (Google style)
+- Imports grouped: stdlib → third-party → `feature_forge` internal
+- `logger = get_logger(__name__)` at module level when logging is needed
+- `if TYPE_CHECKING:` blocks for heavy or circular imports
 
-### Method System (Plugin Architecture)
-- `MethodProtocol` — `@runtime_checkable` Protocol for third-party methods (no import dependency)
-- `BaseMethod(ArtifactExporter)` — abstract base with `fit()`/`transform()`/`fit_transform()` sklearn interface
-- `MethodRegistry` — discovers methods via `importlib.metadata.entry_points(group="feature_forge.methods")`
-- Each method lives in `methods/<name>/method.py` with a `method.py` entry point
-- Method adapters wrap internal pipeline (e.g., `MALMASMethod` wraps `FeatureForge`)
+### Pydantic Models
+- `BaseModel` for data schemas (`FeatureSpec`, `Prompt`)
+- `BaseSettings` for configuration (`Settings`) with `env_prefix="FF_"` and `env_nested_delimiter="__"`
+- Sensitive fields use `SecretStr` (e.g., `api_key: SecretStr | None`)
+- Validation via `@field_validator` classmethods with `@classmethod` decorator
+- Private validator methods named `_validate_<field>` or `_empty_string_to_none`
+- `model_config = SettingsConfigDict(...)` as class attribute on Settings
+- `Field(default_factory=...)` for nested config sub-models
 
-### Agent System
-- `Agent(ABC)` — abstract base with `generate()` async method
-- `BaseFeatureAgent(Agent)` — concrete base with LLM interaction, prompt building, response parsing
-- Each agent class sets `prompt_key` and `agent_name` class attributes
-- `AgentRegistry` — discovers agents via entry points + `get_builtin_agents()`
-- Agent prompts stored as YAML in `methods/<method>/prompts/<agent_name>.yaml`
-- `PromptRegistry` lazily loads YAML and caches `Prompt(system, description)` objects
+### Abstract Base Classes
+- `ABC` + `@abstractmethod` for interface contracts
+- `LLMClient` uses template method pattern: `_call_api()`, `_extract_content()`, `_extract_usage()` as hooks
+- Concrete agents are generated dynamically via `_make_prompt_agent(name, prompt_key)` in `base.py`, not as separate class files
+- Methods extend `BaseMethod` and implement `fit()`, `transform()`, `get_artifacts()`
 
-### LLM Client System
-- `LLMClient(ABC)` — abstract with provider hooks: `_call_api()`, `_extract_content()`, `_extract_usage()`
-- Public API: `complete()`, `complete_json()` — both with automatic retry via `_retry()`
-- `LLMResponse` — structured response with `content`, `model`, token counts
-- `create_llm_client(LLMConfig)` — factory with auto provider inference from model name
-- Provider modules imported lazily via `importlib.import_module()`
-
-### Pipeline Pattern
-- `CorePipeline` — single-round: agents → code gen → sandbox → CV eval → select top-k
-- `IterativePipeline` — multi-round orchestration
-- Ablation variants in `pipeline/ablations.py`: `NoMemoryPipeline`, `SingleAgentPipeline`, etc.
-- Async-first: all pipeline methods are `async def`, sync callers use `run_coro_sync()`
-- `asyncio.Semaphore` for LLM rate limiting, `asyncio.gather()` for parallel agent execution
+### Plugin Discovery
+- `MethodRegistry`, `AgentRegistry`, `MetricRegistry`, `ModelRegistry`, `DatasetRegistry` — all use `importlib.metadata.entry_points()`
+- Entry points declared in `pyproject.toml` under `[project.entry-points."<group>"]`
+- Registry classes use `ClassVar` for class-level caches with `_discovered: ClassVar[dict | None]`
+- `get_builtin_*()` returns hard-coded methods; `get_all_*()` merges built-in + discovered
+- `discover()` wrapped in `try/except` with `warnings.warn(..., RuntimeWarning)`
 
 ### Async/Sync Bridge
-- `_AsyncBridge` in `utils.py` provides a daemon-thread event loop
-- `run_coro_sync()` bridges sync callers into async code (handles already-running-loop case)
-- Used by `FeatureForge.fit()` and `Platform.run()`
+- `run_coro_sync()` in `utils.py` bridges async → sync using a daemon background event loop
+- All LLM calls are async (`async def complete(...)`, `async def generate(...)`)
+- Public sklearn API (`fit`, `transform`) is synchronous, calls `run_coro_sync(self.async_fit(...))`
 
-### Exception Hierarchy
-- `FeatureForgeError` root → domain-specific children: `LLMError`, `AgentError`, `PipelineError`, `EvaluationError`, `CodeExecutionError`, `DatasetError`, `ConfigurationError`, `TrackingError`
-- Sandbox errors: `CodeExecutionError` → `SandboxValidationError`, `SandboxTimeoutError`, `SandboxWorkerError`
+### Structured Logging
+- `get_logger(__name__)` returns a structlog `BoundLogger`
+- Log events use `snake_case` keys: `logger.info("fit_start", mode=self.mode, latency_ms=...)`
+- No f-string interpolation in log messages — all context passed as keyword args
 
-### Artifact System
-- `ArtifactExporter(ABC)` mixin — `generated_scripts`, `intermediate_dataframes`, `feature_metadata`, `get_artifacts()`
-- `ArtifactConfig` dataclass: `storage_mode` (memory/disk/hybrid), `storage_format` (parquet/csv/feather)
-- `LazyDataFrameRef` for disk-backed DataFrames
-- `ArtifactBundle` Pydantic model for validated serialization
+### Error Handling
+- Exception hierarchy: `FeatureForgeError` → `ConfigurationError`, `LLMError`, `FeatureGenerationError`, `CodeExecutionError`, `AgentError`, etc.
+- `LLMError` wraps all provider-specific exceptions
+- `tenacity` retry with exponential backoff for transient LLM failures
 
-### Logging
-- `structlog` with `get_logger(__name__)` in every module
-- Key-value structured events: `logger.info("event_name", key1=val1, key2=val2)`
-- TTY → pretty console; non-TTY → JSON
-- OpenTelemetry span injection via `add_open_telemetry_spans` processor
-- Log level configurable via `FF_LOG_LEVEL` env var
+### Method Structure
+- Each method lives in its own subdirectory: `methods/<method_name>/method.py`
+- Method directories contain `method.py`, optional `prompts/` subdirectory
+- Thin adapter pattern: `MALMASMethod` wraps `FeatureForge` to implement `BaseMethod`
+- Iterative methods accumulate `_artifacts: dict[str, Any]` with `generated_code`, `iterations`, `gains`
 
-### Imports
-- `from __future__ import annotations` in every file
-- stdlib → third-party → local (standard grouping)
-- Heavy imports (providers, wandb, mlflow) are lazy — inside functions or via `importlib`
-- `TYPE_CHECKING` guard for type-only imports
+### Prompt Templates
+- YAML files in `prompts/` directory with `system:` and `description:` keys
+- `PromptRegistry` lazy-loads and caches `Prompt` Pydantic models
+- Agent class attribute `prompt_key` maps to YAML filename (without extension)
 
-### Data Types
-- `NewType` for domain strings: `DatasetName`, `MetricName`, `PromptName`, `AgentName`, `Seed`
-- Pydantic `BaseModel` for structured data: `FeatureSpec`, `Prompt`, config models
-- `Literal` for constrained strings: `TaskType`, `LLMProvider`, `RouterStrategy`
+### Configuration Layering
+- Priority (highest → lowest): constructor args → env vars (`FF_*`) → `.env` (dotenvx) → `config/settings.yaml`
+- `Settings.settings_customise_sources()` defines the priority chain
+- Sub-configs as nested `BaseModel`: `LLMConfig`, `TrackerConfig`, `RouterConfig`, `MemoryConfig`, `RetryConfig`, `EvaluationConfig`
 
 ## Testing
 
 ### Python (pytest + hypothesis)
+
 - **Runner**: `uv run pytest` from project root
-- **Async**: `asyncio_mode = "auto"` — async test functions detected automatically
-- **File naming**: `test_<module>.py` co-located in `tests/unit/` or `tests/integration/`
-- **Test organization**: Class-based (`class TestFoo`) for related tests; standalone functions for simple cases
-- **Markers**: `@pytest.mark.unit`, `@pytest.mark.integration`, `@pytest.mark.slow`, `@pytest.mark.llm`, `@pytest.mark.property`, `@pytest.mark.metamorphic`, `@pytest.mark.contract`, `@pytest.mark.differential`, `@pytest.mark.baseline`
-- **Auto-marking**: `conftest.py` auto-marks tests by directory (`unit/` → `unit`, `integration/` → `integration`)
-- **Fixtures**: Defined in `conftest.py` — `FakeLLM`, `fake_llm`, `sample_config`, `sample_dataframe`, `sample_series`
-- **Mocking**: `FakeLLM(LLMClient)` subclass with predetermined responses — no `unittest.mock`
-- **Property testing**: Hypothesis strategies in `tests/strategies.py` — `pd_dataframes()`, `feature_specs()`, `binary_classification_data()`, `markdown_fenced_code()`, `valid_metrics()`
-- **Coverage**: `--cov=feature_forge` with `--cov-report=term-missing` and `--cov-report=html`
+- **Async**: `asyncio_mode = "auto"` — async test functions work without decorators
+- **File naming**: `test_<module>.py` co-located by domain in `tests/unit/` or `tests/integration/`
+- **Test organization**: Class-based grouping (`TestAgentRegistry`, `TestStripMarkdownFencesProperties`) with `test_<behavior>` methods
+- **Mocking**: `FakeLLM(LLMClient)` test double in `conftest.py` — overrides `_do_complete`, `_do_complete_json`, `_call_api`, `_extract_content`, `_extract_usage`
+- **Fixtures**: Defined in `tests/conftest.py` — `fake_llm`, `sample_config`, `sample_dataframe`, `sample_series`
+- **Auto-marking**: `pytest_collection_modifyitems` auto-applies `pytest.mark.unit` / `pytest.mark.integration` based on directory
+- **Property testing**: Hypothesis strategies in `tests/strategies.py` (`pd_dataframes`, `feature_specs`, `binary_classification_data`, etc.)
+- **Markers** (declared in `pyproject.toml`):
+  - `unit` — fast isolated tests
+  - `integration` — multi-component tests
+  - `slow` — deselect with `-m not slow`
+  - `llm` — calls real LLM APIs (expensive)
+  - `baseline` — requires optional baseline packages
+  - `property` — hypothesis-based property tests
+  - `metamorphic` — metamorphic relation tests
+  - `contract` — API surface contract tests
+  - `differential` — reference comparison tests
+- **Coverage**: `--cov=feature_forge --cov-report=term-missing --cov-report=html`
 
 ## Linting & Formatting
 
-### Python
-- **Ruff** (linter + formatter): `target-version = "py311"`, `line-length = 100`
-  - Rule set: E, F, I (isort), UP, B, C4, DTZ, T10, ISC, PIE, PT, RUF
-  - `E501` ignored (line length handled by formatter)
-  - `quote-style = "double"`, `indent-style = "space"`
-  - `convention = "google"` for pydocstyle
-- **mypy**: `strict = true`, `python_version = "3.11"`, `warn_return_any`, `warn_unused_ignores`
-  - `ignore_missing_imports = true` for untyped third-party packages (sklearn, xgboost, wandb, etc.)
-- **pre-commit hooks**:
-  - `trailing-whitespace`, `end-of-file-fixer`, `check-yaml`, `check-added-large-files` (max 1024KB)
-  - `uv-lock` — keeps lockfile in sync
-  - `ruff-check --fix` + `ruff-format` (excludes `notebooks/`)
-  - `conventional-pre-commit` for commit messages
-  - Local: `pip-audit`, `mypy` (excludes `tests/`), `quarto-render` for `.qmd` changes, `repo-hygiene`
+### Ruff
+- **Config**: `[tool.ruff]` in `pyproject.toml`
+- **Target**: Python 3.11
+- **Line length**: 100 (E501 ignored)
+- **Quote style**: double quotes
+- **Indent**: spaces
+- **Selected rules**: E, F, I, UP, B, C4, DTZ, T10, ISC, PIE, PT, RUF
+- **Excluded**: `*.ipynb` files
+- **Docstring convention**: Google (`convention = "google"`)
+
+### Mypy
+- **Config**: `[tool.mypy]` in `pyproject.toml`
+- **Mode**: `strict = true`
+- **Python version**: 3.11
+- **Warnings**: `warn_return_any`, `warn_unused_ignores`, `warn_redundant_casts`
+- **Ignore missing imports**: for third-party libs without stubs (openfe, xgboost, sklearn, wandb, etc.)
+- **Skipped**: `tests/` directory (pre-commit hook excludes tests)
+
+### Pre-commit
+- trailing-whitespace, end-of-file-fixer, check-yaml, check-added-large-files (1024 KB), check-merge-conflict, debug-statements
+- `uv-lock` — keeps lockfile in sync
+- `ruff-check --fix` + `ruff-format` (excludes notebooks/)
+- `conventional-pre-commit` for commit messages
+- Local hooks: `pip-audit`, `repo-hygiene`, `docs-references`, `mypy` (src only), `quarto-render` (notebooks)
 
 ## Build/Dev Commands
 
 ```
-uv sync                                    → Install all dependencies from lockfile
+uv sync                                    → Install all dependencies
 uv run pytest                              → Run full test suite with coverage
-uv run pytest tests/unit/                  → Run only unit tests
-uv run pytest -m "not slow and not llm"    → Run tests excluding slow and LLM tests
-uv run pytest -m property                  → Run only Hypothesis property tests
-uv run ruff check                          → Lint all Python files
-uv run ruff format                         → Format all Python files
-uv run mypy src/                           → Type-check source (strict mode)
-uv run pre-commit run --all-files          → Run all pre-commit hooks
-make docs                                  → Build MkDocs documentation
-make docs-serve                            → Serve docs with live reload
-make notebooks                             → Render all Quarto notebooks
-uv run python scripts/check_repo_hygiene.py → Check for tracked cache artifacts
-uv run python scripts/run_pip_audit.py     → Security audit dependencies
+uv run pytest tests/unit/                  → Run unit tests only
+uv run pytest -m "not slow and not llm"    → Run fast local tests
+uv run pytest -m property                  → Run property-based tests only
+uv run ruff check src/                     → Lint source code
+uv run ruff check src/ --fix               → Lint and auto-fix
+uv run ruff format src/                    → Format source code
+uv run mypy src/                           → Type-check source code
+uv run python -m feature_forge             → (Not applicable — library, not CLI)
+make docs                                  → Build documentation site
+make docs-serve                            → Serve docs locally with live reload
+make notebooks                             → Render all notebooks
 ```

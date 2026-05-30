@@ -84,6 +84,11 @@ platform.report_best(results)     # best per dataset
 df = platform.to_dataframe(results)  # raw pandas DataFrame
 ```
 
+Notes:
+- `parallel=True` uses a process-pool seam and supports registry-discovered methods.
+- Instance-local methods added via `platform.register_method(...)` are not process-serializable and must run with `parallel=False`.
+- Results are normalized to an `ExperimentResult`-like shape with a nullable `error` field.
+
 ### Experiment Matrix (Advanced)
 
 ```python
