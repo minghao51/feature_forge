@@ -126,6 +126,17 @@ class ModelRegistry:
         return {**cls.get_builtin(), **cls._discovered}
 
     @classmethod
+    def clear_cache(cls) -> None:
+        """Clear cached discovered entry points."""
+        cls._discovered = None
+
+    @classmethod
+    def refresh(cls) -> dict[str, Callable[..., Any]]:
+        """Force re-discovery of entry-point model factories."""
+        cls.clear_cache()
+        return cls.get_all()
+
+    @classmethod
     def get(cls, name: str) -> Callable[..., Any]:
         """Get a model factory function by name."""
         factories = cls.get_all()

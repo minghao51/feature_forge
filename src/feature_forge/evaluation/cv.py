@@ -136,6 +136,25 @@ class CVEvaluator:
 
         return float(np.mean(scores))
 
+    def evaluate_features_batch(
+        self,
+        X_base: pd.DataFrame,
+        y: pd.Series,
+        features_df: pd.DataFrame,
+        baseline_score: float,
+        n_jobs: int = -1,
+    ) -> dict[str, float]:
+        from joblib import Parallel, delayed  # type: ignore[import-untyped]
+
+        def _eval_single(col: str) -> tuple[str, float]:
+            score = self.evaluate_feature(X_base, y, features_df[[col]], baseline_score)
+            return (col, score)
+
+        results = Parallel(n_jobs=n_jobs, backend="loky")(
+            delayed(_eval_single)(col) for col in features_df.columns
+        )
+        return dict(results)
+
     def _fit_preprocess(self, X: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, Any]]:
         """Fit preprocessing: compute medians and category mappings from X.
 

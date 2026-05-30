@@ -55,12 +55,14 @@ class ExperimentRunner:
         for i, config in iterator:
             run_name = f"run_{i}_{config.get('dataset', 'unknown')}"
             logger.info("experiment_run_start", run_name=run_name, config_keys=list(config.keys()))
-            if self.tracker is not None:
-                self.tracker.init_run(
-                    run_name=run_name,
-                    config=config,
-                )
+            run_initialized = False
             try:
+                if self.tracker is not None:
+                    self.tracker.init_run(
+                        run_name=run_name,
+                        config=config,
+                    )
+                    run_initialized = True
                 result = experiment_fn(config)
                 if self.tracker is not None:
                     self.tracker.log_metrics(
@@ -72,7 +74,7 @@ class ExperimentRunner:
                 logger.error("experiment_run_error", run_name=run_name, error=str(exc))
                 results.append({**config, "error": str(exc)})
             finally:
-                if self.tracker is not None:
+                if self.tracker is not None and run_initialized:
                     self.tracker.finish()
         return results
 
@@ -112,9 +114,11 @@ class ExperimentRunner:
             )
             for i, (cfg, future) in iterator:
                 run_name = f"run_{i}_{cfg.get('dataset', 'unknown')}"
-                if self.tracker is not None:
-                    self.tracker.init_run(run_name=run_name, config=cfg)
+                run_initialized = False
                 try:
+                    if self.tracker is not None:
+                        self.tracker.init_run(run_name=run_name, config=cfg)
+                        run_initialized = True
                     result = future.result()
                     if self.tracker is not None:
                         self.tracker.log_metrics(
@@ -125,6 +129,6 @@ class ExperimentRunner:
                     logger.error("experiment_run_error", run_name=run_name, error=str(exc))
                     results.append({**cfg, "error": str(exc)})
                 finally:
-                    if self.tracker is not None:
+                    if self.tracker is not None and run_initialized:
                         self.tracker.finish()
             return results

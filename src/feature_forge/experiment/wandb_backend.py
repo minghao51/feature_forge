@@ -9,6 +9,9 @@ import pandas as pd
 
 from feature_forge.exceptions import TrackingError
 from feature_forge.experiment.tracker import ExperimentTracker
+from feature_forge.observability.structlog_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class WandBTracker(ExperimentTracker):
@@ -76,7 +79,9 @@ class WandBTracker(ExperimentTracker):
             table = wandb.Table(dataframe=df)  # type: ignore[attr-defined]
             self._run.log({key: table})
         except ImportError:
-            pass
+            logger.warning(
+                "wandb_not_available", hint="pip install wandb to enable artifact logging"
+            )
 
     def _log_code(self, key: str, code: str) -> None:
         if self._run is None:
@@ -87,18 +92,23 @@ class WandBTracker(ExperimentTracker):
             import wandb
 
             if self.log_code_to_artifact:
-                with tempfile.NamedTemporaryFile(
-                    mode="w",
-                    suffix=".py",
-                    delete=False,
-                    prefix=f"{key}_",
-                ) as f:
-                    f.write(code)
-                    f.flush()
+                tmp_path = ""
+                try:
+                    with tempfile.NamedTemporaryFile(
+                        mode="w",
+                        suffix=".py",
+                        delete=False,
+                        prefix=f"{key}_",
+                    ) as f:
+                        f.write(code)
+                        f.flush()
+                        tmp_path = f.name
                     art = wandb.Artifact(name=key, type="code")  # type: ignore[attr-defined]
-                    art.add_file(f.name, name=f"{key}.py")
+                    art.add_file(tmp_path, name=f"{key}.py")
                     self._run.log_artifact(art)
-                    os.unlink(f.name)
+                finally:
+                    if tmp_path and os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
 
             if self.log_code_to_table:
                 table = wandb.Table(  # type: ignore[attr-defined]
@@ -107,4 +117,6 @@ class WandBTracker(ExperimentTracker):
                 )
                 self._run.log({f"{key}_table": table})
         except ImportError:
-            pass
+            logger.warning(
+                "wandb_not_available", hint="pip install wandb to enable artifact logging"
+            )

@@ -5,6 +5,7 @@ Supports both classification (AUC, ACC, F1) and regression (RMSE, MAE, R2).
 
 from __future__ import annotations
 
+import threading
 import warnings
 from collections.abc import Callable
 from typing import Any, ClassVar
@@ -89,6 +90,9 @@ METRIC_REGISTRY: dict[str, Callable[..., Any]] = {
 }
 
 
+_registry_lock = threading.Lock()
+
+
 class MetricRegistry:
     """Registry for evaluation metrics with entry point discovery.
 
@@ -116,10 +120,22 @@ class MetricRegistry:
 
     @classmethod
     def get_all(cls) -> dict[str, Callable[..., Any]]:
-        """Return built-in + entry-point discovered metrics."""
         if cls._discovered is None:
-            cls._discovered = cls.discover()
+            with _registry_lock:
+                if cls._discovered is None:
+                    cls._discovered = cls.discover()
         return {**cls._builtin, **cls._discovered}
+
+    @classmethod
+    def clear_cache(cls) -> None:
+        """Clear cached discovered entry points."""
+        cls._discovered = None
+
+    @classmethod
+    def refresh(cls) -> dict[str, Callable[..., Any]]:
+        """Force re-discovery of entry-point metrics and return merged registry."""
+        cls.clear_cache()
+        return cls.get_all()
 
     @classmethod
     def get(cls, name: str) -> Callable[..., Any]:

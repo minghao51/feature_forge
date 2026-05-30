@@ -73,15 +73,20 @@ class MLflowTracker(ExperimentTracker):
             import mlflow
         except ImportError:
             return
-        with tempfile.NamedTemporaryFile(
-            mode="wb",
-            suffix=".parquet",
-            delete=False,
-            prefix=f"{key}_",
-        ) as f:
-            df.to_parquet(f.name)
-            mlflow.log_artifact(f.name, artifact_path=key)
-            os.unlink(f.name)
+        tmp_path = ""
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                suffix=".parquet",
+                delete=False,
+                prefix=f"{key}_",
+            ) as f:
+                df.to_parquet(f.name)
+                tmp_path = f.name
+            mlflow.log_artifact(tmp_path, artifact_path=key)
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
     def _log_code(self, key: str, code: str) -> None:
         try:
@@ -90,13 +95,18 @@ class MLflowTracker(ExperimentTracker):
             import mlflow
         except ImportError:
             return
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".py",
-            delete=False,
-            prefix=f"{key}_",
-        ) as f:
-            f.write(code)
-            f.flush()
-            mlflow.log_artifact(f.name, artifact_path="code")
-            os.unlink(f.name)
+        tmp_path = ""
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".py",
+                delete=False,
+                prefix=f"{key}_",
+            ) as f:
+                f.write(code)
+                f.flush()
+                tmp_path = f.name
+            mlflow.log_artifact(tmp_path, artifact_path="code")
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)

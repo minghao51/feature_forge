@@ -18,12 +18,9 @@ import socket
 import tempfile
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 
 import numpy as np
-
-if TYPE_CHECKING:
-    from feature_forge.evaluation.cv import CVEvaluator
 import pandas as pd
 
 from feature_forge.exceptions import (
@@ -104,6 +101,10 @@ class SandboxedExecutor:
         "getattr",
         "setattr",
         "delattr",
+        "os",
+        "sys",
+        "signal",
+        "subprocess",
     }
     FORBIDDEN_DUNDER_PREFIX: ClassVar[str] = "__"
     ALLOWED_BUILTINS: ClassVar[set[str]] = {
@@ -176,16 +177,6 @@ class SandboxedExecutor:
     ) -> None:
         self.limits = SandboxLimits(timeout_seconds=timeout_seconds, max_memory_mb=max_memory_mb)
 
-    @staticmethod
-    def from_evaluator(evaluator: CVEvaluator | None) -> SandboxedExecutor:
-        if evaluator is not None:
-            cfg = evaluator.config.evaluation
-            return SandboxedExecutor(
-                timeout_seconds=cfg.sandbox_timeout_seconds,
-                max_memory_mb=cfg.sandbox_max_memory_mb,
-            )
-        return SandboxedExecutor(timeout_seconds=5.0, max_memory_mb=512)
-
     def execute(
         self,
         code: str,
@@ -248,6 +239,12 @@ class SandboxedExecutor:
                 if proc.is_alive():
                     proc.terminate()
                     proc.join(timeout=1)
+                try:
+                    late_status, late_payload = response_queue.get_nowait()
+                    if late_status == "ok" and late_payload:
+                        artifact_path = late_payload
+                except queue.Empty:
+                    pass
                 logger.error("sandbox_timeout", timeout_seconds=self.limits.timeout_seconds)
                 raise SandboxTimeoutError(
                     f"Sandbox execution timed out after {self.limits.timeout_seconds:.1f}s"
@@ -355,6 +352,27 @@ def _sandbox_worker_main(
         )
         raise PermissionError("Network access is blocked in sandbox runtime")
 
+    class _BlockedSocket:
+        """Socket shim that blocks any runtime network usage in sandbox."""
+
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            _blocked_network()
+
+        def connect(self, *_args: Any, **_kwargs: Any) -> Any:
+            return _blocked_network()
+
+        def send(self, *_args: Any, **_kwargs: Any) -> Any:
+            return _blocked_network()
+
+        def sendall(self, *_args: Any, **_kwargs: Any) -> Any:
+            return _blocked_network()
+
+        def recv(self, *_args: Any, **_kwargs: Any) -> Any:
+            return _blocked_network()
+
+        def close(self) -> None:
+            return None
+
     try:
         df = pd.read_parquet(input_parquet_path)
     except Exception as exc:
@@ -362,7 +380,7 @@ def _sandbox_worker_main(
         return
 
     socket.create_connection = _blocked_network
-    socket.socket = _blocked_network  # type: ignore[assignment,misc]
+    socket.socket = _BlockedSocket  # type: ignore[assignment,misc]
 
     import builtins as _builtins
 
@@ -401,11 +419,20 @@ def _sandbox_worker_main(
             return
         # Convert non-serializable types (Interval, Categorical, object) to safe numeric/string
         result = _to_parquet_safe(result)
-        with tempfile.NamedTemporaryFile(
-            mode="wb", suffix=".parquet", delete=False, prefix="feature_forge_sandbox_"
-        ) as temp_file:
-            result.to_parquet(temp_file.name)
-            response_queue.put(("ok", temp_file.name))
+        artifact_tmp = tempfile.NamedTemporaryFile(
+            mode="wb", suffix=".parquet", delete=False, prefix="ff_sandbox_"
+        )
+        tmp_name = artifact_tmp.name
+        artifact_tmp.close()
+        try:
+            result.to_parquet(tmp_name)
+            response_queue.put(("ok", tmp_name))
+        except Exception:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
     except Exception as exc:  # pragma: no cover - subprocess path
         response_queue.put(("error", f"Feature generation execution failed: {exc}"))
 
