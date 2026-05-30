@@ -9,32 +9,26 @@ Usage:
 
 from __future__ import annotations
 
+import atexit
 import time
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 
 from feature_forge.artifacts.base import ArtifactConfig, ArtifactExporter
 from feature_forge.config import Settings, get_settings
-from feature_forge.evaluation.sandbox import SandboxedExecutor
+from feature_forge.evaluation.kit import EvaluationKit
+from feature_forge.exceptions import LLMError
 from feature_forge.llm.base import LLMClient
 from feature_forge.llm.factory import create_llm_client
+from feature_forge.methods.malmas.agents.base import AgentRegistry
 from feature_forge.observability.structlog_config import get_logger
 from feature_forge.utils import run_coro_sync
 
 logger = get_logger(__name__)
 
-_SINGLE_AGENT_MODES = frozenset(
-    {
-        "unary",
-        "cross_compositional",
-        "aggregation",
-        "temporal",
-        "local_transform",
-        "local_pattern",
-    }
-)
+_SINGLE_AGENT_MODES = frozenset(AgentRegistry.builtin_agent_names())
 
 
 class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: ignore[misc]
@@ -71,7 +65,7 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
         if llm_client is None:
             try:
                 self.llm_client = self._default_llm_client()
-            except Exception as exc:
+            except (ValueError, KeyError, TypeError, ImportError, AttributeError, LLMError) as exc:
                 logger.warning(
                     "llm_client_init_failed",
                     error=str(exc),
@@ -79,13 +73,32 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
                 )
         self.selected_features: list[str] = []
         self.feature_codes: list[str] = []
-        self.sandbox = SandboxedExecutor(
-            timeout_seconds=self.config.evaluation.sandbox_timeout_seconds,
-            max_memory_mb=self.config.evaluation.sandbox_max_memory_mb,
-        )
+        self._eval_kit = EvaluationKit.from_settings(self.config)
+        self.sandbox = self._eval_kit.sandbox
         self.pipeline_result: dict[str, Any] | None = None
         self.transform_failures: list[dict[str, str]] = []
         ArtifactExporter.__init__(self, artifact_config=artifact_config)
+        atexit.register(self.close)
+
+    def __enter__(self) -> FeatureForge:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any | None,
+    ) -> Literal[False]:
+        self.close()
+        return False
+
+    def close(self) -> None:
+        if (
+            hasattr(self, "llm_client")
+            and self.llm_client is not None
+            and hasattr(self.llm_client, "close")
+        ):
+            self.llm_client.close()
 
     def _default_llm_client(self) -> LLMClient:
         """Create default LLM client from settings using the provider factory."""
@@ -114,7 +127,7 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
             module_path, class_name = spec
             mod = importlib.import_module(module_path)
             cls = getattr(mod, class_name)
-            return cls(self.config, self.llm_client, sandbox=self.sandbox)
+            return cls(self.config, self.llm_client, eval_kit=self._eval_kit)
 
         if self.mode in _SINGLE_AGENT_MODES:
             from feature_forge.methods.malmas.pipeline.ablations import SingleAgentPipeline
@@ -124,13 +137,13 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
                 self.mode,
                 self.config,
                 self.llm_client,
-                sandbox=self.sandbox,
+                eval_kit=self._eval_kit,
             )
 
         from feature_forge.methods.malmas.pipeline.iterative import IterativePipeline
 
         assert self.llm_client is not None
-        return IterativePipeline(self.config, self.llm_client, sandbox=self.sandbox)
+        return IterativePipeline(self.config, self.llm_client, eval_kit=self._eval_kit)
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> FeatureForge:
         if self.llm_client is None:

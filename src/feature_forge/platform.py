@@ -7,16 +7,24 @@ ExperimentRunner, and Reporter.
 
 from __future__ import annotations
 
-import inspect
 from typing import Any
 
 import pandas as pd
 
 from feature_forge.config import Settings, get_settings
 from feature_forge.data import DatasetRegistry
-from feature_forge.evaluation import CVEvaluator, MetricRegistry, ModelFactory, ModelRegistry
-from feature_forge.exceptions import EvaluationError
-from feature_forge.experiment import ExperimentRunner, ExperimentTracker, NoOpTracker, Reporter
+from feature_forge.evaluation import MetricRegistry, ModelRegistry
+from feature_forge.experiment import ExperimentTracker, NoOpTracker, Reporter
+from feature_forge.experiment.case_executor import (
+    CaseComputationInput,
+    ExperimentCaseExecutor,
+    run_case,
+)
+from feature_forge.experiment.execution import (
+    ExperimentCase,
+    ProcessPoolExecutionAdapter,
+    SequentialExecutionAdapter,
+)
 from feature_forge.methods import BaseMethod, MethodRegistry
 from feature_forge.observability.structlog_config import get_logger
 
@@ -45,6 +53,7 @@ class ExperimentalPlatform:
         self._settings: Settings | None = None
         self._dataset_registry: DatasetRegistry | None = None
         self._extra_methods: dict[str, type[BaseMethod]] = {}
+        self._extra_datasets: dict[str, dict[str, Any]] = {}
         self._extra_models: dict[str, Any] = {}
         self._extra_metrics: dict[str, Any] = {}
 
@@ -82,6 +91,7 @@ class ExperimentalPlatform:
 
     def register_dataset(self, name: str, info: dict[str, Any]) -> None:
         """Register a dataset programmatically."""
+        self._extra_datasets[name] = dict(info)
         self._get_dataset_registry().register(name, info)
 
     def register_model(self, name: str, factory_fn: Any) -> None:
@@ -148,99 +158,55 @@ class ExperimentalPlatform:
         models = models or ["xgboost"]
         seeds = seeds or [42]
 
-        # Resolve methods
-        all_methods = dict(MethodRegistry.get_all_methods())
-        all_methods.update(self._extra_methods)
-
-        # Build config matrix
-        configs: list[dict[str, Any]] = []
+        cases: list[ExperimentCase] = []
         for ds_name in datasets:
             for method_name in methods:
                 for model_name in models:
                     for seed in seeds:
-                        configs.append(
-                            {
-                                "dataset": ds_name,
-                                "method": method_name,
-                                "model": model_name,
-                                "seed": seed,
-                            }
+                        cases.append(
+                            ExperimentCase(
+                                dataset=ds_name,
+                                method=method_name,
+                                model=model_name,
+                                seed=seed,
+                                mode=mode,
+                                cv_folds=cv_folds,
+                                run_id=f"run_{ds_name}_{method_name}_{model_name}_{seed}",
+                            )
                         )
 
-        registry = self._get_dataset_registry()
-
-        # Pre-build per-run settings and evaluators (cache heavy objects)
         run_settings = self._get_settings()
-        if cv_folds is not None:
-            run_settings.evaluation.cv_folds = cv_folds
-        model_factory = ModelFactory(random_state=run_settings.random_state)
-        cv_evaluator = CVEvaluator(config=run_settings, model_factory=model_factory)
-
-        def experiment_fn(config: dict[str, Any]) -> dict[str, Any]:
-            ds_name = config["dataset"]
-            method_name = config["method"]
-            model_name = config["model"]
-            seed = config["seed"]
-
-            # Load dataset
-            data = registry.load(ds_name)
-            target_col = data.get("target")
-            if target_col is None:
-                raise EvaluationError(f"Dataset '{ds_name}' has no target column")
-            train_df = data.get("train")
-            if train_df is None or train_df.empty:
-                raise EvaluationError(f"Dataset '{ds_name}' has no training data")
-            y = train_df[target_col]
-            X = train_df.drop(columns=[target_col])
-
-            # Resolve method
-            method_cls = all_methods.get(method_name)
-            if method_cls is None:
-                raise EvaluationError(f"Method '{method_name}' not found")
-
-            # Update random state for this seed
-            run_settings.random_state = seed
-            model_factory.random_state = seed
-
-            # Construct method — pass only supported kwargs
-            method_kwargs: dict[str, Any] = {}
-            sig = inspect.signature(method_cls.__init__)
-            if "mode" in sig.parameters and mode is not None:
-                method_kwargs["mode"] = mode
-            if "artifact_config" in sig.parameters:
-                method_kwargs["artifact_config"] = None
-            method = method_cls(**method_kwargs)
-            method.name = method_name
-
-            # Run method
-            method.fit(X, y)
-            X_transformed = method.transform(X)
-
-            # Evaluate
-            baseline_score = cv_evaluator.evaluate_baseline(X, y, model_name=model_name)
-            gain = cv_evaluator.evaluate_feature(
-                X,
-                y,
-                X_transformed,
-                baseline_score=baseline_score,
-                model_name=model_name,
-            )
-
-            return {
-                "cv_score": baseline_score + gain,
-                "gain": gain,
-                "baseline_score": baseline_score,
-                "num_features_generated": len(method.generated_scripts),
-            }
-
-        # Execute
         run_tracker = tracker or NoOpTracker(project="feature-forge-platform")
-        runner = ExperimentRunner(tracker=run_tracker)
+        executor = ExperimentCaseExecutor(
+            settings=run_settings,
+            tracker=run_tracker,
+            extra_methods=self._extra_methods,
+            extra_datasets=self._extra_datasets,
+            extra_models=self._extra_models,
+            extra_metrics=self._extra_metrics,
+        )
+
         if parallel:
-            return runner.run_parallel(
-                configs, experiment_fn, max_workers=max_workers, progress=progress
-            )
-        return runner.run(configs, experiment_fn, progress=progress)
+            if self._extra_methods:
+                raise ValueError(
+                    "parallel=True currently supports only registry-discovered methods; "
+                    "instance-local extra methods are not serializable across process seam."
+                )
+            pool_backend = ProcessPoolExecutionAdapter(max_workers=max_workers)
+            payloads = [
+                CaseComputationInput(
+                    case=c,
+                    settings_data=run_settings.model_dump(),
+                    dataset_overrides=self._extra_datasets,
+                )
+                for c in cases
+            ]
+            backend_results = pool_backend.run(payloads, run_case, progress=progress)
+        else:
+            seq_backend = SequentialExecutionAdapter()
+            backend_results = seq_backend.run(cases, executor.execute, progress=progress)
+
+        return [result.__dict__ for result in backend_results]
 
     # ── Reporting ──────────────────────────────────────────────
 
