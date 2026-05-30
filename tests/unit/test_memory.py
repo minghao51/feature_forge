@@ -8,6 +8,7 @@ import pytest
 
 from feature_forge.llm.base import LLMClient, LLMResponse
 from feature_forge.methods.malmas.memory import AgentMemory, ConceptualMemory, MemoryPersistence
+from feature_forge.methods.malmas.memory.retrieval import retrieve_top_k
 
 
 class FakeLLM(LLMClient):
@@ -26,6 +27,29 @@ class FakeLLM(LLMClient):
         self, messages, schema_description, temperature=0.2, max_tokens=4096
     ):
         return json.loads(self.response_text or "{}")
+
+
+class TestRetrieval:
+    def test_retrieve_top_k_ranks_by_overlap(self):
+        entries = [
+            {"feature_name": "a", "base_columns": ["age", "fare"], "round_idx": 0, "value": 0.05},
+            {"feature_name": "b", "base_columns": ["sibsp"], "round_idx": 0, "value": 0.1},
+            {"feature_name": "c", "base_columns": ["age"], "round_idx": 1, "value": 0.02},
+        ]
+        result = retrieve_top_k(entries, current_columns={"age", "fare"}, current_round=2, top_k=3)
+        assert result[0]["feature_name"] == "a"
+        assert result[1]["feature_name"] == "c"
+
+    def test_retrieve_top_k_respects_top_k(self):
+        entries = [
+            {"feature_name": f"f{i}", "base_columns": ["age"], "round_idx": 0, "value": 0.05}
+            for i in range(10)
+        ]
+        result = retrieve_top_k(entries, current_columns={"age"}, current_round=0, top_k=3)
+        assert len(result) == 3
+
+    def test_retrieve_top_k_empty(self):
+        assert retrieve_top_k([], current_columns={"age"}, current_round=0) == []
 
 
 class TestMemoryPersistence:
@@ -109,6 +133,22 @@ class TestAgentMemory:
         section = mem.generate_prompt_section(use_feedback=True)
         assert "History Feedback" in section
         assert "f1" in section
+
+    def test_retrieve_relevant_returns_top_k(self, tmp_path):
+        path = str(tmp_path / "mem.json")
+        mem = AgentMemory("unary", path)
+        for i in range(20):
+            mem.record_feedback(f"f{i}", "auc", 0.1, True, 0, ["age"], "num")
+        result = mem.retrieve_relevant(current_columns={"age"}, current_round=0, top_k=5)
+        lines = result.strip().split("\n")
+        assert len(lines) <= 6
+        assert "ranked by relevance" in result
+
+    def test_retrieve_relevant_fallback_to_generate(self, tmp_path):
+        path = str(tmp_path / "mem.json")
+        mem = AgentMemory("unary", path)
+        result = mem.retrieve_relevant(current_columns={"age"}, current_round=0, top_k=5)
+        assert result == mem.generate_prompt_section(use_feedback=True)
 
 
 class TestConceptualMemory:

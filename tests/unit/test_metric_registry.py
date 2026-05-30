@@ -42,6 +42,15 @@ class TestMetricRegistry:
         all_metrics = MetricRegistry.get_all()
         assert "test_metric" in all_metrics
 
+    def test_clear_cache_and_refresh(self):
+        MetricRegistry.get_all()
+        first = MetricRegistry._discovered
+        MetricRegistry.clear_cache()
+        assert MetricRegistry._discovered is None
+        MetricRegistry.refresh()
+        assert MetricRegistry._discovered is not None
+        assert MetricRegistry._discovered is not first
+
     def test_get_metric_delegates_to_registry(self):
         fn = get_metric("auc")
         assert callable(fn)

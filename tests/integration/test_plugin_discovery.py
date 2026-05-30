@@ -44,7 +44,7 @@ class TestPluginDiscovery:
         assert "house_prices" in datasets
 
     def test_method_registry_caches_discovery(self):
-        MethodRegistry._discovered = None  # reset cache
+        MethodRegistry.clear_cache()
         MethodRegistry.get_all_methods()
         first = MethodRegistry._discovered
         MethodRegistry.get_all_methods()
@@ -52,7 +52,7 @@ class TestPluginDiscovery:
         assert first is second  # cached discovered reference
 
     def test_metric_registry_caches_discovery(self):
-        MetricRegistry._discovered = None  # reset cache
+        MetricRegistry.clear_cache()
         MetricRegistry.get_all()
         first = MetricRegistry._discovered
         MetricRegistry.get_all()
@@ -60,9 +60,33 @@ class TestPluginDiscovery:
         assert first is second  # cached discovered reference
 
     def test_model_registry_caches_discovery(self):
-        ModelRegistry._discovered = None  # reset cache
+        ModelRegistry.clear_cache()
         ModelRegistry.get_all()
         first = ModelRegistry._discovered
         ModelRegistry.get_all()
         second = ModelRegistry._discovered
         assert first is second  # cached discovered reference
+
+    def test_registry_refresh_rebuilds_discovery_cache(self):
+        MethodRegistry.clear_cache()
+        MetricRegistry.clear_cache()
+        ModelRegistry.clear_cache()
+
+        MethodRegistry.get_all_methods()
+        MetricRegistry.get_all()
+        ModelRegistry.get_all()
+
+        method_first = MethodRegistry._discovered
+        metric_first = MetricRegistry._discovered
+        model_first = ModelRegistry._discovered
+
+        MethodRegistry.refresh()
+        MetricRegistry.refresh()
+        ModelRegistry.refresh()
+
+        assert MethodRegistry._discovered is not None
+        assert MetricRegistry._discovered is not None
+        assert ModelRegistry._discovered is not None
+        assert MethodRegistry._discovered is not method_first
+        assert MetricRegistry._discovered is not metric_first
+        assert ModelRegistry._discovered is not model_first

@@ -167,6 +167,19 @@ def generate_features(df):
         with pytest.raises(CodeExecutionError, match="dunder"):
             executor.execute(code, pd.DataFrame())
 
+    def test_socket_import_blocked_before_runtime(self):
+        executor = SandboxedExecutor()
+        code = """
+import pandas as pd
+import socket
+def generate_features(df):
+    s = socket.socket()
+    s.connect(("example.com", 80))
+    return pd.DataFrame(index=df.index)
+"""
+        with pytest.raises(CodeExecutionError, match="Import not allowed: socket"):
+            executor.execute(code, pd.DataFrame({"a": [1]}))
+
     def test_timeout_enforced(self):
         executor = SandboxedExecutor(timeout_seconds=0.2, max_memory_mb=256)
         code = """
@@ -233,61 +246,45 @@ class TestCVEvaluator:
 
 
 class TestPrefilterCandidateColumns:
-    def _make_pipeline(self):
-        from feature_forge.config import Settings
-        from feature_forge.llm.base import LLMClient, LLMResponse
-        from feature_forge.methods.malmas.pipeline.core import CorePipeline
-
-        class FakeLLM(LLMClient):
-            def __init__(self):
-                super().__init__(model="fake", api_key="fake")
-
-            @property
-            def provider_name(self) -> str:
-                return "fake"
-
-            async def _do_complete(self, messages, **kwargs):
-                return LLMResponse(content="[]", model="fake")
-
-            async def _do_complete_json(self, messages, schema_description, **kwargs):
-                return []
-
-        config = Settings(task="classification", metric="auc")
-        return CorePipeline(config=config, llm_client=FakeLLM())
-
     def test_empty_dataframe_returns_empty(self):
-        pipeline = self._make_pipeline()
-        result = pipeline._prefilter_candidate_columns(pd.DataFrame())
+        from feature_forge.evaluation.prefilter import prefilter_candidate_columns
+
+        result = prefilter_candidate_columns(pd.DataFrame(), max_candidates=50)
         assert result == []
 
     def test_constant_columns_filtered(self):
-        pipeline = self._make_pipeline()
+        from feature_forge.evaluation.prefilter import prefilter_candidate_columns
+
         df = pd.DataFrame({"const": [1, 1, 1, 1], "varying": [1, 2, 3, 4]})
-        result = pipeline._prefilter_candidate_columns(df)
+        result = prefilter_candidate_columns(df, max_candidates=50)
         assert result == ["varying"]
 
     def test_all_constant_returns_empty(self):
-        pipeline = self._make_pipeline()
+        from feature_forge.evaluation.prefilter import prefilter_candidate_columns
+
         df = pd.DataFrame({"a": [42] * 10, "b": ["x"] * 10})
-        result = pipeline._prefilter_candidate_columns(df)
+        result = prefilter_candidate_columns(df, max_candidates=50)
         assert result == []
 
     def test_under_50_candidates_returns_all(self):
-        pipeline = self._make_pipeline()
+        from feature_forge.evaluation.prefilter import prefilter_candidate_columns
+
         cols = {f"col_{i}": list(range(10)) for i in range(10)}
         df = pd.DataFrame(cols)
-        result = pipeline._prefilter_candidate_columns(df)
+        result = prefilter_candidate_columns(df, max_candidates=50)
         assert len(result) == 10
 
     def test_over_50_candidates_caps_at_50(self):
-        pipeline = self._make_pipeline()
+        from feature_forge.evaluation.prefilter import prefilter_candidate_columns
+
         cols = {f"col_{i}": list(range(100)) for i in range(80)}
         df = pd.DataFrame(cols)
-        result = pipeline._prefilter_candidate_columns(df)
+        result = prefilter_candidate_columns(df, max_candidates=50)
         assert len(result) == 50
 
     def test_high_variance_prioritized(self):
-        pipeline = self._make_pipeline()
+        from feature_forge.evaluation.prefilter import prefilter_candidate_columns
+
         cols = {}
         for i in range(60):
             if i == 0:
@@ -295,46 +292,25 @@ class TestPrefilterCandidateColumns:
             else:
                 cols[f"low_{i}"] = [float(j % 2) for j in range(100)]
         df = pd.DataFrame(cols)
-        result = pipeline._prefilter_candidate_columns(df)
+        result = prefilter_candidate_columns(df, max_candidates=50)
         assert result[0] == "high_var"
 
     def test_non_numeric_gets_zero_variance(self):
-        pipeline = self._make_pipeline()
+        from feature_forge.evaluation.prefilter import prefilter_candidate_columns
+
         cols = {f"num_{i}": list(range(10)) for i in range(40)}
         cols["cat"] = [f"x_{i}" for i in range(10)]
         df = pd.DataFrame(cols)
-        result = pipeline._prefilter_candidate_columns(df)
+        result = prefilter_candidate_columns(df, max_candidates=50)
         assert "cat" in result
         assert len(result) == 41
 
     def test_custom_max_candidate_features(self):
-        from feature_forge.config import Settings
-        from feature_forge.llm.base import LLMClient, LLMResponse
-        from feature_forge.methods.malmas.pipeline.core import CorePipeline
+        from feature_forge.evaluation.prefilter import prefilter_candidate_columns
 
-        class FakeLLM(LLMClient):
-            def __init__(self):
-                super().__init__(model="fake", api_key="fake")
-
-            @property
-            def provider_name(self) -> str:
-                return "fake"
-
-            async def _do_complete(self, messages, **kwargs):
-                return LLMResponse(content="[]", model="fake")
-
-            async def _do_complete_json(self, messages, schema_description, **kwargs):
-                return []
-
-        config = Settings(
-            task="classification",
-            metric="auc",
-            evaluation={"max_candidate_features": 5},
-        )
-        pipeline = CorePipeline(config=config, llm_client=FakeLLM())
         cols = {f"col_{i}": list(range(20)) for i in range(20)}
         df = pd.DataFrame(cols)
-        result = pipeline._prefilter_candidate_columns(df)
+        result = prefilter_candidate_columns(df, max_candidates=5)
         assert len(result) == 5
 
 

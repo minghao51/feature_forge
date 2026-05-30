@@ -18,6 +18,7 @@ from feature_forge.methods.malmas.pipeline.ablations import (
 )
 from feature_forge.methods.malmas.pipeline.core import CodeGenerator, CorePipeline
 from feature_forge.methods.malmas.pipeline.iterative import IterativePipeline
+from feature_forge.methods.malmas.pipeline.result import PipelineResult
 
 
 class FakeLLM(LLMClient):
@@ -109,8 +110,7 @@ def generate_features(df):
         agent = FakeAgent(specs)
         result = await pipeline.run([agent], X, y)
 
-        assert "features_train" in result
-        assert "sum_ab" in result["features_train"].columns
+        assert "sum_ab" in result.features_train.columns
 
     @pytest.mark.asyncio
     async def test_run_no_specs_returns_empty(self, sample_data):
@@ -120,7 +120,7 @@ def generate_features(df):
         pipeline = CorePipeline(config=config, llm_client=llm)
         agent = FakeAgent([])
         result = await pipeline.run([agent], X, y)
-        assert result["features_train"].empty
+        assert result.features_train.empty
 
     @pytest.mark.asyncio
     async def test_run_returns_generated_code(self, sample_data):
@@ -148,8 +148,7 @@ def generate_features(df):
         pipeline = CorePipeline(config=config, llm_client=llm)
         agent = FakeAgent(specs)
         result = await pipeline.run([agent], X, y)
-        assert "generated_code" in result
-        assert "def generate_features" in result["generated_code"]
+        assert "def generate_features" in result.generated_code
 
 
 class TestIterativePipeline:
@@ -505,6 +504,21 @@ def generate_features(df):
         )
         pipeline.router.update_performance("unary", 0.1)
         before = pipeline.router.agent_performance["unary"][:]
-        await pipeline._post_round([], {"agent_gains": {}}, round_idx=0)
+        empty_result = PipelineResult(
+            features_train=pd.DataFrame(),
+            features_test=pd.DataFrame(),
+            all_features_train=pd.DataFrame(),
+            all_features_test=pd.DataFrame(),
+            selected_features_train=pd.DataFrame(),
+            selected_features_test=pd.DataFrame(),
+            top_features_train=pd.DataFrame(),
+            top_features_test=pd.DataFrame(),
+            agent_gains={},
+            specs=[],
+            baseline_score=0.0,
+            gains={},
+            generated_code="",
+        )
+        await pipeline._post_round([], empty_result, round_idx=0)
         after = pipeline.router.agent_performance["unary"][:]
         assert after == before

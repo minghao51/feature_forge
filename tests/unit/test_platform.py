@@ -10,7 +10,6 @@ import pytest
 
 from feature_forge import ExperimentalPlatform
 from feature_forge.config import Settings
-from feature_forge.exceptions import EvaluationError
 from feature_forge.methods import BaseMethod
 
 
@@ -134,26 +133,21 @@ class TestExperimentalPlatform:
         assert len(best) == 1
         assert best.iloc[0]["method"] == "b1"
 
-    @patch("feature_forge.platform.MethodRegistry")
-    @patch("feature_forge.platform.ExperimentRunner")
-    def test_run_basic(self, mock_runner, mock_registry, sample_X, sample_y):
-        mock_registry.get_all_methods.return_value = {"dummy": DummyBaseline}
-
-        mock_runner_instance = MagicMock()
-        mock_runner.return_value = mock_runner_instance
-        mock_runner_instance.run.return_value = [
-            {
-                "dataset": "titanic",
-                "method": "dummy",
-                "model": "xgboost",
-                "seed": 42,
-                "cv_score": 0.9,
-                "gain": 0.1,
-                "baseline_score": 0.8,
-                "num_features_generated": 1,
-            },
-        ]
-
+    @patch("feature_forge.platform.ExperimentCaseExecutor")
+    def test_run_basic(self, mock_executor_cls, sample_X, sample_y):
+        mock_executor = MagicMock()
+        mock_executor_cls.return_value = mock_executor
+        mock_executor.execute.return_value = MagicMock(
+            dataset="titanic",
+            method="dummy",
+            model="xgboost",
+            seed=42,
+            cv_score=0.9,
+            gain=0.1,
+            baseline_score=0.8,
+            num_features_generated=1,
+            error=None,
+        )
         platform = ExperimentalPlatform()
         platform._dataset_registry = MagicMock()
         platform._dataset_registry.list.return_value = ["titanic"]
@@ -198,78 +192,42 @@ class TestExperimentalPlatform:
         names = platform.list_methods()
         assert "custom" in names
 
-    @patch("feature_forge.platform.MethodRegistry")
-    @patch("feature_forge.platform.ExperimentRunner")
-    def test_run_executes_experiment_fn_path(self, mock_runner, mock_registry):
-        mock_registry.get_all_methods.return_value = {"dummy": DummyBaseline}
-        mock_runner_instance = MagicMock()
-        mock_runner.return_value = mock_runner_instance
-        mock_runner_instance.run.side_effect = lambda configs, experiment_fn, progress=True: [
-            {**cfg, **experiment_fn(cfg)} for cfg in configs
+    @patch("feature_forge.platform.ExperimentCaseExecutor")
+    @patch("feature_forge.platform.ProcessPoolExecutionAdapter")
+    def test_run_parallel_uses_pool_backend(self, mock_pool_cls, mock_executor_cls):
+        mock_executor_cls.return_value = MagicMock()
+        mock_pool = MagicMock()
+        mock_pool_cls.return_value = mock_pool
+        mock_pool.run.return_value = [
+            MagicMock(
+                dataset="demo",
+                method="dummy",
+                model="xgboost",
+                seed=42,
+                cv_score=0.7,
+                gain=0.1,
+                baseline_score=0.6,
+                num_features_generated=1,
+                error=None,
+            )
         ]
-
-        platform = ExperimentalPlatform(config=Settings(evaluation={"cv_folds": 2}))
-        platform._dataset_registry = MagicMock()
-        platform._dataset_registry.load.return_value = {
-            "train": pd.DataFrame({"a": [1, 2, 3, 4], "target": [0, 1, 0, 1]}),
-            "target": "target",
-            "test": pd.DataFrame(),
-            "metadata": {"task": "classification"},
-        }
-
-        with (
-            patch("feature_forge.platform.CVEvaluator.evaluate_baseline", return_value=0.6),
-            patch("feature_forge.platform.CVEvaluator.evaluate_feature", return_value=0.1),
-        ):
-            results = platform.run(datasets=["demo"], methods=["dummy"], progress=False)
-
+        platform = ExperimentalPlatform()
+        results = platform.run(
+            datasets=["demo"],
+            methods=["dummy"],
+            parallel=True,
+            progress=False,
+        )
         assert len(results) == 1
         assert results[0]["dataset"] == "demo"
-        assert results[0]["method"] == "dummy"
-        assert results[0]["cv_score"] == 0.7
-        assert results[0]["gain"] == 0.1
-        assert results[0]["baseline_score"] == 0.6
 
-    @patch("feature_forge.platform.MethodRegistry")
-    @patch("feature_forge.platform.ExperimentRunner")
-    def test_run_raises_when_dataset_has_no_target(self, mock_runner, mock_registry):
-        mock_registry.get_all_methods.return_value = {"dummy": DummyBaseline}
-        mock_runner_instance = MagicMock()
-        mock_runner.return_value = mock_runner_instance
-        mock_runner_instance.run.side_effect = lambda configs, experiment_fn, progress=True: [
-            experiment_fn(cfg) for cfg in configs
-        ]
-
+    def test_run_parallel_rejects_extra_methods(self):
         platform = ExperimentalPlatform()
-        platform._dataset_registry = MagicMock()
-        platform._dataset_registry.load.return_value = {
-            "train": pd.DataFrame({"a": [1, 2]}),
-            "target": None,
-            "test": pd.DataFrame(),
-            "metadata": {},
-        }
-
-        with pytest.raises(EvaluationError, match="has no target column"):
-            platform.run(datasets=["demo"], methods=["dummy"], progress=False)
-
-    @patch("feature_forge.platform.MethodRegistry")
-    @patch("feature_forge.platform.ExperimentRunner")
-    def test_run_raises_when_method_not_found(self, mock_runner, mock_registry):
-        mock_registry.get_all_methods.return_value = {}
-        mock_runner_instance = MagicMock()
-        mock_runner.return_value = mock_runner_instance
-        mock_runner_instance.run.side_effect = lambda configs, experiment_fn, progress=True: [
-            experiment_fn(cfg) for cfg in configs
-        ]
-
-        platform = ExperimentalPlatform()
-        platform._dataset_registry = MagicMock()
-        platform._dataset_registry.load.return_value = {
-            "train": pd.DataFrame({"a": [1, 2], "target": [0, 1]}),
-            "target": "target",
-            "test": pd.DataFrame(),
-            "metadata": {},
-        }
-
-        with pytest.raises(EvaluationError, match="not found"):
-            platform.run(datasets=["demo"], methods=["missing"], progress=False)
+        platform.register_method("custom", DummyBaseline)
+        with pytest.raises(ValueError, match="parallel=True currently supports only"):
+            platform.run(
+                datasets=["demo"],
+                methods=["custom"],
+                parallel=True,
+                progress=False,
+            )

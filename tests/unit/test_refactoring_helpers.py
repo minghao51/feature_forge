@@ -9,6 +9,7 @@ import pytest
 
 from feature_forge.config import Settings
 from feature_forge.evaluation.cv import CVEvaluator
+from feature_forge.evaluation.kit import EvaluationKit
 from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.exceptions import CodeExecutionError
 from feature_forge.methods.base import BaseMethod
@@ -29,26 +30,32 @@ class _ConcreteMethod(BaseMethod):
         return X
 
 
-class TestFromEvaluatorFactory:
-    def test_from_evaluator_none_returns_defaults(self):
-        executor = SandboxedExecutor.from_evaluator(None)
-        assert executor.limits.timeout_seconds == 5.0
-        assert executor.limits.max_memory_mb == 512
+class TestEvaluationKit:
+    def test_from_settings_defaults(self):
+        kit = EvaluationKit.from_settings()
+        assert isinstance(kit.sandbox, SandboxedExecutor)
+        assert isinstance(kit.evaluator, CVEvaluator)
+        assert kit.sandbox.limits.timeout_seconds == 5.0
+        assert kit.sandbox.limits.max_memory_mb == 512
 
-    def test_from_evaluator_with_config(self):
+    def test_from_settings_custom_config(self):
         config = Settings(
             task="classification",
             metric="auc",
             evaluation={"sandbox_timeout_seconds": 10.0, "sandbox_max_memory_mb": 256},
         )
-        evaluator = CVEvaluator(config=config)
-        executor = SandboxedExecutor.from_evaluator(evaluator)
-        assert executor.limits.timeout_seconds == 10.0
-        assert executor.limits.max_memory_mb == 256
+        kit = EvaluationKit.from_settings(config)
+        assert kit.sandbox.limits.timeout_seconds == 10.0
+        assert kit.sandbox.limits.max_memory_mb == 256
 
-    def test_from_evaluator_returns_sandboxed_executor(self):
-        executor = SandboxedExecutor.from_evaluator(None)
-        assert isinstance(executor, SandboxedExecutor)
+    def test_from_settings_returns_evaluation_kit(self):
+        kit = EvaluationKit.from_settings()
+        assert isinstance(kit, EvaluationKit)
+
+    def test_evaluator_uses_config_random_state(self):
+        config = Settings(random_state=123)
+        kit = EvaluationKit.from_settings(config)
+        assert kit.model_factory.random_state == 123
 
 
 class TestIterativeFeatureMetadata:

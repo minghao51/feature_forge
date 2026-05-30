@@ -5,8 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 import pandas as pd
+import pytest
 
 from feature_forge import ExperimentalPlatform
+from feature_forge.experiment.execution import ExperimentResult
 from feature_forge.methods import BaseMethod
 
 
@@ -29,6 +31,30 @@ class DummyBaseline(BaseMethod):
     @property
     def generated_scripts(self) -> list[str]:
         return ["x = 1"]
+
+
+def _deterministic_result(dataset: str, method: str, model: str, seed: int) -> ExperimentResult:
+    baseline = 0.7 + (seed % 10) * 0.001
+    gain = 0.05 if method == "openfe" else 0.04
+    return ExperimentResult(
+        dataset=dataset,
+        method=method,
+        model=model,
+        seed=seed,
+        cv_score=baseline + gain,
+        gain=gain,
+        baseline_score=baseline,
+        num_features_generated=1,
+    )
+
+
+def _fake_execute(self, case):
+    return _deterministic_result(case.dataset, case.method, case.model, case.seed)
+
+
+def _fake_run_case(payload):
+    case = payload.case
+    return _deterministic_result(case.dataset, case.method, case.model, case.seed)
 
 
 class TestPlatformE2E:
@@ -77,7 +103,7 @@ class TestPlatformE2E:
         assert "cv_score" in result
         assert "gain" in result
         assert "baseline_score" in result
-        assert "error" not in result
+        assert result["error"] is None
 
     def test_run_with_missing_dataset(self):
         platform = ExperimentalPlatform()
@@ -204,7 +230,7 @@ class TestPlatformE2E:
         )
 
         assert len(results) == 1
-        assert "error" not in results[0]
+        assert results[0]["error"] is None
 
     def test_report_best_integration(self, tmp_path):
         platform = ExperimentalPlatform()
@@ -314,3 +340,47 @@ class TestPlatformE2E:
         assert "xgboost" in models
         assert "lightgbm" in models
         assert "random_forest" in models
+
+    def test_parallel_and_sequential_semantic_equality(self, monkeypatch):
+        monkeypatch.setattr(
+            "feature_forge.experiment.case_executor.ExperimentCaseExecutor.execute", _fake_execute
+        )
+        monkeypatch.setattr("feature_forge.platform.run_case", _fake_run_case)
+
+        platform = ExperimentalPlatform()
+        kwargs = {
+            "datasets": ["titanic"],
+            "methods": ["openfe"],
+            "models": ["xgboost"],
+            "seeds": [1, 2],
+            "progress": False,
+        }
+
+        seq_results = platform.run(parallel=False, **kwargs)
+        par_results = platform.run(parallel=True, max_workers=2, **kwargs)
+
+        seq_sorted = sorted(
+            seq_results,
+            key=lambda x: (x["dataset"], x["method"], x["model"], x["seed"]),
+        )
+        par_sorted = sorted(
+            par_results,
+            key=lambda x: (x["dataset"], x["method"], x["model"], x["seed"]),
+        )
+        assert seq_sorted == par_sorted
+
+    def test_parallel_rejects_instance_local_registered_method(self):
+        platform = ExperimentalPlatform()
+        platform.register_method("dummy", DummyBaseline)
+
+        with pytest.raises(
+            ValueError,
+            match="parallel=True currently supports only registry-discovered methods",
+        ):
+            platform.run(
+                datasets=["titanic"],
+                methods=["dummy"],
+                models=["xgboost"],
+                parallel=True,
+                progress=False,
+            )

@@ -107,6 +107,6 @@ def test_candidate_eval_backend_smoke_budget(backend: str) -> None:
     )
     elapsed = time.perf_counter() - start
 
-    assert "gains" in result
-    assert len(result["gains"]) <= config.evaluation.max_candidate_features
+    assert result.gains
+    assert len(result.gains) <= config.evaluation.max_candidate_features
     assert elapsed < 30.0

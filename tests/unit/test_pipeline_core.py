@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from feature_forge.config import Settings
+from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.exceptions import PipelineError
 from feature_forge.llm.base import LLMClient
 from feature_forge.methods.malmas.agents.base import Agent
@@ -115,19 +116,35 @@ class TestCorePipeline:
         pipeline = CorePipeline(config=config, llm_client=fake_llm, code_generator=gen)
         assert pipeline.code_generator is gen
 
+    def test_eval_kit_param(self, config, fake_llm):
+        from feature_forge.evaluation.kit import EvaluationKit
+
+        kit = EvaluationKit.from_settings(config)
+        pipeline = CorePipeline(config=config, llm_client=fake_llm, eval_kit=kit)
+        assert pipeline.evaluator is kit.evaluator
+        assert pipeline.sandbox is kit.sandbox
+
+    def test_backward_compat_evaluator_param(self, config, fake_llm):
+        from feature_forge.evaluation.cv import CVEvaluator
+
+        evaluator = CVEvaluator(config)
+        pipeline = CorePipeline(config=config, llm_client=fake_llm, evaluator=evaluator)
+        assert pipeline.evaluator is evaluator
+        assert isinstance(pipeline.sandbox, SandboxedExecutor)
+
     @pytest.mark.asyncio
     async def test_run_empty_agents_returns_empty_features(self, config, fake_llm):
         pipeline = CorePipeline(config=config, llm_client=fake_llm)
         X = pd.DataFrame({"a": [1, 2, 3]})
         y = pd.Series([0, 1, 0])
         result = await pipeline.run(agents=[], X_train=X, y_train=y)
-        assert result["specs"] == []
-        assert result["features_train"].empty
-        assert result["features_test"].empty
-        assert result["generated_code"] == ""
-        assert result["baseline_score"] == 0.0
-        assert result["gains"] == {}
-        assert result["agent_gains"] == {}
+        assert result.specs == []
+        assert result.features_train.empty
+        assert result.features_test.empty
+        assert result.generated_code == ""
+        assert result.baseline_score == 0.0
+        assert result.gains == {}
+        assert result.agent_gains == {}
 
     @pytest.mark.asyncio
     async def test_run_empty_agents_with_test_set(self, config, fake_llm):
@@ -136,9 +153,9 @@ class TestCorePipeline:
         X_test = pd.DataFrame({"a": [4, 5, 6]})
         y = pd.Series([0, 1, 0])
         result = await pipeline.run(agents=[], X_train=X_train, y_train=y, X_test=X_test)
-        assert result["features_train"].empty
-        assert result["features_test"].empty
-        assert list(result["features_test"].index) == list(X_test.index)
+        assert result.features_train.empty
+        assert result.features_test.empty
+        assert list(result.features_test.index) == list(X_test.index)
 
     def test_prefilter_candidate_columns_removes_constant(self, config, fake_llm):
         pipeline = CorePipeline(config=config, llm_client=fake_llm)
@@ -278,7 +295,7 @@ class TestCorePipelineXTestFaultTolerance:
         X_test = X_train.copy()
 
         result = await pipeline.run([good_agent, bad_agent], X_train, y, X_test=X_test)
-        assert "good_feature" in result["features_test"].columns
+        assert "good_feature" in result.features_test.columns
 
 
 class _CountingEvaluator:
@@ -374,7 +391,7 @@ class TestFeatureEvalBackendSelection:
         )
         assert captured["backend"] == "threading"
         assert captured["n_jobs"] == 2
-        assert "f1" in result["gains"]
+        assert "f1" in result.gains
 
     def test_parallel_uses_loky_backend(self, monkeypatch):
         config = Settings(
@@ -414,7 +431,7 @@ class TestFeatureEvalBackendSelection:
         )
         assert captured["backend"] == "loky"
         assert captured["n_jobs"] == 3
-        assert "f2" in result["gains"]
+        assert "f2" in result.gains
 
     def test_baseline_cache_key_changes_when_target_values_change(self):
         config = Settings(evaluation={"feature_eval_backend": "threading"})

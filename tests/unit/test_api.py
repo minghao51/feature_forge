@@ -273,3 +273,12 @@ class TestFeatureForgeEdgeCases:
         X_out = fe.transform(X)
         assert "double_x" in X_out.columns
         assert "triple_x" not in X_out.columns
+
+    def test_transform_collects_failures_when_not_raising(self):
+        fe = FeatureForge(config=_make_config(), llm_client=StubProvider())
+        fe.config.evaluation.fail_on_feature_error = False
+        fe.feature_codes = ["invalid python {"]
+        X = pd.DataFrame({"x": [1.0, 2.0, 3.0]})
+        X_out = fe.transform(X)
+        assert list(X_out.columns) == ["x"]
+        assert len(fe.transform_failures) == 1

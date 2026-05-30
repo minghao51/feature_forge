@@ -243,3 +243,80 @@ def generate_features(df):
             df = pd.DataFrame({"a": [1, 2, 3]})
             executor.execute(code, df)
             assert mock_unlink.call_count >= 2
+
+
+class TestParseAndValidate:
+    """Cover parse_and_validate edge paths."""
+
+    def test_blocks_regular_import_not_allowed(self):
+        executor = SandboxedExecutor()
+        code = "import os\ndef generate_features(df): return df"
+        with pytest.raises(SandboxValidationError, match="Import not allowed"):
+            executor.execute(code, pd.DataFrame())
+
+    def test_allows_regular_import_allowed(self):
+        executor = SandboxedExecutor()
+        code = "import math\ndef generate_features(df): return df"
+        result = executor.execute(code, pd.DataFrame({"a": [1.0]}))
+        assert isinstance(result, pd.DataFrame)
+
+    def test_blocks_dunder_attribute_access(self):
+        executor = SandboxedExecutor()
+        code = """
+def generate_features(df):
+    df.__class__
+    return df
+"""
+        with pytest.raises(SandboxValidationError, match="Forbidden dunder attribute"):
+            executor.execute(code, pd.DataFrame({"a": [1]}))
+
+    def test_allows_import_from_allowed(self):
+        executor = SandboxedExecutor()
+        code = "from math import sqrt\ndef generate_features(df): return df"
+        result = executor.execute(code, pd.DataFrame({"a": [1.0]}))
+        assert isinstance(result, pd.DataFrame)
+
+
+class TestExecuteFullPath:
+    """Cover the full execute() success path with metadata assertions."""
+
+    def test_success_path_returns_features(self):
+        executor = SandboxedExecutor(timeout_seconds=5.0)
+        code = """
+def generate_features(df):
+    result = pd.DataFrame(index=df.index)
+    result['double'] = df['a'] * 2
+    return result
+"""
+        df = pd.DataFrame({"a": [1.0, 2.0, 3.0]})
+        result = executor.execute(code, df, source="test", agent_name="test_agent")
+        assert list(result["double"]) == [2.0, 4.0, 6.0]
+        assert len(result) == 3
+
+    def test_success_path_preserves_index(self):
+        executor = SandboxedExecutor(timeout_seconds=5.0)
+        code = """
+def generate_features(df):
+    result = pd.DataFrame(index=df.index)
+    result['sum'] = df['a'] + df['b']
+    return result
+"""
+        df = pd.DataFrame({"a": [1.0, 2.0], "b": [10.0, 20.0]}, index=[10, 20])
+        result = executor.execute(code, df)
+        assert list(result.index) == [10, 20]
+        assert list(result["sum"]) == [11.0, 22.0]
+
+    def test_parquet_output_valid(self, tmp_path):
+        executor = SandboxedExecutor(timeout_seconds=5.0)
+        code = """
+def generate_features(df):
+    result = pd.DataFrame(index=df.index)
+    result['x'] = df.iloc[:, 0] * 3
+    return result
+"""
+        df = pd.DataFrame({"v": [1.0, 2.0, 3.0]})
+        result = executor.execute(code, df)
+        parquet_path = str(tmp_path / "output.parquet")
+        result.to_parquet(parquet_path)
+        loaded = pd.read_parquet(parquet_path)
+        assert list(loaded["x"]) == [3.0, 6.0, 9.0]

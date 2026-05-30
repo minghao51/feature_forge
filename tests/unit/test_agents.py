@@ -11,13 +11,7 @@ from feature_forge.config import Settings
 from feature_forge.llm.base import LLMClient, LLMResponse
 from feature_forge.methods.malmas.agents import (
     AgentRegistry,
-    AggregationConstructAgent,
-    CrossCompositionalAgent,
-    LocalPatternAgent,
-    LocalTransformAgent,
     RouterAgent,
-    TemporalFeatureAgent,
-    UnaryFeatureAgent,
 )
 
 
@@ -61,6 +55,11 @@ class TestAgentRegistry:
         agents = AgentRegistry.get_all_agents()
         assert "unary" in agents
 
+    def test_agent_class_identity_stable(self):
+        cls1 = AgentRegistry.get_agent("unary")
+        cls2 = AgentRegistry.get_agent("unary")
+        assert cls1 is cls2
+
 
 class TestBaseFeatureAgent:
     @pytest.fixture
@@ -88,7 +87,7 @@ class TestBaseFeatureAgent:
 
     @pytest.mark.asyncio
     async def test_generate_parses_features(self, fake_llm, config):
-        agent = UnaryFeatureAgent(config=config, llm_client=fake_llm)
+        agent = AgentRegistry.get_agent("unary")(config=config, llm_client=fake_llm)
         X = pd.DataFrame({"age": [20, 30, 40]})
         y = pd.Series([0, 1, 0])
         specs = await agent.generate(X, y, context={})
@@ -98,14 +97,14 @@ class TestBaseFeatureAgent:
 
     @pytest.mark.asyncio
     async def test_generate_with_memory_context(self, fake_llm, config):
-        agent = CrossCompositionalAgent(config=config, llm_client=fake_llm)
+        agent = AgentRegistry.get_agent("cross_compositional")(config=config, llm_client=fake_llm)
         X = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
         y = pd.Series([0, 1])
         specs = await agent.generate(X, y, context={"memory": "previous success with ratios"})
         assert len(specs) == 1
 
     def test_parse_response_strips_markdown(self, config):
-        agent = UnaryFeatureAgent(config=config, llm_client=FakeLLM())
+        agent = AgentRegistry.get_agent("unary")(config=config, llm_client=FakeLLM())
         content = '```json\n[{"base_columns": "x", "derived_features": [{"name": "f1", "type": "num", "transform": "t", "logic": "l"}]}]\n```'
         specs = agent._parse_response(content)
         assert len(specs) == 1
@@ -114,7 +113,7 @@ class TestBaseFeatureAgent:
     def test_parse_response_invalid_json_raises(self, config):
         from feature_forge.exceptions import AgentError
 
-        agent = UnaryFeatureAgent(config=config, llm_client=FakeLLM())
+        agent = AgentRegistry.get_agent("unary")(config=config, llm_client=FakeLLM())
         with pytest.raises(AgentError):
             agent._parse_response("not json")
 
@@ -209,27 +208,29 @@ class TestAllAgentsInstantiate:
     """Smoke test that all agents can be instantiated."""
 
     def test_unary(self):
-        agent = UnaryFeatureAgent(config=Settings(), llm_client=FakeLLM())
+        agent = AgentRegistry.get_agent("unary")(config=Settings(), llm_client=FakeLLM())
         assert agent.name == "unary"
 
     def test_cross_compositional(self):
-        agent = CrossCompositionalAgent(config=Settings(), llm_client=FakeLLM())
+        agent = AgentRegistry.get_agent("cross_compositional")(
+            config=Settings(), llm_client=FakeLLM()
+        )
         assert agent.name == "cross_compositional"
 
     def test_aggregation(self):
-        agent = AggregationConstructAgent(config=Settings(), llm_client=FakeLLM())
+        agent = AgentRegistry.get_agent("aggregation")(config=Settings(), llm_client=FakeLLM())
         assert agent.name == "aggregation"
 
     def test_temporal(self):
-        agent = TemporalFeatureAgent(config=Settings(), llm_client=FakeLLM())
+        agent = AgentRegistry.get_agent("temporal")(config=Settings(), llm_client=FakeLLM())
         assert agent.name == "temporal"
 
     def test_local_transform(self):
-        agent = LocalTransformAgent(config=Settings(), llm_client=FakeLLM())
+        agent = AgentRegistry.get_agent("local_transform")(config=Settings(), llm_client=FakeLLM())
         assert agent.name == "local_transform"
 
     def test_local_pattern(self):
-        agent = LocalPatternAgent(config=Settings(), llm_client=FakeLLM())
+        agent = AgentRegistry.get_agent("local_pattern")(config=Settings(), llm_client=FakeLLM())
         assert agent.name == "local_pattern"
 
 

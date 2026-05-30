@@ -15,6 +15,7 @@ from feature_forge.methods.malmus import (
     MalmusMethod,
     StructuredFeatureOutput,
 )
+from feature_forge.methods.malmus.method import _ensure_json_object
 
 
 class FakeJsonLLM:
@@ -206,3 +207,140 @@ class TestMalmusMethodRegistry:
         assert "caafe" in baselines
         assert "llmfe" in baselines
         assert "malmus" in baselines
+
+
+ITERATIVE_JSON = {
+    "features": [
+        {
+            "name": "ratio_ab",
+            "code": "df['a'] / (df['b'] + 1)",
+            "description": "Ratio of a to b",
+            "libraries": ["pandas"],
+        },
+    ]
+}
+
+
+class TestMalmusMethodIterative:
+    """Cover _fit_iterative path (lines 174-271)."""
+
+    @pytest.fixture
+    def mock_evaluator(self):
+        from unittest.mock import MagicMock
+
+        evaluator = MagicMock()
+        evaluator.config.evaluation.sandbox_timeout_seconds = 10.0
+        evaluator.config.evaluation.sandbox_max_memory_mb = 512
+        evaluator.config.metric = "auc"
+        evaluator.config.task = "classification"
+        return evaluator
+
+    def test_iterative_fit_keeps_feature(self, mock_evaluator):
+        llm = FakeJsonLLM(ITERATIVE_JSON)
+        mock_evaluator.evaluate_baseline.return_value = 0.7
+        mock_evaluator.evaluate_feature.return_value = 0.05
+        mock_evaluator.evaluate_features_batch.return_value = {"ratio_ab": 0.05}
+
+        method = MalmusMethod(
+            llm_client=llm, mode="iterative", n_features=1, evaluator=mock_evaluator
+        )
+        X = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
+        y = pd.Series([0, 1, 0])
+        method.fit(X, y)
+
+        assert "ratio_ab" in method._artifacts.get("generated_code", "")
+        assert len(method._feature_defs) == 1
+        assert method._feature_defs[0].name == "ratio_ab"
+
+    def test_iterative_fit_discards_feature(self, mock_evaluator):
+        llm = FakeJsonLLM(ITERATIVE_JSON)
+        mock_evaluator.evaluate_baseline.return_value = 0.7
+        mock_evaluator.evaluate_feature.return_value = -0.02
+        mock_evaluator.evaluate_features_batch.return_value = {"ratio_ab": -0.02}
+
+        method = MalmusMethod(
+            llm_client=llm, mode="iterative", n_features=1, evaluator=mock_evaluator
+        )
+        X = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
+        y = pd.Series([0, 1, 0])
+        method.fit(X, y)
+
+        assert len(method._feature_defs) == 0
+        iterations = method._artifacts.get("iterations", [])
+        assert len(iterations) == 1
+        assert iterations[0]["gains"] == {}
+
+    def test_iterative_baseline_score_in_artifacts(self, mock_evaluator):
+        llm = FakeJsonLLM(ITERATIVE_JSON)
+        mock_evaluator.evaluate_baseline.return_value = 0.85
+        mock_evaluator.evaluate_feature.return_value = 0.03
+        mock_evaluator.evaluate_features_batch.return_value = {"ratio_ab": 0.03}
+
+        method = MalmusMethod(
+            llm_client=llm, mode="iterative", n_features=1, evaluator=mock_evaluator
+        )
+        X = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
+        y = pd.Series([0, 1, 0])
+        method.fit(X, y)
+
+        assert method._artifacts["baseline_score"] == 0.85
+
+    def test_iterative_generated_scripts(self, mock_evaluator):
+        llm = FakeJsonLLM(ITERATIVE_JSON)
+        mock_evaluator.evaluate_baseline.return_value = 0.7
+        mock_evaluator.evaluate_feature.return_value = 0.05
+        mock_evaluator.evaluate_features_batch.return_value = {"ratio_ab": 0.05}
+
+        method = MalmusMethod(
+            llm_client=llm, mode="iterative", n_features=1, evaluator=mock_evaluator
+        )
+        X = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
+        y = pd.Series([0, 1, 0])
+        method.fit(X, y)
+
+        scripts = method.generated_scripts
+        assert len(scripts) == 1
+        assert "generate_features" in scripts[0]
+
+    def test_iterative_feature_metadata(self, mock_evaluator):
+        llm = FakeJsonLLM(ITERATIVE_JSON)
+        mock_evaluator.evaluate_baseline.return_value = 0.7
+        mock_evaluator.evaluate_feature.return_value = 0.05
+        mock_evaluator.evaluate_features_batch.return_value = {"ratio_ab": 0.05}
+
+        method = MalmusMethod(
+            llm_client=llm, mode="iterative", n_features=1, evaluator=mock_evaluator
+        )
+        X = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
+        y = pd.Series([0, 1, 0])
+        method.fit(X, y)
+
+        meta = method.feature_metadata
+        assert len(meta) == 1
+        assert meta[0]["name"] == "ratio_ab"
+        assert meta[0]["method"] == "malmus"
+        assert meta[0]["gain"] == 0.05
+        assert meta[0]["kept"] is True
+
+    def test_iterative_transform(self, mock_evaluator):
+        llm = FakeJsonLLM(ITERATIVE_JSON)
+        mock_evaluator.evaluate_baseline.return_value = 0.7
+        mock_evaluator.evaluate_feature.return_value = 0.05
+        mock_evaluator.evaluate_features_batch.return_value = {"ratio_ab": 0.05}
+
+        method = MalmusMethod(
+            llm_client=llm, mode="iterative", n_features=1, evaluator=mock_evaluator
+        )
+        X_train = pd.DataFrame({"a": [1.0, 2.0, 3.0], "b": [4.0, 5.0, 6.0]})
+        y = pd.Series([0, 1, 0])
+        method.fit(X_train, y)
+
+        X_test = pd.DataFrame({"a": [10.0, 20.0], "b": [40.0, 50.0]})
+        result = method.transform(X_test)
+        assert "ratio_ab" in result.columns
+        expected = [round(10.0 / 41.0, 2), round(20.0 / 51.0, 2)]
+        assert list(round(result["ratio_ab"], 2)) == expected
+
+    def test_ensure_json_object_non_dict_raises(self):
+        with pytest.raises(Exception, match="Expected JSON object"):
+            _ensure_json_object("not_a_dict")

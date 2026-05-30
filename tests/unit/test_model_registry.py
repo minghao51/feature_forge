@@ -44,6 +44,15 @@ class TestModelRegistry:
         all_models = ModelRegistry.get_all()
         assert "test_model" in all_models
 
+    def test_clear_cache_and_refresh(self):
+        ModelRegistry.get_all()
+        first = ModelRegistry._discovered
+        ModelRegistry.clear_cache()
+        assert ModelRegistry._discovered is None
+        ModelRegistry.refresh()
+        assert ModelRegistry._discovered is not None
+        assert ModelRegistry._discovered is not first
+
     def test_factory_creates_xgboost(self):
         factory = ModelFactory(random_state=42)
         model = factory.get_model("xgboost", "classification")

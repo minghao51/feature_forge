@@ -26,7 +26,9 @@ class TestDotenvxFlow:
     @pytest.fixture
     def clean_env(self):
         """Save and restore environment variables around each test."""
-        # Save original env vars that we might modify
+        import feature_forge.config as _cfg
+
+        _cfg._settings_cache = None
         saved_vars = {
             k: os.environ.get(k)
             for k in [
@@ -45,7 +47,7 @@ class TestDotenvxFlow:
             ]
         }
         yield
-        # Restore original values
+        _cfg._settings_cache = None
         for key, value in saved_vars.items():
             if value is None:
                 os.environ.pop(key, None)
