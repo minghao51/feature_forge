@@ -38,7 +38,8 @@ class MALMASMethod(BaseMethod):
         self, X_train: pd.DataFrame, y_train: pd.Series, **kwargs: Any
     ) -> pd.DataFrame:
         self.fit(X_train, y_train, **kwargs)
-        return self.transform(X_train)
+        new_features = self.transform(X_train)
+        return pd.concat([X_train, new_features], axis=1)
 
     @property
     def generated_scripts(self) -> list[str]:

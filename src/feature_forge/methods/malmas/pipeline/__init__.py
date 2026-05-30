@@ -8,6 +8,7 @@ from feature_forge.methods.malmas.pipeline.ablations import (
 )
 from feature_forge.methods.malmas.pipeline.core import CorePipeline
 from feature_forge.methods.malmas.pipeline.iterative import IterativePipeline
+from feature_forge.methods.malmas.pipeline.result import PipelineResult
 
 __all__ = [
     "CorePipeline",
@@ -15,5 +16,6 @@ __all__ = [
     "NoMemoryPipeline",
     "NoMemoryStaticRouterPipeline",
     "NoRouterPipeline",
+    "PipelineResult",
     "SingleAgentPipeline",
 ]

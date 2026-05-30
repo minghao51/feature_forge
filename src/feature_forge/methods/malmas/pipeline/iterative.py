@@ -9,12 +9,14 @@ import pandas as pd
 
 from feature_forge.config import Settings
 from feature_forge.evaluation.cv import CVEvaluator
+from feature_forge.evaluation.kit import EvaluationKit
 from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.llm.base import LLMClient
 from feature_forge.methods.malmas.agents.base import Agent, AgentRegistry
 from feature_forge.methods.malmas.agents.router import RouterAgent
 from feature_forge.methods.malmas.memory.base import AgentMemory
 from feature_forge.methods.malmas.pipeline.core import CodeGenerator, CorePipeline
+from feature_forge.methods.malmas.pipeline.result import PipelineResult
 from feature_forge.observability.structlog_config import get_logger
 from feature_forge.types import FeatureSpec
 
@@ -42,13 +44,21 @@ class BaseIterativePipeline:
         self,
         config: Settings,
         llm_client: LLMClient,
+        eval_kit: EvaluationKit | None = None,
         evaluator: CVEvaluator | None = None,
         sandbox: SandboxedExecutor | None = None,
         code_generator: CodeGenerator | None = None,
     ) -> None:
         self.config = config
         self.llm_client = llm_client
-        self.core = CorePipeline(config, llm_client, evaluator, sandbox, code_generator)
+        self.core = CorePipeline(
+            config,
+            llm_client,
+            eval_kit=eval_kit,
+            evaluator=evaluator,
+            sandbox=sandbox,
+            code_generator=code_generator,
+        )
         self.all_feature_codes: list[str] = []
         self.round_artifacts: list[dict[str, Any]] = []
 
@@ -71,7 +81,7 @@ class BaseIterativePipeline:
     async def _post_round(
         self,
         agents: list[Agent],
-        core_results: dict[str, Any],
+        core_results: PipelineResult,
         round_idx: int,
     ) -> None:
         pass
@@ -134,6 +144,7 @@ class BaseIterativePipeline:
                 "description": description or {},
                 "task": self.config.task,
                 "round_idx": round_idx,
+                "columns": set(X_train_enhanced.columns),
             }
 
             agent_contexts = []
@@ -152,16 +163,16 @@ class BaseIterativePipeline:
             await self._post_round(agents, core_results, round_idx)
 
             for agent in agents:
-                agent_gain_df = core_results["agent_gains"].get(agent.name, pd.DataFrame())
+                agent_gain_df = core_results.agent_gains.get(agent.name, pd.DataFrame())
                 if agent.name not in all_agent_gains:
                     all_agent_gains[agent.name] = []
                 all_agent_gains[agent.name].append(agent_gain_df)
 
-            if core_results.get("generated_code"):
-                self.all_feature_codes.append(core_results["generated_code"])
+            if core_results.generated_code:
+                self.all_feature_codes.append(core_results.generated_code)
 
-            top_train = core_results["top_features_train"]
-            top_test = core_results.get("top_features_test", pd.DataFrame())
+            top_train = core_results.top_features_train
+            top_test = core_results.top_features_test
             if not top_train.empty:
                 for col in top_train.columns:
                     if col not in X_train_enhanced.columns:
@@ -175,8 +186,8 @@ class BaseIterativePipeline:
                 {
                     "round": round_idx + 1,
                     "agents": [a.name for a in agents],
-                    "baseline_score": core_results["baseline_score"],
-                    "num_features_generated": len(core_results["specs"]),
+                    "baseline_score": core_results.baseline_score,
+                    "num_features_generated": len(core_results.specs),
                     "num_features_selected": len(top_train.columns),
                 }
             )
@@ -184,17 +195,17 @@ class BaseIterativePipeline:
             self.round_artifacts.append(
                 {
                     "round": round_idx + 1,
-                    "generated_code": core_results.get("generated_code", ""),
-                    "all_features_train": core_results.get("all_features_train", pd.DataFrame()),
-                    "all_features_test": core_results.get("all_features_test", pd.DataFrame()),
+                    "generated_code": core_results.generated_code,
+                    "all_features_train": core_results.all_features_train,
+                    "all_features_test": core_results.all_features_test,
                     "selected_features_train": top_train,
                     "selected_features_test": top_test
                     if X_test_enhanced is not None
                     else pd.DataFrame(),
-                    "specs": core_results.get("specs", []),
-                    "agent_gains": core_results.get("agent_gains", {}),
-                    "baseline_score": core_results["baseline_score"],
-                    "gains": core_results.get("gains", {}),
+                    "specs": core_results.specs,
+                    "agent_gains": core_results.agent_gains,
+                    "baseline_score": core_results.baseline_score,
+                    "gains": core_results.gains,
                     "agents": [a.name for a in agents],
                 }
             )
@@ -203,9 +214,9 @@ class BaseIterativePipeline:
             logger.info(
                 "round_complete",
                 round_idx=round_idx,
-                features_generated=len(core_results["specs"]),
+                features_generated=len(core_results.specs),
                 features_selected=len(top_train.columns),
-                baseline_score=core_results["baseline_score"],
+                baseline_score=core_results.baseline_score,
                 latency_ms=round_latency_ms,
             )
 
@@ -245,12 +256,20 @@ class IterativePipeline(BaseIterativePipeline):
         config: Settings,
         llm_client: LLMClient,
         router: RouterAgent | None = None,
+        eval_kit: EvaluationKit | None = None,
         evaluator: CVEvaluator | None = None,
         sandbox: SandboxedExecutor | None = None,
         code_generator: CodeGenerator | None = None,
         memory_dir: str | None = None,
     ) -> None:
-        super().__init__(config, llm_client, evaluator, sandbox, code_generator)
+        super().__init__(
+            config,
+            llm_client,
+            eval_kit=eval_kit,
+            evaluator=evaluator,
+            sandbox=sandbox,
+            code_generator=code_generator,
+        )
         self.router = router or RouterAgent(config, llm_client)
         self.memory_dir = memory_dir or str(
             config.memory.persistence_dir or "memory_files/agent_memories"
@@ -292,9 +311,15 @@ class IterativePipeline(BaseIterativePipeline):
     ) -> dict[str, Any]:
         memory = self._get_memory(agent.name)
         pos, neg = memory.get_positive_negative_features()
+        columns = context.get("columns", set())
+        round_idx = context.get("round_idx", 0)
         return {
             **context,
-            "memory": memory.generate_prompt_section(use_feedback=True),
+            "memory": memory.retrieve_relevant(
+                current_columns=columns,
+                current_round=round_idx,
+                top_k=15,
+            ),
             "positive_features": pos,
             "negative_features": neg,
         }
@@ -338,14 +363,14 @@ class IterativePipeline(BaseIterativePipeline):
     async def _post_round(
         self,
         agents: list[Agent],
-        core_results: dict[str, Any],
+        core_results: PipelineResult,
         round_idx: int,
     ) -> None:
         for agent in agents:
             memory = self._get_memory(agent.name)
-            agent_gain_df = core_results["agent_gains"].get(agent.name, pd.DataFrame())
+            agent_gain_df = core_results.agent_gains.get(agent.name, pd.DataFrame())
             for _, row in agent_gain_df.iterrows():
-                spec = next((s for s in core_results["specs"] if s.name == row["feature"]), None)
+                spec = next((s for s in core_results.specs if s.name == row["feature"]), None)
                 if spec:
                     self._record_feature_in_memory(
                         memory,

@@ -10,6 +10,7 @@ from feature_forge.config import Settings
 from feature_forge.llm.base import LLMClient
 from feature_forge.methods.malmas.agents.base import Agent, AgentRegistry
 from feature_forge.methods.malmas.pipeline.iterative import BaseIterativePipeline, IterativePipeline
+from feature_forge.methods.malmas.pipeline.result import PipelineResult
 
 
 class NoMemoryPipeline(IterativePipeline):
@@ -30,11 +31,11 @@ class NoMemoryPipeline(IterativePipeline):
     async def _post_round(
         self,
         agents: list[Agent],
-        core_results: dict[str, Any],
+        core_results: PipelineResult,
         round_idx: int,
     ) -> None:
         for agent in agents:
-            agent_gain_df = core_results["agent_gains"].get(agent.name, pd.DataFrame())
+            agent_gain_df = core_results.agent_gains.get(agent.name, pd.DataFrame())
             if not agent_gain_df.empty:
                 avg_gain = agent_gain_df["gain"].mean()
                 self.router.update_performance(agent.name, avg_gain)
@@ -50,9 +51,10 @@ class NoMemoryStaticRouterPipeline(NoMemoryPipeline):
     async def _post_round(
         self,
         agents: list[Agent],
-        core_results: dict[str, Any],
+        core_results: PipelineResult,
         round_idx: int,
-    ) -> None: ...
+    ) -> None:
+        pass
 
 
 class SingleAgentPipeline(BaseIterativePipeline):

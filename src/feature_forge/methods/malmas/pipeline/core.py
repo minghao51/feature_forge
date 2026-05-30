@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import ast
 import asyncio
-import hashlib
 import json
 import os
 import shutil
@@ -23,10 +22,13 @@ from joblib import Parallel, delayed  # type: ignore[import-untyped]
 
 from feature_forge.config import Settings
 from feature_forge.evaluation.cv import CVEvaluator
+from feature_forge.evaluation.kit import EvaluationKit
+from feature_forge.evaluation.prefilter import prefilter_candidate_columns
 from feature_forge.evaluation.sandbox import SandboxedExecutor
-from feature_forge.exceptions import PipelineError
+from feature_forge.exceptions import CodeExecutionError, PipelineError
 from feature_forge.llm.base import LLMClient
 from feature_forge.methods.malmas.agents.base import Agent
+from feature_forge.methods.malmas.pipeline.result import PipelineResult
 from feature_forge.methods.malmas.prompts import get_registry
 from feature_forge.observability.structlog_config import get_logger
 from feature_forge.types import FeatureSpec
@@ -70,9 +72,16 @@ async def _exec_sandbox(
             timeout=sandbox_timeout * 2,
         )
         return None
-    except Exception as exc:
+    except CodeExecutionError as exc:
         logger.warning(
             "agent_code_execution_failed",
+            agent=agent_name,
+            error=str(exc)[:200],
+        )
+        return None
+    except Exception as exc:
+        logger.exception(
+            "agent_code_execution_unexpected",
             agent=agent_name,
             error=str(exc)[:200],
         )
@@ -230,37 +239,36 @@ class CorePipeline:
         self,
         config: Settings,
         llm_client: LLMClient,
+        eval_kit: EvaluationKit | None = None,
         evaluator: CVEvaluator | None = None,
         sandbox: SandboxedExecutor | None = None,
         code_generator: CodeGenerator | None = None,
     ) -> None:
         self.config = config
         self.llm_client = llm_client
-        self.evaluator = evaluator or CVEvaluator(config)
-        self.sandbox = sandbox or SandboxedExecutor(
-            timeout_seconds=config.evaluation.sandbox_timeout_seconds,
-            max_memory_mb=config.evaluation.sandbox_max_memory_mb,
-        )
+        self.eval_kit: EvaluationKit | None = eval_kit
+        if eval_kit is not None:
+            self.evaluator = eval_kit.evaluator
+            self.sandbox = eval_kit.sandbox
+        else:
+            self.evaluator = evaluator or CVEvaluator(config)
+            self.sandbox = sandbox or SandboxedExecutor(
+                timeout_seconds=config.evaluation.sandbox_timeout_seconds,
+                max_memory_mb=config.evaluation.sandbox_max_memory_mb,
+            )
         self.code_generator = code_generator or CodeGenerator(
             llm_client, max_tokens=config.llm.codegen_max_tokens
         )
-        self._baseline_cache: dict[tuple[str, int, int], float] = {}
+        self._baseline_cache: dict[tuple[frozenset[str], int, int], float] = {}
 
     def clear_baseline_cache(self) -> None:
         self._baseline_cache.clear()
 
     @staticmethod
-    def _baseline_cache_key(X_train: pd.DataFrame, y_train: pd.Series) -> tuple[str, int, int]:
-        # Cache key includes a strong content fingerprint so in-place DataFrame mutations
-        # across rounds cannot reuse stale baseline scores.
-        x_hash = pd.util.hash_pandas_object(X_train, index=True, categorize=True).to_numpy()
-        y_hash = pd.util.hash_pandas_object(y_train, index=True, categorize=True).to_numpy()
-        digest = hashlib.blake2b(digest_size=16)
-        digest.update(x_hash.tobytes())
-        digest.update(y_hash.tobytes())
-        digest.update(str(tuple(X_train.columns)).encode("utf-8"))
-        digest.update(str(tuple(str(t) for t in X_train.dtypes)).encode("utf-8"))
-        return (digest.hexdigest(), len(X_train), len(X_train.columns))
+    def _baseline_cache_key(
+        X_train: pd.DataFrame, y_train: pd.Series
+    ) -> tuple[frozenset[str], int, int]:
+        return (frozenset(X_train.columns), len(X_train), hash(bytes(y_train.values)))
 
     async def run(
         self,
@@ -269,7 +277,7 @@ class CorePipeline:
         y_train: pd.Series,
         X_test: pd.DataFrame | None = None,
         context: dict[str, Any] | list[dict[str, Any]] | None = None,
-    ) -> dict[str, Any]:
+    ) -> PipelineResult:
         """Run one round of feature engineering.
 
         Returns:
@@ -328,30 +336,34 @@ class CorePipeline:
         logger.info(
             "pipeline_complete",
             num_specs=len(all_specs),
-            num_selected=len(result["selected_features_train"].columns)
-            if not result["selected_features_train"].empty
+            num_selected=len(result.selected_features_train.columns)
+            if not result.selected_features_train.empty
             else 0,
-            num_effective=len([g for g in result["gains"].values() if g > 0]),
-            baseline_score=round(result["baseline_score"], 6),
+            num_effective=len([g for g in result.gains.values() if g > 0]),
+            baseline_score=round(result.baseline_score, 6),
             latency_ms=pipeline_latency_ms,
         )
         return result
 
     @staticmethod
-    def _empty_result(X_train: pd.DataFrame, X_test: pd.DataFrame | None) -> dict[str, Any]:
+    def _empty_result(X_train: pd.DataFrame, X_test: pd.DataFrame | None) -> PipelineResult:
         empty_train = pd.DataFrame(index=X_train.index)
         empty_test = pd.DataFrame(index=X_test.index if X_test is not None else X_train.index)
-        return {
-            "features_train": empty_train,
-            "features_test": empty_test,
-            "agent_gains": {},
-            "specs": [],
-            "top_features_train": empty_train,
-            "top_features_test": empty_test,
-            "baseline_score": 0.0,
-            "gains": {},
-            "generated_code": "",
-        }
+        return PipelineResult(
+            features_train=empty_train,
+            features_test=empty_test,
+            all_features_train=empty_train,
+            all_features_test=empty_test,
+            selected_features_train=empty_train,
+            selected_features_test=empty_test,
+            top_features_train=empty_train,
+            top_features_test=empty_test,
+            agent_gains={},
+            specs=[],
+            baseline_score=0.0,
+            gains={},
+            generated_code="",
+        )
 
     @staticmethod
     def _build_schema(X_train: pd.DataFrame) -> dict[str, Any]:
@@ -521,7 +533,7 @@ class CorePipeline:
         all_specs: list[FeatureSpec],
         agents: list[Agent],
         code: str,
-    ) -> dict[str, Any]:
+    ) -> PipelineResult:
         _cache_key = self._baseline_cache_key(X_train, y_train)
         baseline_score = self._baseline_cache.get(_cache_key)
         if baseline_score is None:
@@ -595,21 +607,21 @@ class CorePipeline:
             if agent_gain_rows:
                 agent_gains[agent.name] = pd.DataFrame(agent_gain_rows)
 
-        return {
-            "features_train": features_train,
-            "features_test": features_test,
-            "all_features_train": features_train,
-            "all_features_test": features_test if X_test is not None else pd.DataFrame(),
-            "selected_features_train": top_features_train,
-            "selected_features_test": top_features_test,
-            "agent_gains": agent_gains,
-            "specs": all_specs,
-            "top_features_train": top_features_train,
-            "top_features_test": top_features_test,
-            "baseline_score": baseline_score,
-            "gains": gains,
-            "generated_code": code,
-        }
+        return PipelineResult(
+            features_train=features_train,
+            features_test=features_test,
+            all_features_train=features_train,
+            all_features_test=features_test if X_test is not None else pd.DataFrame(),
+            selected_features_train=top_features_train,
+            selected_features_test=top_features_test,
+            agent_gains=agent_gains,
+            specs=all_specs,
+            top_features_train=top_features_train,
+            top_features_test=top_features_test,
+            baseline_score=baseline_score,
+            gains=gains,
+            generated_code=code,
+        )
 
     @staticmethod
     def _concat_dedup(parts: list[pd.DataFrame], index: pd.Index | None = None) -> pd.DataFrame:
@@ -622,29 +634,10 @@ class CorePipeline:
         return combined.loc[:, ~combined.columns.duplicated()]
 
     def _prefilter_candidate_columns(self, features_train: pd.DataFrame) -> list[str]:
-        if features_train.empty:
-            return []
-
-        candidates = []
-        for col in features_train.columns:
-            series = features_train[col]
-            if series.nunique(dropna=False) <= 1:
-                continue
-            candidates.append(col)
-
-        max_candidates = self.config.evaluation.max_candidate_features
-        if len(candidates) <= max_candidates:
-            return candidates
-
-        variances: list[tuple[str, float]] = []
-        for col in candidates:
-            series = features_train[col]
-            if pd.api.types.is_numeric_dtype(series):
-                variances.append((col, float(series.var(ddof=0))))
-            else:
-                variances.append((col, 0.0))
-        variances.sort(key=lambda x: x[1], reverse=True)
-        return [col for col, _ in variances[:max_candidates]]
+        return prefilter_candidate_columns(
+            features_train,
+            self.config.evaluation.max_candidate_features,
+        )
 
     @staticmethod
     def _eval_single_feature(
