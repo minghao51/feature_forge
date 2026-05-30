@@ -16,6 +16,7 @@ import pandas as pd
 
 from feature_forge.artifacts.base import ArtifactConfig
 from feature_forge.evaluation.cv import CVEvaluator
+from feature_forge.evaluation.kit import EvaluationKit
 from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.exceptions import EvaluationError
 from feature_forge.llm.base import LLMClient
@@ -54,7 +55,11 @@ class CAAFEMethod(BaseMethod):
         self.iterations = iterations
         self.variant = variant
         self.evaluator = evaluator
-        self.sandbox = SandboxedExecutor.from_evaluator(evaluator)
+        if evaluator is not None:
+            kit = EvaluationKit.from_settings(evaluator.config)
+            self.sandbox = kit.sandbox
+        else:
+            self.sandbox = SandboxedExecutor()
         self._caafe: Any = None
         self._iteration_codes: list[str] = []
 
@@ -145,17 +150,18 @@ class CAAFEMethod(BaseMethod):
                 kept_features = pd.DataFrame(index=X_train.index)
                 kept_gains: dict[str, float] = {}
 
-                for col in new_features.columns:
-                    gain = evaluator.evaluate_feature(
+                if new_features.columns.size > 0:
+                    all_gains = evaluator.evaluate_features_batch(
                         X_train,
                         y_train,
-                        new_features[[col]],
+                        new_features,
                         baseline_score=baseline_score,
                     )
-                    if gain > 0:
-                        kept_features[col] = new_features[col].values
-                        kept_gains[col] = gain
-                        cumulative_cols.append(col)
+                    for col, gain in all_gains.items():
+                        if gain > 0:
+                            kept_features[col] = new_features[col].values
+                            kept_gains[col] = gain
+                            cumulative_cols.append(col)
 
                 iteration_record["all_new_features"] = self._storage.store(
                     f"caafe_iter_{i}_all", new_features

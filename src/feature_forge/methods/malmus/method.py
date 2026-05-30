@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field, ValidationError
 from feature_forge.artifacts.base import ArtifactConfig
 from feature_forge.config import Settings, get_settings
 from feature_forge.evaluation.cv import CVEvaluator
-from feature_forge.evaluation.sandbox import SandboxedExecutor
+from feature_forge.evaluation.kit import EvaluationKit
 from feature_forge.exceptions import EvaluationError
 from feature_forge.llm.base import LLMClient
 from feature_forge.llm.factory import create_llm_client
@@ -136,8 +136,9 @@ class MalmusMethod(BaseMethod):
         self.n_features = n_features
         self.mode = mode
         self.evaluator = evaluator
-        self.sandbox = SandboxedExecutor.from_evaluator(evaluator)
+        self.sandbox = EvaluationKit.from_settings(settings).sandbox
         self._feature_defs: list[FeatureDefinition] = []
+        self._iteration_codes: list[str] = []
 
     def fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> MalmusMethod:
         run_coro_sync(self.async_fit(X_train, y_train))
@@ -219,23 +220,24 @@ class MalmusMethod(BaseMethod):
                 kept_features = pd.DataFrame(index=X.index)
                 kept_gains: dict[str, float] = {}
 
-                for col in new_features.columns:
-                    gain = evaluator.evaluate_feature(
+                if new_features.columns.size > 0:
+                    all_gains = evaluator.evaluate_features_batch(
                         X,
                         y,
-                        new_features[[col]],
+                        new_features,
                         baseline_score=baseline_score,
                     )
-                    if gain > 0:
-                        kept_features[col] = new_features[col].values
-                        kept_gains[col] = gain
-                        cumulative_cols.append(col)
-                        matching_def = next(
-                            (d for d in parsed.features if d.name == col),
-                            None,
-                        )
-                        if matching_def:
-                            all_defs.append(matching_def)
+                    for col, gain in all_gains.items():
+                        if gain > 0:
+                            kept_features[col] = new_features[col].values
+                            kept_gains[col] = gain
+                            cumulative_cols.append(col)
+                            matching_def = next(
+                                (d for d in parsed.features if d.name == col),
+                                None,
+                            )
+                            if matching_def:
+                                all_defs.append(matching_def)
 
                 iteration_record["all_new_features"] = self._storage.store(
                     f"malmus_iter_{i}_all",
@@ -263,6 +265,9 @@ class MalmusMethod(BaseMethod):
 
             iterations.append(iteration_record)
 
+        self._iteration_codes = [
+            it["generated_code"] for it in iterations if it.get("generated_code")
+        ]
         self._feature_defs = all_defs
         self._artifacts["iterations"] = iterations
         self._artifacts["feature_definitions"] = [d.model_dump() for d in all_defs]
@@ -271,13 +276,12 @@ class MalmusMethod(BaseMethod):
         )
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        if self.mode == "iterative":
+            return self._transform_via_iteration_codes(X)
         if not self._feature_defs:
             raise RuntimeError("MalmusMethod not fitted yet")
         code = self._defs_to_code(self._feature_defs)
-        try:
-            return self.sandbox.execute(code, X)
-        except Exception as exc:
-            raise EvaluationError(f"Malmus transform failed: {exc}") from exc
+        return self.sandbox.execute(code, X)
 
     @property
     def generated_scripts(self) -> list[str]:

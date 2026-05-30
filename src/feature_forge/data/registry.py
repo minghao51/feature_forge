@@ -60,24 +60,11 @@ class DatasetRegistry:
                 )
                 continue
             self._entry_point_loaders[ep.name] = loader
-            # Attempt to extract metadata by calling the loader once.
-            # If the loader is expensive, this is a one-time cost.
-            try:
-                sample = loader()
-                target = sample.get("target")
-                task = sample.get("metadata", {}).get("task", "classification")
-            except Exception as exc:
-                warnings.warn(
-                    f"Failed to extract metadata from entry-point '{ep.name}': {exc}",
-                    RuntimeWarning,
-                    stacklevel=3,
-                )
-                target = None
-                task = "classification"
             self._datasets[ep.name] = {
                 "source": "entry_point",
-                "target": target,
-                "task": task,
+                "target": None,
+                "task": "classification",
+                "_metadata_resolved": False,
             }
 
     def _load_local_samples(self) -> None:
@@ -107,14 +94,20 @@ class DatasetRegistry:
         return self._datasets[name]
 
     def load(self, name: str) -> dict[str, Any]:
-        """Load a dataset by name.
-
-        Returns:
-            Dict with keys: train, test, target, metadata.
-        """
         self._ensure_entry_points_loaded()
         info = self.info(name)
         if info["source"] == "entry_point":
+            if not info.get("_metadata_resolved", True):
+                loader = self._entry_point_loaders.get(name)
+                if loader is not None:
+                    try:
+                        sample = loader()
+                        info["target"] = sample.get("target")
+                        info["task"] = sample.get("metadata", {}).get("task", "classification")
+                    except Exception:
+                        pass
+                    info["_metadata_resolved"] = True
+                    self._datasets[name] = info
             loader = self._entry_point_loaders.get(name)
             if loader is None:
                 raise ValueError(f"Entry point loader for '{name}' is not available")

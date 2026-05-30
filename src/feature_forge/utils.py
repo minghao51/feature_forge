@@ -34,8 +34,6 @@ class _AsyncBridge:
         loop.close()
 
     def _get_loop(self) -> asyncio.AbstractEventLoop:
-        if self._loop is not None:
-            return self._loop
         with self._lock:
             if self._loop is not None:
                 return self._loop

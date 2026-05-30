@@ -108,14 +108,6 @@ dev = [
     "types-pyyaml>=6.0.12.20260510",
 ]
 
-[project.entry-points."feature_forge.methods.malmas.agents"]
-unary = "feature_forge.methods.malmas.agents.unary:UnaryFeatureAgent"
-cross_compositional = "feature_forge.methods.malmas.agents.cross_compositional:CrossCompositionalAgent"
-aggregation = "feature_forge.methods.malmas.agents.aggregation:AggregationConstructAgent"
-temporal = "feature_forge.methods.malmas.agents.temporal:TemporalFeatureAgent"
-local_transform = "feature_forge.methods.malmas.agents.local_transform:LocalTransformAgent"
-local_pattern = "feature_forge.methods.malmas.agents.local_pattern:LocalPatternAgent"
-
 [project.entry-points."feature_forge.methods"]
 malmas = "feature_forge.methods.malmas.method:MALMASMethod"
 caafe = "feature_forge.methods.caafe.method:CAAFEMethod"

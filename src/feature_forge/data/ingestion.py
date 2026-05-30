@@ -40,12 +40,15 @@ class KaggleFetcher:
                 "kaggle package not installed or not authenticated. Run: uv pip install kaggle"
             ) from exc
 
+        from filelock import FileLock
+
         dataset_path = self.cache_dir / dataset_slug.replace("/", "_")
         dataset_path.mkdir(parents=True, exist_ok=True)
 
-        # Download if not cached
-        if not any(dataset_path.iterdir()):
-            kaggle.api.dataset_download_files(dataset_slug, path=str(dataset_path), unzip=True)
+        lock_path = dataset_path.with_suffix(".lock")
+        with FileLock(str(lock_path)):
+            if not any(dataset_path.iterdir()):
+                kaggle.api.dataset_download_files(dataset_slug, path=str(dataset_path), unzip=True)
 
         # Load CSVs
         result: dict[str, pd.DataFrame] = {}

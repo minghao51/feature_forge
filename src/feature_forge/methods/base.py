@@ -76,9 +76,9 @@ class BaseMethod(ArtifactExporter):
         """Transform data using the fitted method."""
 
     def fit_transform(self, X_train: pd.DataFrame, y_train: pd.Series) -> pd.DataFrame:
-        """Fit and transform training data."""
         self.fit(X_train, y_train)
-        return self.transform(X_train)
+        new_features = self.transform(X_train)
+        return pd.concat([X_train, new_features], axis=1)
 
     def get_artifacts(self) -> dict[str, Any]:
         """Return all collected artifacts."""
@@ -153,8 +153,7 @@ class BaseMethod(ArtifactExporter):
                 logger.warning("transform_step_failed", method=self.name, error=str(exc))
                 if self._should_raise_on_feature_error():
                     raise
-        new_cols = [c for c in result.columns if c not in X.columns]
-        return result[new_cols]
+        return result
 
 
 class MethodRegistry:
@@ -237,3 +236,14 @@ class MethodRegistry:
                 continue
             methods[name] = method_cls
         return methods
+
+    @classmethod
+    def clear_cache(cls) -> None:
+        """Clear cached discovered entry-point methods."""
+        cls._discovered = None
+
+    @classmethod
+    def refresh(cls) -> dict[str, type[BaseMethod]]:
+        """Force re-discovery of entry-point methods."""
+        cls.clear_cache()
+        return cls.get_all_methods()

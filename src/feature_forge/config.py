@@ -142,6 +142,7 @@ class MemoryConfig(BaseModel):
 
     max_size: int = 100
     persistence_dir: str = "memory_files/agent_memories"
+    use_conceptual: bool = False
 
 
 class RetryConfig(BaseModel):
@@ -315,9 +316,11 @@ class Settings(BaseSettings):
         )
 
 
-def get_settings(**overrides: Any) -> Settings:
-    """Get settings with optional overrides.
+_settings_cache: Settings | None = None
 
-    This is the primary way to obtain configuration in the codebase.
-    """
-    return Settings(**overrides)
+
+def get_settings(*, invalidate: bool = False, **overrides: Any) -> Settings:
+    global _settings_cache
+    if _settings_cache is None or invalidate or overrides:
+        _settings_cache = Settings(**overrides)
+    return _settings_cache

@@ -15,7 +15,7 @@ import pandas as pd
 from feature_forge.artifacts.base import ArtifactConfig
 from feature_forge.config import Settings, get_settings
 from feature_forge.evaluation.cv import CVEvaluator
-from feature_forge.evaluation.sandbox import SandboxedExecutor
+from feature_forge.evaluation.kit import EvaluationKit
 from feature_forge.llm.base import LLMClient
 from feature_forge.llm.factory import create_llm_client
 from feature_forge.methods.base import BaseMethod
@@ -60,7 +60,7 @@ class LLMFEMethod(BaseMethod):
         self.n_features = n_features
         self.mode = mode
         self.evaluator = evaluator
-        self.sandbox = SandboxedExecutor.from_evaluator(evaluator)
+        self.sandbox = EvaluationKit.from_settings(settings).sandbox
         self._iteration_codes: list[str] = []
 
     def fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> LLMFEMethod:
@@ -125,17 +125,18 @@ class LLMFEMethod(BaseMethod):
                 kept_features = pd.DataFrame(index=X.index)
                 kept_gains: dict[str, float] = {}
 
-                for col in new_features.columns:
-                    gain = evaluator.evaluate_feature(
+                if new_features.columns.size > 0:
+                    all_gains = evaluator.evaluate_features_batch(
                         X,
                         y,
-                        new_features[[col]],
+                        new_features,
                         baseline_score=baseline_score,
                     )
-                    if gain > 0:
-                        kept_features[col] = new_features[col].values
-                        kept_gains[col] = gain
-                        cumulative_cols.append(col)
+                    for col, gain in all_gains.items():
+                        if gain > 0:
+                            kept_features[col] = new_features[col].values
+                            kept_gains[col] = gain
+                            cumulative_cols.append(col)
 
                 iteration_record["all_new_features"] = self._storage.store(
                     f"llmfe_iter_{i}_all", new_features
