@@ -18,7 +18,7 @@ from typing import Any, ClassVar
 import pandas as pd
 
 from feature_forge.config import Settings
-from feature_forge.exceptions import AgentError
+from feature_forge.exceptions import AgentError, LLMError
 from feature_forge.llm.base import LLMClient
 from feature_forge.methods.malmas.prompts import get_registry
 from feature_forge.methods.malmas.types import AgentName
@@ -167,12 +167,13 @@ class BaseFeatureAgent(Agent):
 
     @staticmethod
     def _column_fingerprint(X: pd.DataFrame) -> str:
-        """Build a lightweight deterministic fingerprint of dataframe values."""
         if X.empty:
             return "empty"
-        sample = X.head(256).copy()
-        # Hash object representation to support mixed dtypes consistently.
-        hashed = pd.util.hash_pandas_object(sample.astype(str), index=True).to_numpy()
+        sample = X.head(256)
+        if all(pd.api.types.is_numeric_dtype(X[c]) for c in X.columns):
+            hashed = pd.util.hash_pandas_object(sample, index=True).to_numpy()
+        else:
+            hashed = pd.util.hash_pandas_object(sample.astype(str), index=True).to_numpy()
         return sha256(hashed.tobytes()).hexdigest()[:16]
 
     @staticmethod
@@ -247,8 +248,11 @@ class BaseFeatureAgent(Agent):
             specs = self._parse_response(response)
             for spec in specs:
                 spec.agent_name = self.name
-        except Exception as exc:
+        except (LLMError, ValueError, json.JSONDecodeError) as exc:
             logger.error("agent_generate_error", agent=self.name, error=str(exc))
+            raise AgentError(f"{self.name} LLM call failed: {exc}") from exc
+        except Exception as exc:
+            logger.exception("agent_generate_unexpected", agent=self.name, error=str(exc))
             raise AgentError(f"{self.name} LLM call failed: {exc}") from exc
         latency_ms = round((time.perf_counter() - gen_t0) * 1000, 1)
         logger.info(
@@ -320,6 +324,20 @@ class BaseFeatureAgent(Agent):
         return specs
 
 
+_AGENT_CLASS_CACHE: dict[str, type[BaseFeatureAgent]] = {}
+
+
+def _make_prompt_agent(name: str, prompt_key: str) -> type[BaseFeatureAgent]:
+    if name not in _AGENT_CLASS_CACHE:
+        doc = f"Auto-generated feature agent for '{name}' transformations."
+        _AGENT_CLASS_CACHE[name] = type(
+            f"_PromptAgent_{name}",
+            (BaseFeatureAgent,),
+            {"prompt_key": prompt_key, "agent_name": name, "__doc__": doc},
+        )
+    return _AGENT_CLASS_CACHE[name]
+
+
 class AgentRegistry:
     """Discover agents via Python entry points.
 
@@ -329,6 +347,8 @@ class AgentRegistry:
 
     ENTRY_POINT_GROUP = "feature_forge.methods.malmas.agents"
 
+    _AGENT_CACHE: ClassVar[dict[str, type[Agent]]] = {}
+
     @classmethod
     def discover(cls) -> dict[str, type[Agent]]:
         """Discover all registered agents from entry points."""
@@ -337,41 +357,30 @@ class AgentRegistry:
             agents[ep.name] = ep.load()
         return agents
 
-    _BUILTIN_AGENT_MODULES: ClassVar[dict[str, str]] = {
-        "unary": "feature_forge.methods.malmas.agents.unary:UnaryFeatureAgent",
-        "cross_compositional": "feature_forge.methods.malmas.agents.cross_compositional:CrossCompositionalAgent",
-        "aggregation": "feature_forge.methods.malmas.agents.aggregation:AggregationConstructAgent",
-        "temporal": "feature_forge.methods.malmas.agents.temporal:TemporalFeatureAgent",
-        "local_transform": "feature_forge.methods.malmas.agents.local_transform:LocalTransformAgent",
-        "local_pattern": "feature_forge.methods.malmas.agents.local_pattern:LocalPatternAgent",
+    _BUILTIN_PROMPT_AGENTS: ClassVar[dict[str, str]] = {
+        "unary": "unary",
+        "cross_compositional": "cross_compositional",
+        "aggregation": "aggregation",
+        "temporal": "temporal",
+        "local_transform": "local_transform",
+        "local_pattern": "local_pattern",
     }
 
     @classmethod
-    def _load_agent(cls, qualified: str) -> type[Agent]:
-        """Import and return an agent class from a ``"module:Class"`` string."""
-        import importlib
-
-        module_path, attr = qualified.rsplit(":", 1)
-        mod = importlib.import_module(module_path)
-        return getattr(mod, attr)  # type: ignore[no-any-return]
-
-    @classmethod
     def get_builtin_agents(cls) -> dict[str, type[Agent]]:
-        """Return built-in agents without entry point discovery."""
-        return {name: cls._load_agent(q) for name, q in cls._BUILTIN_AGENT_MODULES.items()}
+        return {name: cls.get_agent(name) for name in cls._BUILTIN_PROMPT_AGENTS}
 
     @classmethod
     def get_agent(cls, name: str) -> type[Agent]:
-        """Load a single built-in agent by name without importing the rest."""
-        qualified = cls._BUILTIN_AGENT_MODULES.get(name)
-        if qualified is None:
+        if name not in cls._BUILTIN_PROMPT_AGENTS:
             raise ValueError(f"Unknown built-in agent: {name}")
-        return cls._load_agent(qualified)
+        if name not in cls._AGENT_CACHE:
+            cls._AGENT_CACHE[name] = _make_prompt_agent(name, cls._BUILTIN_PROMPT_AGENTS[name])
+        return cls._AGENT_CACHE[name]
 
     @classmethod
     def builtin_agent_names(cls) -> list[str]:
-        """Return names of available built-in agents without importing them."""
-        return list(cls._BUILTIN_AGENT_MODULES.keys())
+        return list(cls._BUILTIN_PROMPT_AGENTS.keys())
 
     @classmethod
     def get_all_agents(cls) -> dict[str, type[Agent]]:
