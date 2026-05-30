@@ -6,6 +6,7 @@ import json
 import time
 from typing import Any
 
+from feature_forge.exceptions import LLMError
 from feature_forge.llm.base import LLMClient
 from feature_forge.methods.malmas.memory.base import AgentMemory
 from feature_forge.methods.malmas.memory.prompts import (
@@ -90,7 +91,7 @@ class ConceptualMemory:
                 max_tokens=1024,
             )
             memory.conceptual_summary = response.content
-        except Exception as exc:
+        except (LLMError, TimeoutError, ConnectionError) as exc:
             logger.warning(
                 "conceptual_summarize_failed",
                 agent=memory.agent_name,
@@ -151,7 +152,7 @@ class ConceptualMemory:
                 max_tokens=1024,
             )
             global_summary = response.content
-        except Exception as exc:
+        except (LLMError, TimeoutError, ConnectionError) as exc:
             logger.warning(
                 "conceptual_global_summarize_failed",
                 error=str(exc)[:200],

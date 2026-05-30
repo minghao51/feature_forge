@@ -27,6 +27,9 @@ class MemoryPersistence:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.chmod(tmp_path, 0o600)
             os.replace(tmp_path, self.memory_path)
         except BaseException:
             try:

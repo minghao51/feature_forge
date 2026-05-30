@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from feature_forge.methods.malmas.memory.persistence import MemoryPersistence
+from feature_forge.methods.malmas.memory.retrieval import retrieve_top_k
 
 
 class AgentMemory:
@@ -209,6 +210,22 @@ class AgentMemory:
             ]
             sections.append("【Operations Attempted】\n" + "\n".join(proc_lines))
         return "\n\n".join(sections)
+
+    def retrieve_relevant(
+        self,
+        current_columns: set[str],
+        current_round: int,
+        top_k: int = 15,
+    ) -> str:
+        all_feedback = [{**fb, "value": fb.get("value", 0)} for fb in self.feedback]
+        ranked = retrieve_top_k(all_feedback, current_columns, current_round, top_k)
+        if not ranked:
+            return self.generate_prompt_section(use_feedback=True)
+        lines = [
+            f"{e['feature_name']} → gain: {e.get('value', 0):.4f} (round {e.get('round_idx', 0)}, cols: {e.get('base_columns', [])})"
+            for e in ranked
+        ]
+        return "【History Feedback (ranked by relevance)】\n" + "\n".join(lines)
 
     # ── Mechanical Statistics ───────────────────────────────────────
 
