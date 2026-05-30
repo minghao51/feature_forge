@@ -19,6 +19,7 @@ from feature_forge.observability.structlog_config import get_logger
 
 if TYPE_CHECKING:
     from feature_forge.config import RetryConfig
+    from feature_forge.llm.cache import DiskCache
 
 logger = get_logger(__name__)
 
@@ -64,6 +65,15 @@ class LLMClient(ABC):
 
     The base class handles logging, timing, token extraction, retry,
     JSON schema injection, and error wrapping.
+
+    Args:
+        model: Model identifier string.
+        api_key: API key (plain string or ``SecretStr``).
+        base_url: Optional override for the provider's base URL.
+        thinking_enabled: Enable extended thinking / reasoning mode.
+        reasoning_effort: Reasoning effort level (e.g. ``"low"``, ``"medium"``, ``"high"``).
+        cache: Optional ``DiskCache`` instance for response caching.
+        tracing_enabled: Whether to enable Langfuse tracing for API calls.
     """
 
     def __init__(
@@ -73,6 +83,8 @@ class LLMClient(ABC):
         base_url: str | None = None,
         thinking_enabled: bool = False,
         reasoning_effort: str = "medium",
+        cache: DiskCache | None = None,
+        tracing_enabled: bool = True,
     ) -> None:
         self.model = model
         self._api_key_secret: SecretStr | None = None
@@ -84,6 +96,8 @@ class LLMClient(ABC):
         self._retry_config: RetryConfig | None = None
         self.thinking_enabled = thinking_enabled
         self.reasoning_effort = reasoning_effort
+        self._cache = cache
+        self._tracing_enabled = tracing_enabled
 
     @property
     def api_key(self) -> str | None:
@@ -208,25 +222,65 @@ class LLMClient(ABC):
             max_tokens=max_tokens,
             json_mode=json_mode,
         )
+
+        cache_key: str | None = None
+        if self._cache is not None and self._cache.enabled and not json_mode:
+            cache_key = self.build_cache_key(messages, temperature, max_tokens, **kwargs)
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                logger.info(
+                    "llm_cache_hit",
+                    provider=self.provider_name,
+                    model=self.model,
+                    cache_key=cache_key[:16],
+                )
+                return LLMResponse(
+                    content=cached["content"],
+                    model=cached.get("model", self.model),
+                    prompt_tokens=cached.get("prompt_tokens", 0),
+                    completion_tokens=cached.get("completion_tokens", 0),
+                    total_tokens=cached.get("total_tokens", 0),
+                )
+
+        logger.info(
+            "llm_cache_miss",
+            provider=self.provider_name,
+            model=self.model,
+            cache_key=cache_key[:16] if cache_key else "none",
+        )
+
         t0 = time.perf_counter()
-        try:
-            raw = await self._call_api(
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                **kwargs,
-            )
-        except LLMError:
-            raise
-        except Exception as exc:
-            logger.error(
-                "llm_error",
-                provider=self.provider_name,
-                model=self.model,
-                json_mode=json_mode,
-                error=str(exc),
-            )
-            raise LLMError(f"{self.provider_name} API error: {exc}") from exc
+
+        async def _call_api_inner() -> Any:
+            try:
+                return await self._call_api(
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    **kwargs,
+                )
+            except LLMError:
+                raise
+            except Exception as exc:
+                logger.error(
+                    "llm_error",
+                    provider=self.provider_name,
+                    model=self.model,
+                    json_mode=json_mode,
+                    error=str(exc),
+                )
+                raise LLMError(f"{self.provider_name} API error: {exc}") from exc
+
+        if self._tracing_enabled:
+            from feature_forge.observability.langfuse_tracer import trace_generation
+
+            @trace_generation(name=f"{self.provider_name}-completion")
+            async def _traced_call() -> Any:
+                return await _call_api_inner()
+
+            raw = await _traced_call()
+        else:
+            raw = await _call_api_inner()
 
         content = self._extract_content(raw)
         reasoning_content = self._extract_reasoning_content(raw)
@@ -245,7 +299,7 @@ class LLMClient(ABC):
             response_preview=content[:200],
         )
 
-        return LLMResponse(
+        response = LLMResponse(
             content=content,
             model=self.model,
             prompt_tokens=prompt_tokens,
@@ -254,6 +308,20 @@ class LLMClient(ABC):
             raw_response=raw,
             reasoning_content=reasoning_content,
         )
+
+        if self._cache is not None and cache_key is not None:
+            self._cache.set(
+                cache_key,
+                {
+                    "content": response.content,
+                    "model": response.model,
+                    "prompt_tokens": response.prompt_tokens,
+                    "completion_tokens": response.completion_tokens,
+                    "total_tokens": response.total_tokens,
+                },
+            )
+
+        return response
 
     async def _do_complete_json(
         self,
@@ -264,10 +332,42 @@ class LLMClient(ABC):
     ) -> JSONValue:
         enhanced = self._inject_json_schema(messages, schema_description)
         json_kwargs = self._json_mode_kwargs()
+
+        if self._cache is not None and self._cache.enabled:
+            cache_key = self.build_cache_key(
+                enhanced, temperature, max_tokens, json_mode=True, **json_kwargs
+            )
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                logger.info(
+                    "llm_cache_hit",
+                    provider=self.provider_name,
+                    model=self.model,
+                    cache_key=cache_key[:16],
+                )
+                return cast(JSONValue, json.loads(cached["content"]))
+
         response = await self._do_complete(
             enhanced, temperature, max_tokens, json_mode=True, **json_kwargs
         )
-        return self._parse_json_response(response.content)
+        parsed = self._parse_json_response(response.content)
+
+        if self._cache is not None and self._cache.enabled:
+            cache_key = self.build_cache_key(
+                enhanced, temperature, max_tokens, json_mode=True, **json_kwargs
+            )
+            self._cache.set(
+                cache_key,
+                {
+                    "content": response.content,
+                    "model": response.model,
+                    "prompt_tokens": response.prompt_tokens,
+                    "completion_tokens": response.completion_tokens,
+                    "total_tokens": response.total_tokens,
+                },
+            )
+
+        return parsed
 
     # ── helpers ─────────────────────────────────────────────────────
 
@@ -319,6 +419,10 @@ class LLMClient(ABC):
             raise LLMError(
                 f"{self.provider_name} returned invalid JSON: {content[:200]}... Parse error: {exc}"
             ) from exc
+
+    def close(self) -> None:
+        if self._cache is not None:
+            self._cache.close()
 
     def build_cache_key(
         self,

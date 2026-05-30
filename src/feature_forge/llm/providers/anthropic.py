@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 try:
     from anthropic import AsyncAnthropic
@@ -12,6 +12,9 @@ except ImportError:
 from feature_forge.exceptions import LLMError
 from feature_forge.llm.base import LLMClient
 from feature_forge.observability.structlog_config import get_logger
+
+if TYPE_CHECKING:
+    from feature_forge.llm.cache import DiskCache
 
 logger = get_logger(__name__)
 
@@ -28,8 +31,16 @@ class AnthropicProvider(LLMClient):
         model: str = "claude-3-5-sonnet-20241022",
         api_key: str | None = None,
         base_url: str | None = None,
+        cache: DiskCache | None = None,
+        tracing_enabled: bool = True,
     ) -> None:
-        super().__init__(model=model, api_key=api_key, base_url=base_url)
+        super().__init__(
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+            cache=cache,
+            tracing_enabled=tracing_enabled,
+        )
         if AsyncAnthropic is None:
             raise LLMError("Anthropic SDK not installed. Run: uv pip install anthropic")
         if not self.api_key:

@@ -8,13 +8,16 @@ Works with any OpenAI-compatible API endpoint, including:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from openai import AsyncOpenAI
 
 from feature_forge.exceptions import LLMError
 from feature_forge.llm.base import LLMClient
 from feature_forge.observability.structlog_config import get_logger
+
+if TYPE_CHECKING:
+    from feature_forge.llm.cache import DiskCache
 
 logger = get_logger(__name__)
 
@@ -31,8 +34,16 @@ class OpenAIProvider(LLMClient):
         model: str = "gpt-4o",
         api_key: str | None = None,
         base_url: str | None = "https://api.openai.com/v1",
+        cache: DiskCache | None = None,
+        tracing_enabled: bool = True,
     ) -> None:
-        super().__init__(model=model, api_key=api_key, base_url=base_url)
+        super().__init__(
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+            cache=cache,
+            tracing_enabled=tracing_enabled,
+        )
         if not self.api_key:
             raise LLMError("OpenAI provider requires an API key")
         self._client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)

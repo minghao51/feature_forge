@@ -7,10 +7,13 @@ provider name, default connection details, and thinking mode support.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from feature_forge.llm.providers.openai import OpenAIProvider
 from feature_forge.observability.structlog_config import get_logger
+
+if TYPE_CHECKING:
+    from feature_forge.llm.cache import DiskCache
 
 logger = get_logger(__name__)
 
@@ -41,11 +44,19 @@ class DeepSeekProvider(OpenAIProvider):
         base_url: str = "https://api.deepseek.com",
         thinking_enabled: bool = False,
         reasoning_effort: str = "medium",
+        cache: DiskCache | None = None,
+        tracing_enabled: bool = True,
     ) -> None:
         import os
 
         api_key = api_key or os.environ.get("DEEPSEEK_API_KEY")
-        super().__init__(model=model, api_key=api_key, base_url=base_url)
+        super().__init__(
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+            cache=cache,
+            tracing_enabled=tracing_enabled,
+        )
         self.thinking_enabled = thinking_enabled
         self.reasoning_effort = reasoning_effort
 

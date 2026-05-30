@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from feature_forge.config import LLMConfig, RetryConfig
     from feature_forge.llm.base import LLMClient
+    from feature_forge.llm.cache import DiskCache
 
 _DEEPSEEK_PREFIXES = ("deepseek",)
 _OPENAI_PREFIXES = ("gpt-", "o1-", "o3-", "o4-")
@@ -38,7 +39,12 @@ def _infer_provider(model: str) -> str:
     return "litellm"
 
 
-def create_llm_client(config: LLMConfig, retry_config: RetryConfig | None = None) -> LLMClient:
+def create_llm_client(
+    config: LLMConfig,
+    retry_config: RetryConfig | None = None,
+    cache: DiskCache | None = None,
+    tracing_enabled: bool = True,
+) -> LLMClient:
     """Create an LLM client from configuration.
 
     When ``config.provider`` is ``"auto"`` (default), the provider is
@@ -65,6 +71,8 @@ def create_llm_client(config: LLMConfig, retry_config: RetryConfig | None = None
         "model": config.model,
         "api_key": api_key,
         "base_url": config.base_url or default_url,
+        "cache": cache,
+        "tracing_enabled": tracing_enabled,
     }
     if provider == "deepseek":
         init_kwargs["thinking_enabled"] = config.thinking_enabled

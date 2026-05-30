@@ -9,7 +9,7 @@ See https://docs.litellm.ai/docs/providers for the full list.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 try:
     import litellm
@@ -19,6 +19,9 @@ except ImportError:
 from feature_forge.exceptions import LLMError
 from feature_forge.llm.base import LLMClient
 from feature_forge.observability.structlog_config import get_logger
+
+if TYPE_CHECKING:
+    from feature_forge.llm.cache import DiskCache
 
 logger = get_logger(__name__)
 
@@ -46,8 +49,16 @@ class LiteLLMProvider(LLMClient):
         api_key: str | None = None,
         base_url: str | None = None,
         provider_env_vars: dict[str, str] | None = None,
+        cache: DiskCache | None = None,
+        tracing_enabled: bool = True,
     ) -> None:
-        super().__init__(model=model, api_key=api_key, base_url=base_url)
+        super().__init__(
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+            cache=cache,
+            tracing_enabled=tracing_enabled,
+        )
         if litellm is None:
             raise LLMError("litellm is not installed. Run: uv pip install litellm")
         self.provider_env_vars = provider_env_vars or {}
