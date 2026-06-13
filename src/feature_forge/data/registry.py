@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.metadata
+import json
 import warnings
 from collections.abc import Callable
 from pathlib import Path
@@ -74,7 +75,7 @@ class DatasetRegistry:
         for meta_path in self.sample_dir.glob("*/metadata.json"):
             name = meta_path.parent.name
             with open(meta_path, encoding="utf-8") as f:
-                meta = __import__("json").load(f)
+                meta = json.load(f)
             self._datasets[name] = {
                 "source": "local",
                 "path": str(meta_path.parent),
@@ -97,20 +98,24 @@ class DatasetRegistry:
         self._ensure_entry_points_loaded()
         info = self.info(name)
         if info["source"] == "entry_point":
-            if not info.get("_metadata_resolved", True):
-                loader = self._entry_point_loaders.get(name)
-                if loader is not None:
-                    try:
-                        sample = loader()
-                        info["target"] = sample.get("target")
-                        info["task"] = sample.get("metadata", {}).get("task", "classification")
-                    except Exception:
-                        pass
-                    info["_metadata_resolved"] = True
-                    self._datasets[name] = info
             loader = self._entry_point_loaders.get(name)
             if loader is None:
                 raise ValueError(f"Entry point loader for '{name}' is not available")
+            if not info.get("_metadata_resolved", True):
+                try:
+                    sample = loader()
+                except Exception as exc:
+                    warnings.warn(
+                        f"Failed to resolve metadata for dataset entry point '{name}': {exc}",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+                    raise
+                info["target"] = sample.get("target")
+                info["task"] = sample.get("metadata", {}).get("task", "classification")
+                info["_metadata_resolved"] = True
+                self._datasets[name] = info
+                return sample
             return loader()
         if info["source"] == "local":
             return self._load_local(info)
@@ -146,11 +151,21 @@ class DatasetRegistry:
         self._datasets[name] = info
 
 
+_DEFAULT_REGISTRY: DatasetRegistry | None = None
+
+
+def _get_default_registry() -> DatasetRegistry:
+    global _DEFAULT_REGISTRY
+    if _DEFAULT_REGISTRY is None:
+        _DEFAULT_REGISTRY = DatasetRegistry()
+    return _DEFAULT_REGISTRY
+
+
 def titanic_loader() -> dict[str, Any]:
     """Load the titanic dataset via the standard registry mechanism."""
-    return DatasetRegistry().load("titanic")
+    return _get_default_registry().load("titanic")
 
 
 def house_prices_loader() -> dict[str, Any]:
     """Load the house_prices dataset via the standard registry mechanism."""
-    return DatasetRegistry().load("house_prices")
+    return _get_default_registry().load("house_prices")

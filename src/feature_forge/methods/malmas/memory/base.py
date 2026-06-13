@@ -29,15 +29,15 @@ class AgentMemory:
         conceptual_summary: Latest LLM-generated conceptual summary.
     """
 
-    def __init__(self, agent_name: str, memory_path: str) -> None:
+    def __init__(self, agent_name: str, memory_path: str, max_size: int = 100) -> None:
         self.agent_name = agent_name
         self._persistence = MemoryPersistence(memory_path)
+        self.max_size = max_size
         self.procedural: list[dict[str, Any]] = []
         self.unused_procedural: list[dict[str, Any]] = []
         self.feedback: list[dict[str, Any]] = []
         self.conceptual: list[str] = []
         self.global_summary: list[str] = []
-        self._max_global_summaries: int = 20
         self.stats: dict[str, Any] = {}
         self.conceptual_summary: str = ""
         self._procedural_names: set[str] = set()
@@ -56,10 +56,32 @@ class AgentMemory:
             self.global_summary = data.get("global_summary", [])
             self.stats = data.get("stats", {})
             self.conceptual_summary = data.get("conceptual_summary", "")
+            self._enforce_limits()
+            self._rebuild_indices()
+
+    def _trim_sequence(self, values: list[Any]) -> bool:
+        if self.max_size <= 0:
+            return False
+        excess = len(values) - self.max_size
+        if excess > 0:
+            del values[:excess]
+            return True
+        return False
+
+    def _enforce_limits(self) -> None:
+        """Apply the configured maximum size to all memory tiers."""
+        trimmed = False
+        trimmed |= self._trim_sequence(self.procedural)
+        trimmed |= self._trim_sequence(self.unused_procedural)
+        trimmed |= self._trim_sequence(self.feedback)
+        self._trim_sequence(self.conceptual)
+        self._trim_sequence(self.global_summary)
+        if trimmed:
             self._rebuild_indices()
 
     def save(self) -> None:
         """Persist current memory state."""
+        self._enforce_limits()
         self._persistence.save(
             {
                 "procedural": self.procedural,
@@ -104,6 +126,8 @@ class AgentMemory:
                 "round_idx": round_idx,
             }
         )
+        if self._trim_sequence(self.procedural):
+            self._rebuild_indices()
 
     def record_unused_procedure(
         self,
@@ -129,6 +153,8 @@ class AgentMemory:
                 "round_idx": round_idx,
             }
         )
+        if self._trim_sequence(self.unused_procedural):
+            self._rebuild_indices()
 
     # ── Feedback Memory ─────────────────────────────────────────────
 
@@ -158,6 +184,8 @@ class AgentMemory:
                 "type": ty,
             }
         )
+        if self._trim_sequence(self.feedback):
+            self._rebuild_indices()
 
     def summarize_feedback(self, top_k: int = 5) -> str:
         """Summarize top-k effective feedback entries."""
@@ -187,9 +215,16 @@ class AgentMemory:
         """Add a conceptual rule if not already present."""
         if rule not in self.conceptual:
             self.conceptual.append(rule)
+            self._trim_sequence(self.conceptual)
+
+    def record_global_summary(self, summary: str) -> None:
+        """Add a global summary while respecting the configured limit."""
+        self.global_summary.append(summary)
+        self._trim_sequence(self.global_summary)
 
     def summarize_conceptual(self) -> str:
         """Return all conceptual rules as a string."""
+        self._trim_sequence(self.conceptual)
         return "\n".join(self.conceptual)
 
     # ── Prompt Context Generation ───────────────────────────────────
@@ -200,6 +235,7 @@ class AgentMemory:
         use_feedback: bool = True,
     ) -> str:
         """Build a memory context string for agent prompts."""
+        self._enforce_limits()
         sections: list[str] = []
         if use_feedback and self.feedback:
             sections.append("【History Feedback】\n" + self.summarize_feedback())
@@ -217,6 +253,7 @@ class AgentMemory:
         current_round: int,
         top_k: int = 15,
     ) -> str:
+        self._enforce_limits()
         all_feedback = [{**fb, "value": fb.get("value", 0)} for fb in self.feedback]
         ranked = retrieve_top_k(all_feedback, current_columns, current_round, top_k)
         if not ranked:
@@ -231,6 +268,7 @@ class AgentMemory:
 
     def compute_stats(self, min_effective: int = 1) -> dict[str, Any]:
         """Compute mechanical statistics from feedback for LLM summarization."""
+        self._enforce_limits()
         effective_transforms: dict[str, int] = {}
         effective_fields: dict[str, int] = {}
         effective_types: dict[str, int] = {}

@@ -388,6 +388,10 @@ class IterativePipeline(BaseIterativePipeline):
             import os
 
             path = os.path.join(self.memory_dir, f"{agent_name}_memory.json")
-            self.memories[agent_name] = AgentMemory(agent_name, path)
+            self.memories[agent_name] = AgentMemory(
+                agent_name,
+                path,
+                max_size=self.config.memory.max_size,
+            )
             logger.debug("agent_memory_initialized", agent=agent_name, path=path)
         return self.memories[agent_name]

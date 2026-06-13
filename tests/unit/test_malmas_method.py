@@ -59,7 +59,7 @@ def test_fit_and_transform_delegate_to_feature_forge() -> None:
     assert "generated_code" in method.get_artifacts()
 
 
-def test_fit_transform_concatenates_input_and_new_features() -> None:
+def test_fit_transform_returns_feature_forge_output_once() -> None:
     X = pd.DataFrame({"a": [1, 2]})
     y = pd.Series([0, 1])
 
@@ -67,5 +67,5 @@ def test_fit_transform_concatenates_input_and_new_features() -> None:
         method = MALMASMethod(config=_settings())
         enhanced = method.fit_transform(X, y)
 
-    assert list(enhanced.columns) == ["a", "f1"]
-    assert enhanced.shape == (2, 2)
+    assert list(enhanced.columns) == ["f1"]
+    assert enhanced.shape == (2, 1)

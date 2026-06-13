@@ -68,6 +68,34 @@ class TestMemoryPersistence:
 
 
 class TestAgentMemory:
+    def test_enforces_max_size_across_tiers(self, tmp_path):
+        path = str(tmp_path / "mem.json")
+        mem = AgentMemory("unary", path, max_size=2)
+
+        for idx in range(4):
+            mem.record_procedure(["a"], "t", f"f{idx}", "num", "d", idx)
+            mem.record_feedback(f"fb{idx}", "auc", float(idx), True, idx, ["a"], "num")
+            mem.record_conceptual(f"rule {idx}")
+            mem.record_global_summary(f"summary {idx}")
+
+        mem.save()
+
+        assert [item["feature_name"] for item in mem.procedural] == ["f2", "f3"]
+        assert [item["feature_name"] for item in mem.feedback] == ["fb2", "fb3"]
+        assert mem.conceptual == ["rule 2", "rule 3"]
+        assert mem.global_summary == ["summary 2", "summary 3"]
+
+    def test_allows_reusing_evicted_feature_names(self, tmp_path):
+        path = str(tmp_path / "mem.json")
+        mem = AgentMemory("unary", path, max_size=2)
+
+        for idx in range(3):
+            mem.record_procedure(["a"], "t", f"f{idx}", "num", "d", idx)
+
+        mem.record_procedure(["a"], "t", "f0", "num", "d", 99)
+
+        assert [item["feature_name"] for item in mem.procedural] == ["f2", "f0"]
+
     def test_record_procedure(self, tmp_path):
         path = str(tmp_path / "mem.json")
         mem = AgentMemory("unary", path)

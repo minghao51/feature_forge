@@ -68,6 +68,32 @@ class TestDatasetRegistryDiscovery:
         assert info["source"] == "kaggle"
 
     @patch("importlib.metadata.entry_points")
+    def test_entry_point_metadata_failure_warns_and_retries(self, mock_entry_points):
+        mock_ep = MagicMock()
+        mock_ep.name = "flaky_dataset"
+        state = {"calls": 0}
+
+        def flaky_loader():
+            state["calls"] += 1
+            if state["calls"] == 1:
+                raise RuntimeError("temporary metadata failure")
+            return {"train": None, "test": None, "target": "y", "metadata": {"task": "regression"}}
+
+        mock_ep.load.return_value = flaky_loader
+        mock_entry_points.return_value = [mock_ep]
+
+        registry = DatasetRegistry(sample_dir="/nonexistent")
+
+        with pytest.warns(RuntimeWarning, match="Failed to resolve metadata"):
+            with pytest.raises(RuntimeError, match="temporary metadata failure"):
+                registry.load("flaky_dataset")
+
+        sample = registry.load("flaky_dataset")
+        assert sample["target"] == "y"
+        assert sample["metadata"]["task"] == "regression"
+        assert state["calls"] == 2
+
+    @patch("importlib.metadata.entry_points")
     def test_entry_point_discovery_empty(self, mock_entry_points):
         mock_entry_points.return_value = []
         registry = DatasetRegistry(sample_dir="/nonexistent")

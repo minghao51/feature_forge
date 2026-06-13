@@ -159,9 +159,7 @@ class ConceptualMemory:
             )
             global_summary = "Failed to generate global summary due to LLM error."
         for memory in memories.values():
-            memory.global_summary.append(global_summary)
-            if len(memory.global_summary) > memory._max_global_summaries:
-                memory.global_summary.pop(0)
+            memory.record_global_summary(global_summary)
         latency_ms = round((time.perf_counter() - global_t0) * 1000, 1)
         logger.info(
             "conceptual_global_summarize_complete",

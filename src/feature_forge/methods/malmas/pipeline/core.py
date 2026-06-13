@@ -462,6 +462,16 @@ class CorePipeline:
         )
         all_code_parts: list[tuple[str, str]] = [r for r in code_gen_results if r is not None]
 
+        # Deduplicate identical generated code so repeated agents do not
+        # pay the sandbox spawn/import cost multiple times in the same round.
+        unique_code_parts: list[tuple[str, str]] = []
+        seen_code: set[str] = set()
+        for agent_name, code in all_code_parts:
+            if code in seen_code:
+                continue
+            seen_code.add(code)
+            unique_code_parts.append((agent_name, code))
+
         sandbox_timeout = self.config.evaluation.sandbox_timeout_seconds
 
         exec_results = await asyncio.gather(
@@ -469,13 +479,13 @@ class CorePipeline:
                 _exec_sandbox(
                     self.sandbox, name, code, X_train, "malmas_core_train", sandbox_timeout
                 )
-                for name, code in all_code_parts
+                for name, code in unique_code_parts
             ]
         )
 
         features_train_parts: list[pd.DataFrame] = []
         combined_code_parts: list[str] = []
-        for (_name, code), result in zip(all_code_parts, exec_results, strict=True):
+        for (_name, code), result in zip(unique_code_parts, exec_results, strict=True):
             if result is not None:
                 features_train_parts.append(result[1])
                 combined_code_parts.append(code)
