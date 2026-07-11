@@ -1,6 +1,6 @@
 # Feature Forge — Current State
 
-Last updated: 2026-05-25
+Last updated: 2026-07-11
 
 ## What's Implemented
 
@@ -19,13 +19,13 @@ Last updated: 2026-05-25
 | Sandboxed code execution (AST validation + process isolation) | Full | N/A |
 | Cross-validation feature evaluation (CVEvaluator) | Full | N/A |
 | LLM provider abstraction (OpenAI, DeepSeek, Anthropic, LiteLLM) | Full | N/A |
-| Disk-backed LLM response cache (DiskCache) | Full | N/A |
+| Disk-backed LLM response cache (DiskCache) | Unwired — `DiskCache` exists but `create_llm_client` never passes `cache=`. Slated for Phase 2.1 wiring (gated by `LLMConfig.cache_responses`). | N/A |
 | Retry with exponential backoff | Full | N/A |
 | Experiment tracking (WandB, MLflow, NoOp) | Full | N/A |
 | Experiment platform (ExperimentalPlatform facade) | Full | N/A |
 | Pydantic-settings config (YAML + env + dotenvx) | Full | N/A |
-| Artifact export (memory/disk/hybrid storage) | Full | N/A |
-| Artifact schema validation (Pydantic) | Full | N/A |
+| Artifact export (ArtifactExporter ABC + DataFrameStorage memory/disk/hybrid) | Full | N/A |
+| Artifact schema validation (Pydantic) | Removed — `ArtifactBundle`/`FeatureMetadata`/`ProvenanceRecord`/`IterationRecord`/`ArtifactConfigSchema` were dead (0 production callers) and have been deleted. | N/A |
 | Structured logging (structlog + OpenTelemetry) | Full | N/A |
 | Langfuse tracing integration | Full | N/A |
 | Dataset registry (Kaggle, local, entry points) | Full | N/A |
@@ -37,7 +37,7 @@ Last updated: 2026-05-25
 
 All files below raise `NotImplementedError` or return 501:
 
-- `src/feature_forge/experiment/execution.py:58` — `ExecutionBackend.run()` base class (intentional ABC; concrete `SequentialExecutionAdapter` and `ProcessPoolExecutionAdapter` exist at lines 61–106)
+- `src/feature_forge/experiment/execution.py` — `ExecutionBackend` is now an `ABC` with `@abstractmethod run()` (no longer raises `NotImplementedError`). Concrete `SequentialExecutionAdapter` and `ProcessPoolExecutionAdapter` implement it.
 - `src/feature_forge/methods/malmas/pipeline/iterative.py:62` — `BaseIterativePipeline._select_agents()` base class (intentional ABC; `IterativePipeline` override at line 274)
 - `src/feature_forge/llm/base.py:123` — `LLMClient._call_api()` (intentional hook; all providers override)
 - `src/feature_forge/llm/base.py:127` — `LLMClient._extract_content()` (intentional hook; all providers override)
@@ -47,45 +47,47 @@ All files below raise `NotImplementedError` or return 501:
 
 | Severity | Issue | Location |
 |----------|-------|----------|
-| Medium | `NoMemoryStaticRouterPipeline._post_round` is an ellipsis body (`...`), silently skipping all post-round logic including `router.update_performance()` — may cause stale router state in ablation experiments | `src/feature_forge/methods/malmas/pipeline/ablations.py:55` |
-| Medium | `MalmusMethod.transform()` reconstructs code from `self._feature_defs` on every call, ignoring the iterative code pipeline used in `fit()` — iterative-mode transform may produce different features than those selected during fit | `src/feature_forge/methods/malmus/method.py:273-280` |
-| Low | `BaseMethod.fit_transform()` calls `self.transform(X_train)` instead of returning `pipeline_result["X_train_enhanced"]` — may not include all accumulated features for iterative methods | `src/feature_forge/methods/base.py:78-81` |
-| Low | `wandb` and `memory_files/` dirs committed to repo root (contain run artifacts from local experiments) | Repo root: `wandb/`, `memory_files/` |
-| Low | `notebooks/memory_files/` duplicates root `memory_files/` — stale copy | `notebooks/memory_files/` |
+| Medium | `NoMemoryStaticRouterPipeline._post_round` is an ellipsis body (`...`), silently skipping all post-round logic including `router.update_performance()` — may cause stale router state in ablation experiments. Intent needs confirming (freeze router state vs typo). | `src/feature_forge/methods/malmas/pipeline/ablations.py:55` |
 
 ## Fixed Issues
 
 | Ref | Issue | Fix |
 |-----|-------|-----|
 | R1 | `complete_json` had no cache/retry support — JSON-mode calls bypassed caching and retry logic, causing redundant API calls on repeated prompts | `LLMClient.complete_json()` now shares cache/retry path with `complete()` via `_do_complete_json` hook in providers (`src/feature_forge/llm/base.py`) |
+| R2 | `BaseMethod.fit_transform()` re-ran `transform` on the training set instead of reusing the enhanced frame, and iterative methods (CAAFE/LLMFE/Malmus) leaked discarded candidate features into transform output | `fit_transform()` now returns cached `pipeline_result["X_train_enhanced"]`; methods track `_kept_features` and `_transform_via_iteration_codes` filters to selected columns only |
+| R3 | `MalmusMethod.transform()` reconstructed code from `self._feature_defs` on every call, ignoring which features were selected during fit | Malmus now regenerates per-iteration code from kept `FeatureDefinition`s only; iterative transform uses the stored code pipeline |
+| R4 | `LLMClient.api_key` property returned plaintext `SecretStr` value, enabling accidental logging | Replaced with explicit `get_api_key()` method; providers + tests updated |
+| R5 | `_sandbox_worker_main` caught only `Exception`, so `MemoryError`/`SystemExit` escaped containment | Widened to `except BaseException` in the worker |
+| R6 | `get_settings()` re-read YAML + env on every call (no caching) | Now backed by `functools.lru_cache(maxsize=1)` via `_get_base_settings()` |
+| R7 | `_column_fingerprint` and per-column stats recomputed on every agent `generate()` call | Added `_fingerprint_cache` and `_column_stats_cache` ClassVars on `BaseFeatureAgent` |
+| R8 | `_baseline_cache_key` hashed full `y_train` values each round | Uses `id(y_train)` instead |
+| R9 | Loky large-matrix guard warned but did not switch backends, risking OOM | Now falls back to the `threading` backend when the matrix is too large |
 
 ## Security Concerns
 
 | Severity | Issue | Location |
 |----------|-------|----------|
 | Medium | Sandbox uses `exec()` in worker process (`src/feature_forge/evaluation/sandbox.py:412`). While AST validation + restricted builtins + process isolation provide defense-in-depth, `exec` of LLM-generated code is inherently risky. Memory limit is best-effort only on macOS. | `src/feature_forge/evaluation/sandbox.py:412` |
-| Low | `api_key` property on `LLMClient` returns plaintext `str` from `SecretStr`, allowing accidental logging. | `src/feature_forge/llm/base.py:89-90` |
+| Low | ~~`api_key` property on `LLMClient` returns plaintext `str` from `SecretStr`, allowing accidental logging.~~ **Fixed (R4):** replaced with `get_api_key()` method. | `src/feature_forge/llm/base.py` |
 | Low | Agent memory JSON files persisted to disk unencrypted. Agent memories contain feature strategies and dataset column info that could leak proprietary feature engineering logic. | `src/feature_forge/methods/malmas/memory/persistence.py:23-36` |
-| Low | `_sandbox_worker_main` catches `BaseException` at line 430 via `except Exception`, but `MemoryError` and `SystemExit` would still propagate in the parent — timeout is the only reliable containment for runaway allocations on macOS | `src/feature_forge/evaluation/sandbox.py:430` |
+| Low | ~~`_sandbox_worker_main` catches `BaseException` at line 430 via `except Exception`...~~ **Fixed (R5):** worker now catches `BaseException`. Timeout remains the only reliable containment for runaway allocations on macOS. | `src/feature_forge/evaluation/sandbox.py:430` |
 
 ## Performance Issues
 
 | Issue | Location |
 |-------|----------|
 | Serial per-column CV evaluation in iterative methods (CAAFE, LLMFE, Malmus) — each new feature is evaluated one at a time against baseline, causing O(n) full CV passes per iteration | `src/feature_forge/methods/caafe/method.py:148-157`, `src/feature_forge/methods/llmfe/method.py:128-137`, `src/feature_forge/methods/malmus/method.py:222-232` |
-| `_column_fingerprint` hashes entire head(256) as strings on every agent `generate()` call — redundant if columns don't change across rounds | `src/feature_forge/methods/malmas/agents/base.py:169-176` |
+| ~~`_column_fingerprint` hashes entire head(256) as strings on every agent `generate()` call~~ **Fixed (R7):** fingerprint + column stats now cached on `BaseFeatureAgent`. | `src/feature_forge/methods/malmas/agents/base.py` |
 | `CorePipeline._evaluate_and_select` uses joblib `Parallel` for feature evaluation but copies full `X_train` to each worker — high memory overhead for wide datasets | `src/feature_forge/methods/malmas/pipeline/core.py:554-559` |
-| `_baseline_cache_key` recomputes `blake2b` hash of entire `X_train` + `y_train` on every round, even though only column additions change — full content hash is unnecessary | `src/feature_forge/methods/malmas/pipeline/core.py:253-263` |
+| ~~`_baseline_cache_key` recomputes `blake2b` hash of entire `X_train` + `y_train` on every round~~ **Fixed (R8):** uses `id(y_train)`. | `src/feature_forge/methods/malmas/pipeline/core.py` |
 
 ## Maintenance Issues
 
 | Issue | Detail |
 |-------|--------|
 | 36 broad `except Exception` handlers across source | Many catch-and-log-all patterns in `src/feature_forge/methods/malmas/pipeline/core.py:73`, `src/feature_forge/evaluation/sandbox.py:381,430`, `src/feature_forge/methods/base.py:152,174`, `src/feature_forge/api.py:74,206`, `src/feature_forge/methods/malmas/agents/base.py:250`, etc. These swallow unexpected errors (e.g., `KeyboardInterrupt` is `BaseException` not `Exception`, but bugs like `KeyError` in internal dicts would be silently logged). |
-| `MALMASFeatureEngineer` backward-compat alias in api.py | `src/feature_forge/api.py:316` — kept for backward compat but undocumented and may confuse new users |
 | Memory unbounded growth in `AgentMemory` | `src/feature_forge/methods/malmas/memory/base.py` — no `max_size` enforcement despite `MemoryConfig.max_size` existing. Procedural, feedback, and conceptual lists grow without limit across rounds. |
-| `Settings` class re-instantiated on every `get_settings()` call | `src/feature_forge/config.py:318-323` — no caching; each call re-reads YAML + env vars. Multiple calls per pipeline run. |
 | `structlog` configured globally on first `get_logger()` call | `src/feature_forge/observability/structlog_config.py:95-100` — `cache_logger_on_first_use=True` means logging config cannot be changed at runtime without process restart |
-| `MetricRegistry._builtin` is a class var shared across all instances | `src/feature_forge/evaluation/metrics.py:102` — `register()` modifies class-level dict, affecting all users of the registry globally |
+| `MetricRegistry._builtin` is a class var shared across all instances | `src/feature_forge/evaluation/metrics.py:102` — `register()` modifies class-level dict, affecting all users of the registry globally. `MetricRegistry.reset()` now restores builtin defaults for test isolation. |
 | `ProcessPoolExecutionAdapter.run` re-raises as `RuntimeError` on worker failure | `src/feature_forge/experiment/execution.py:106` — loses original exception type, making error handling harder for callers |
 | Duplicated `DatasetRegistry` instances in `titanic_loader` / `house_prices_loader` | `src/feature_forge/data/registry.py:156-162` — each call creates a new registry instance and re-discovers entry points |

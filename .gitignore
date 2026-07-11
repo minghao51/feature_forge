@@ -150,3 +150,4 @@ mlruns/
 
 .claude/
 .feature_forge_artifacts/
+.playwright-mcp/

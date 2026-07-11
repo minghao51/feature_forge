@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
@@ -46,16 +47,17 @@ InputT = TypeVar("InputT")
 OutputT = TypeVar("OutputT")
 
 
-class ExecutionBackend:
+class ExecutionBackend(ABC):
     """Interface for case execution backends."""
 
+    @abstractmethod
     def run(
         self,
         cases: list[InputT],
         worker: Callable[[InputT], OutputT],
         progress: bool = True,
     ) -> list[OutputT]:
-        raise NotImplementedError
+        """Execute ``worker`` over ``cases`` and return outputs in order."""
 
 
 class SequentialExecutionAdapter(ExecutionBackend):
