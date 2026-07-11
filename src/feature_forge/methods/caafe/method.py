@@ -189,8 +189,13 @@ class CAAFEMethod(BaseMethod):
             iterations.append(iteration_record)
 
         self._iteration_codes = iteration_codes
+        self._kept_features = cumulative_cols
         self._artifacts["iterations"] = iterations
         self._artifacts["generated_code"] = "\n\n".join(iteration_codes)
+
+        # Cache enhanced training dataframe for fit_transform()
+        X_train_enhanced = self._transform_via_iteration_codes(X_train)
+        self._artifacts["pipeline_result"] = {"X_train_enhanced": X_train_enhanced}
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         if self.variant == "fidelity":

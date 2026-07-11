@@ -66,6 +66,7 @@ class BaseMethod(ArtifactExporter):
         self.name = name
         self._storage = DataFrameStorage(artifact_config or ArtifactConfig())
         self._artifacts: dict[str, Any] = {}
+        self._kept_features: list[str] | None = None
 
     @abstractmethod
     def fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> BaseMethod:
@@ -77,8 +78,10 @@ class BaseMethod(ArtifactExporter):
 
     def fit_transform(self, X_train: pd.DataFrame, y_train: pd.Series) -> pd.DataFrame:
         self.fit(X_train, y_train)
-        new_features = self.transform(X_train)
-        return pd.concat([X_train, new_features], axis=1)
+        pipeline_result = self._artifacts.get("pipeline_result", {})
+        if pipeline_result and "X_train_enhanced" in pipeline_result:
+            return pipeline_result["X_train_enhanced"]  # type: ignore[no-any-return]
+        return self.transform(X_train)
 
     def get_artifacts(self) -> dict[str, Any]:
         """Return all collected artifacts."""
@@ -135,8 +138,8 @@ class BaseMethod(ArtifactExporter):
         )
 
     def _transform_via_iteration_codes(self, X: pd.DataFrame) -> pd.DataFrame:
-        iteration_codes = getattr(self, "_iteration_codes", None)
-        if not iteration_codes:
+        iteration_codes: list[str] = getattr(self, "_iteration_codes", None) or []
+        if self._kept_features is None and not iteration_codes:
             raise RuntimeError(f"{self.name} not fitted yet")
         sandbox = getattr(self, "sandbox", None)
         if sandbox is None or not hasattr(sandbox, "execute"):
@@ -147,6 +150,8 @@ class BaseMethod(ArtifactExporter):
                 sandbox_exec: _FeatureExecutionProtocol = sandbox
                 features = sandbox_exec.execute(code, result)
                 for col in features.columns:
+                    if self._kept_features is not None and col not in self._kept_features:
+                        continue
                     if col not in result.columns:
                         result[col] = features[col].values
             except Exception as exc:
