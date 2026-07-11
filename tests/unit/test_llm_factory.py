@@ -94,4 +94,4 @@ class TestCreateLLMClient:
         secret = SecretStr("sk-secret-value")
         config = LLMConfig(model="deepseek-chat", provider="deepseek", api_key=secret)
         client = create_llm_client(config)
-        assert client.api_key == "sk-secret-value"
+        assert client.get_api_key() == "sk-secret-value"

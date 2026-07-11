@@ -99,8 +99,7 @@ class LLMClient(ABC):
         self._cache = cache
         self._tracing_enabled = tracing_enabled
 
-    @property
-    def api_key(self) -> str | None:
+    def get_api_key(self) -> str | None:
         return self._api_key_secret.get_secret_value() if self._api_key_secret else None
 
     @property

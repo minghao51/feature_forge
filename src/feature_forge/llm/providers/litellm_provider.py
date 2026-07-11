@@ -78,7 +78,7 @@ class LiteLLMProvider(LLMClient):
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
-            "api_key": self.api_key,
+            "api_key": self.get_api_key(),
             "api_base": self.base_url,
             **self.provider_env_vars,
             **kwargs,

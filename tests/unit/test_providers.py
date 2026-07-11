@@ -152,7 +152,7 @@ class TestDeepSeekProvider:
     def test_fallback_to_env_var(self):
         with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "sk-env-key"}):
             provider = DeepSeekProvider()
-            assert provider.api_key == "sk-env-key"
+            assert provider.get_api_key() == "sk-env-key"
 
 
 # ── Anthropic Provider ───────────────────────────────────────────────

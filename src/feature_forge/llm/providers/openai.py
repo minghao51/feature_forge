@@ -44,9 +44,9 @@ class OpenAIProvider(LLMClient):
             cache=cache,
             tracing_enabled=tracing_enabled,
         )
-        if not self.api_key:
-            raise LLMError("OpenAI provider requires an API key")
-        self._client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
+        if not self.get_api_key():
+            raise LLMError("OpenAI API key is required but was not provided.")
+        self._client = AsyncOpenAI(api_key=self.get_api_key(), base_url=self.base_url)
 
     def _json_mode_kwargs(self) -> dict[str, Any]:
         return {"response_format": {"type": "json_object"}}
