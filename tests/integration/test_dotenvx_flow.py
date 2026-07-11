@@ -28,7 +28,7 @@ class TestDotenvxFlow:
         """Save and restore environment variables around each test."""
         import feature_forge.config as _cfg
 
-        _cfg._settings_cache = None
+        _cfg._get_base_settings.cache_clear()
         saved_vars = {
             k: os.environ.get(k)
             for k in [
@@ -47,7 +47,7 @@ class TestDotenvxFlow:
             ]
         }
         yield
-        _cfg._settings_cache = None
+        _cfg._get_base_settings.cache_clear()
         for key, value in saved_vars.items():
             if value is None:
                 os.environ.pop(key, None)

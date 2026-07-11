@@ -42,6 +42,12 @@ class TestMetricRegistry:
         all_metrics = MetricRegistry.get_all()
         assert "test_metric" in all_metrics
 
+    def test_register_and_reset(self):
+        MetricRegistry.register("temp_metric", lambda y, p: 99.0)
+        assert "temp_metric" in MetricRegistry.get_all()
+        MetricRegistry.reset()
+        assert "temp_metric" not in MetricRegistry.get_all()
+
     def test_clear_cache_and_refresh(self):
         MetricRegistry.get_all()
         first = MetricRegistry._discovered

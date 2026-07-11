@@ -156,6 +156,12 @@ class MetricRegistry:
             )
         cls._builtin[name] = fn
 
+    @classmethod
+    def reset(cls) -> None:
+        """Reset programmatically registered metrics and clear discovered cache."""
+        cls._builtin = dict(METRIC_REGISTRY)
+        cls._discovered = None
+
 
 def get_metric(name: str) -> Callable[..., Any]:
     """Get metric function by name (delegates to MetricRegistry)."""

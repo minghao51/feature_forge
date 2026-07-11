@@ -433,7 +433,7 @@ def _sandbox_worker_main(
             except OSError:
                 pass
             raise
-    except Exception as exc:  # pragma: no cover - subprocess path
+    except BaseException as exc:  # pragma: no cover - subprocess path
         response_queue.put(("error", f"Feature generation execution failed: {exc}"))
 
 

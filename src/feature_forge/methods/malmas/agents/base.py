@@ -160,21 +160,37 @@ class BaseFeatureAgent(Agent):
         ]
     ] = OrderedDict()
     _CACHE_MAX_SIZE: ClassVar[int] = 64
+    _fingerprint_cache: ClassVar[dict[tuple[int, int, int], str]] = {}
+    _column_stats_cache: ClassVar[dict[tuple[str, str, int, int], dict[str, Any]]] = {}
 
     @classmethod
     def _clear_cache(cls) -> None:
         cls._column_desc_cache.clear()
+        cls._fingerprint_cache.clear()
+        cls._column_stats_cache.clear()
 
     @staticmethod
     def _column_fingerprint(X: pd.DataFrame) -> str:
         if X.empty:
             return "empty"
+
+        cache_key = (id(X), X.shape[0], X.shape[1])
+        if cache_key in BaseFeatureAgent._fingerprint_cache:
+            return BaseFeatureAgent._fingerprint_cache[cache_key]
+
         sample = X.head(256)
-        if all(pd.api.types.is_numeric_dtype(X[c]) for c in X.columns):
+        try:
             hashed = pd.util.hash_pandas_object(sample, index=True).to_numpy()
-        else:
+        except TypeError:
             hashed = pd.util.hash_pandas_object(sample.astype(str), index=True).to_numpy()
-        return sha256(hashed.tobytes()).hexdigest()[:16]
+
+        fp = sha256(hashed.tobytes()).hexdigest()[:16]
+
+        if len(BaseFeatureAgent._fingerprint_cache) > 64:
+            BaseFeatureAgent._fingerprint_cache.clear()
+
+        BaseFeatureAgent._fingerprint_cache[cache_key] = fp
+        return fp
 
     @staticmethod
     def _infer_column_descriptions(X: pd.DataFrame) -> dict[str, dict[str, Any]]:
@@ -194,6 +210,19 @@ class BaseFeatureAgent(Agent):
         desc: dict[str, dict[str, Any]] = {}
         for col in X.columns:
             col_data = X[col]
+            try:
+                col_hash = pd.util.hash_pandas_object(col_data.head(64), index=True).sum()
+            except TypeError:
+                col_hash = pd.util.hash_pandas_object(
+                    col_data.head(64).astype(str), index=True
+                ).sum()
+            col_key = (col, str(col_data.dtype), len(col_data), int(col_hash))
+
+            cached_col = BaseFeatureAgent._column_stats_cache.get(col_key)
+            if cached_col is not None:
+                desc[col] = cached_col
+                continue
+
             info: dict[str, Any] = {"name": col}
             if pd.api.types.is_numeric_dtype(col_data):
                 info["type"] = "numerical"
@@ -208,6 +237,8 @@ class BaseFeatureAgent(Agent):
                 mode = col_data.mode(dropna=True)
                 info["top"] = str(mode.iloc[0]) if not mode.empty else ""
                 info["missing"] = int(col_data.isna().sum())
+
+            BaseFeatureAgent._column_stats_cache[col_key] = info
             desc[col] = info
 
         BaseFeatureAgent._column_desc_cache[cache_key] = desc

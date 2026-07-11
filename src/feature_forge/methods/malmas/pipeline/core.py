@@ -268,7 +268,7 @@ class CorePipeline:
     def _baseline_cache_key(
         X_train: pd.DataFrame, y_train: pd.Series
     ) -> tuple[frozenset[str], int, int]:
-        return (frozenset(X_train.columns), len(X_train), hash(bytes(y_train.values)))
+        return (frozenset(X_train.columns), len(X_train), id(y_train))
 
     async def run(
         self,
@@ -561,19 +561,22 @@ class CorePipeline:
             if len(candidate_columns) > 1
             else 1
         )
+        backend = self.config.evaluation.feature_eval_backend
         if (
             len(candidate_columns) > 1
-            and self.config.evaluation.feature_eval_backend == "loky"
+            and backend == "loky"
             and X_train.shape[0] * X_train.shape[1] > 2_000_000
         ):
             logger.warning(
-                "feature_eval_backend_loky_large_matrix",
+                "feature_eval_backend_loky_large_matrix_fallback",
                 rows=X_train.shape[0],
                 cols=X_train.shape[1],
                 candidates=len(candidate_columns),
-                hint="Consider evaluation.feature_eval_backend='threading' to reduce IPC overhead",
+                hint="Falling back to threading backend to prevent OOM",
             )
-        eval_results = Parallel(n_jobs=n_jobs, backend=self.config.evaluation.feature_eval_backend)(
+            backend = "threading"
+
+        eval_results = Parallel(n_jobs=n_jobs, backend=backend)(
             delayed(self._eval_single_feature)(
                 self.evaluator, X_train, y_train, features_train[[col]], col, baseline_score
             )

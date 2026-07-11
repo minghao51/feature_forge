@@ -20,6 +20,7 @@ Example:
 
 from __future__ import annotations
 
+import functools
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, SecretStr, field_validator
@@ -316,11 +317,14 @@ class Settings(BaseSettings):
         )
 
 
-_settings_cache: Settings | None = None
+@functools.lru_cache(maxsize=1)
+def _get_base_settings() -> Settings:
+    return Settings()
 
 
 def get_settings(*, invalidate: bool = False, **overrides: Any) -> Settings:
-    global _settings_cache
-    if _settings_cache is None or invalidate or overrides:
-        _settings_cache = Settings(**overrides)
-    return _settings_cache
+    if invalidate:
+        _get_base_settings.cache_clear()
+    if not overrides:
+        return _get_base_settings()
+    return Settings(**overrides)
