@@ -10,16 +10,8 @@ class FeatureForgeError(Exception):
     """Base exception for all feature_forge errors."""
 
 
-class ConfigurationError(FeatureForgeError):
-    """Invalid or missing configuration."""
-
-
 class LLMError(FeatureForgeError):
     """LLM API call failed or returned invalid response."""
-
-
-class FeatureGenerationError(FeatureForgeError):
-    """Feature generation pipeline step failed."""
 
 
 class CodeExecutionError(FeatureForgeError):
@@ -34,16 +26,8 @@ class SandboxTimeoutError(CodeExecutionError):
     """Sandbox worker exceeded execution time budget."""
 
 
-class SandboxWorkerError(CodeExecutionError):
-    """Sandbox worker process failed unexpectedly."""
-
-
 class AgentError(FeatureForgeError):
     """Agent operation failed (e.g., router, memory update)."""
-
-
-class AgentMemoryError(FeatureForgeError):
-    """Memory system operation failed."""
 
 
 class DatasetError(FeatureForgeError):

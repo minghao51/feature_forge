@@ -4,23 +4,11 @@ from __future__ import annotations
 
 import json
 
-import pandas as pd
 import pytest
 from pydantic import ValidationError
 
 from feature_forge.methods.malmas.types import AgentName
-from feature_forge.types import (
-    DatasetName,
-    FeatureSpec,
-    MemoryEntry,
-    MetricName,
-    PromptName,
-    RoundNumber,
-    Seed,
-    T,
-    XType,
-    YType,
-)
+from feature_forge.types import FeatureSpec
 
 
 class TestFeatureSpecConstruction:
@@ -101,43 +89,3 @@ class TestNewTypeAliases:
         name = AgentName("agent-1")
         assert isinstance(name, str)
         assert name == "agent-1"
-
-    def test_dataset_name(self):
-        name = DatasetName("ds-1")
-        assert isinstance(name, str)
-        assert name == "ds-1"
-
-    def test_metric_name(self):
-        name = MetricName("auc")
-        assert isinstance(name, str)
-        assert name == "auc"
-
-    def test_prompt_name(self):
-        name = PromptName("p-1")
-        assert isinstance(name, str)
-        assert name == "p-1"
-
-    def test_seed(self):
-        s = Seed(42)
-        assert isinstance(s, int)
-        assert s == 42
-
-    def test_round_number(self):
-        r = RoundNumber(3)
-        assert isinstance(r, int)
-        assert r == 3
-
-    def test_memory_entry(self):
-        entry: MemoryEntry = {"key": "value", "num": 1}
-        assert isinstance(entry, dict)
-
-
-class TestTypeVariables:
-    def test_t_exists(self):
-        assert T.__name__ == "T"
-
-    def test_xtype_bound(self):
-        assert XType.__bound__ == pd.DataFrame
-
-    def test_ytype_bound(self):
-        assert YType.__bound__ == pd.Series

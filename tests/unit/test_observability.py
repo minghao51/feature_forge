@@ -25,16 +25,6 @@ class TestStructlogConfig:
 
 
 class TestLangfuseTracer:
-    def test_trace_agent_decorator(self):
-        from feature_forge.observability.langfuse_tracer import trace_agent
-
-        @trace_agent(name="test-agent")
-        def dummy_agent():
-            return "ok"
-
-        # Decorator should wrap the function without error
-        assert dummy_agent() == "ok"
-
     def test_trace_generation_decorator(self):
         from feature_forge.observability.langfuse_tracer import trace_generation
 
@@ -43,24 +33,6 @@ class TestLangfuseTracer:
             return "generated"
 
         assert dummy_gen() == "generated"
-
-    def test_trace_tool_decorator(self):
-        from feature_forge.observability.langfuse_tracer import trace_tool
-
-        @trace_tool(name="test-tool")
-        def dummy_tool():
-            return "tool result"
-
-        assert dummy_tool() == "tool result"
-
-    def test_trace_pipeline_decorator(self):
-        from feature_forge.observability.langfuse_tracer import trace_pipeline
-
-        @trace_pipeline(name="test-pipeline")
-        def dummy_pipeline():
-            return "pipeline result"
-
-        assert dummy_pipeline() == "pipeline result"
 
     def test_add_otel_spans_with_active_span(self):
         from opentelemetry import trace
