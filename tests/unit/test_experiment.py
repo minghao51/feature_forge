@@ -3,55 +3,9 @@
 from __future__ import annotations
 
 from feature_forge.experiment import (
-    ExperimentMatrix,
-    ExperimentRunner,
     NoOpTracker,
     Reporter,
 )
-
-
-class TestExperimentMatrix:
-    def test_generate_combinations(self):
-        matrix = ExperimentMatrix().datasets(["titanic"]).seeds([0, 1]).models(["xgb"])
-        configs = matrix.generate()
-        assert len(configs) == 2
-        assert configs[0]["dataset"] == "titanic"
-        assert configs[0]["seed"] == 0
-
-    def test_len(self):
-        matrix = ExperimentMatrix().datasets(["a", "b"]).seeds([0, 1, 2])
-        assert len(matrix) == 6
-
-    def test_empty_params(self):
-        matrix = ExperimentMatrix()
-        assert matrix.generate() == []
-        assert len(matrix) == 0
-
-    def test_methods_with_dict(self):
-        matrix = ExperimentMatrix().datasets(["a"]).methods({"malmus": ["single_shot"]})
-        configs = matrix.generate()
-        assert len(configs) == 1
-        assert configs[0]["method"] == "malmus"
-
-    def test_rounds(self):
-        matrix = ExperimentMatrix().datasets(["a"]).rounds([1, 2]).seeds([42])
-        configs = matrix.generate()
-        assert len(configs) == 2
-        assert configs[0]["n_rounds"] == 1
-        assert configs[1]["n_rounds"] == 2
-
-    def test_add_param(self):
-        matrix = ExperimentMatrix().add_param("custom", ["x", "y"]).seeds([42])
-        configs = matrix.generate()
-        assert len(configs) == 2
-        assert configs[0]["custom"] == "x"
-
-    def test_full_cartesian(self):
-        matrix = (
-            ExperimentMatrix().datasets(["a", "b"]).seeds([0, 1]).models(["xgb", "rf"]).rounds([1])
-        )
-        configs = matrix.generate()
-        assert len(configs) == 8  # 2 * 2 * 2 * 1
 
 
 class TestNoOpTracker:
@@ -96,90 +50,6 @@ class TestNoOpTracker:
     def test_log_artifacts_dict_with_none(self):
         tracker = NoOpTracker(project="test-none")
         tracker.log_artifacts_dict({"nothing": None})
-
-
-class TestExperimentRunner:
-    def test_run_sequential(self):
-        runner = ExperimentRunner()
-        configs = [{"x": 1}, {"x": 2}]
-        results = runner.run(configs, lambda cfg: {"y": cfg["x"] * 2})
-        assert len(results) == 2
-        assert results[0]["y"] == 2
-        assert results[1]["y"] == 4
-
-    def test_run_with_error(self):
-        runner = ExperimentRunner()
-        configs = [{"x": 1}, {"x": 2}]
-
-        def fail_on_2(cfg):
-            if cfg["x"] == 2:
-                raise ValueError("fail")
-            return {"y": cfg["x"]}
-
-        results = runner.run(configs, fail_on_2)
-        assert "error" in results[1]
-        assert results[0]["y"] == 1
-
-
-def _parallel_double(cfg: dict) -> dict:
-    return {"y": cfg["x"] * 2}
-
-
-def _parallel_fail_on_2(cfg: dict) -> dict:
-    if cfg["x"] == 2:
-        raise ValueError("parallel fail")
-    return {"y": cfg["x"]}
-
-
-class TestExperimentRunnerEdgeCases:
-    """Cover ExperimentRunner uncovered paths: tracker, no progress, run_parallel."""
-
-    def test_run_with_tracker(self):
-        from feature_forge.experiment import NoOpTracker
-
-        tracker = NoOpTracker(project="test-runner")
-        runner = ExperimentRunner(tracker=tracker)
-        configs = [{"x": 1}, {"x": 2}]
-        results = runner.run(configs, lambda cfg: {"y": cfg["x"] * 2})
-        assert len(results) == 2
-
-    def test_run_no_progress(self):
-        runner = ExperimentRunner()
-        configs = [{"x": 1}, {"x": 2}]
-        results = runner.run(configs, lambda cfg: {"y": cfg["x"] * 2}, progress=False)
-        assert len(results) == 2
-
-    def test_run_parallel_basic(self):
-        runner = ExperimentRunner()
-        configs = [{"x": 1}, {"x": 2}]
-        results = runner.run_parallel(configs, _parallel_double, max_workers=2, progress=False)
-        assert len(results) == 2
-        scores = {r["x"]: r["y"] for r in results}
-        assert scores[1] == 2
-        assert scores[2] == 4
-
-    def test_run_parallel_with_error(self):
-        configs = [{"x": 1}, {"x": 2}]
-        results = ExperimentRunner().run_parallel(
-            configs, _parallel_fail_on_2, max_workers=2, progress=False
-        )
-        assert "error" in results[1]
-        assert results[0]["y"] == 1
-
-    def test_run_parallel_no_progress(self):
-        runner = ExperimentRunner()
-        configs = [{"x": 1}]
-        results = runner.run_parallel(configs, _parallel_double, max_workers=1, progress=False)
-        assert len(results) == 1
-
-    def test_run_parallel_with_tracker(self):
-        from feature_forge.experiment import NoOpTracker
-
-        tracker = NoOpTracker(project="test-parallel")
-        runner = ExperimentRunner(tracker=tracker, max_workers=1)
-        configs = [{"x": 1}, {"x": 2}]
-        results = runner.run_parallel(configs, _parallel_double, progress=False)
-        assert len(results) == 2
 
 
 class TestReporter:

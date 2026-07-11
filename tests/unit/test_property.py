@@ -21,7 +21,6 @@ from feature_forge.evaluation.metrics import (
     rmse_score,
 )
 from feature_forge.evaluation.sandbox import _to_parquet_safe
-from feature_forge.experiment.matrix import ExperimentMatrix
 from feature_forge.llm.cache import compute_cache_key
 from feature_forge.methods.malmas.memory.base import AgentMemory
 from feature_forge.types import FeatureSpec
@@ -96,52 +95,6 @@ class TestCacheKeyProperties:
         key = compute_cache_key("test", "model", messages, 0.5, 100)
         assert len(key) == 64
         int(key, 16)
-
-
-# ── ExperimentMatrix ───────────────────────────────────────────────────
-
-
-class TestExperimentMatrixProperties:
-    @given(
-        datasets=st.lists(st.text(min_size=1, max_size=10), min_size=1, max_size=5),
-        seeds=st.lists(st.integers(0, 100), min_size=1, max_size=4),
-    )
-    @settings(max_examples=50)
-    def test_len_equals_product(self, datasets, seeds):
-        m = ExperimentMatrix().datasets(datasets).seeds(seeds)
-        assert len(m) == len(datasets) * len(seeds)
-
-    @given(
-        datasets=st.lists(st.text(min_size=1, max_size=5), min_size=1, max_size=3),
-        seeds=st.lists(st.integers(0, 10), min_size=1, max_size=3),
-    )
-    @settings(max_examples=50)
-    def test_generate_size_matches_len(self, datasets, seeds):
-        m = ExperimentMatrix().datasets(datasets).seeds(seeds)
-        configs = m.generate()
-        assert len(configs) == len(m)
-
-    @given(
-        values=st.lists(st.integers(0, 5), min_size=1, max_size=3),
-    )
-    @settings(max_examples=30)
-    def test_empty_matrix_has_len_zero(self, values):
-        m = ExperimentMatrix()
-        assert len(m) == 0
-        assert m.generate() == []
-
-    @given(
-        datasets=st.lists(st.text(min_size=1), min_size=1, max_size=3),
-        seeds=st.lists(st.integers(0, 10), min_size=1, max_size=3),
-        models=st.lists(st.text(min_size=1), min_size=1, max_size=3),
-    )
-    @settings(max_examples=30)
-    def test_generate_contains_all_combinations(self, datasets, seeds, models):
-        m = ExperimentMatrix().datasets(datasets).seeds(seeds).models(models)
-        configs = m.generate()
-        expected = len(datasets) * len(seeds) * len(models)
-        assert len(configs) == expected
-        assert all("dataset" in c and "seed" in c and "model" in c for c in configs)
 
 
 # ── FeatureSpec round-trip ─────────────────────────────────────────────

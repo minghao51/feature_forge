@@ -20,7 +20,6 @@ from feature_forge.evaluation.metrics import (
     rmse_score,
 )
 from feature_forge.evaluation.sandbox import SandboxedExecutor, _to_parquet_safe
-from feature_forge.experiment.matrix import ExperimentMatrix
 from feature_forge.methods.malmas.agents.router import RouterAgent
 from feature_forge.methods.malmas.memory.base import AgentMemory
 from feature_forge.utils import strip_markdown_fences
@@ -199,22 +198,3 @@ class TestStripMarkdownFencesMetamorphic:
         once = strip_markdown_fences(fenced)
         twice = strip_markdown_fences(strip_markdown_fences(fenced))
         assert once == twice
-
-
-# ── ExperimentMatrix completeness ──────────────────────────────────────
-
-
-class TestExperimentMatrixMetamorphic:
-    def test_all_combinations_present(self):
-        datasets = ["a", "b"]
-        seeds = [1, 2, 3]
-        configs = ExperimentMatrix().datasets(datasets).seeds(seeds).generate()
-        for d in datasets:
-            for s in seeds:
-                assert any(c["dataset"] == d and c["seed"] == s for c in configs)
-
-    def test_adding_params_increases_combinations(self):
-        base = ExperimentMatrix().datasets(["a", "b"]).seeds([1])
-        configs1 = base.generate()
-        configs2 = base.models(["xgb", "rf"]).generate()
-        assert len(configs2) == len(configs1) * 2

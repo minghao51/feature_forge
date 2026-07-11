@@ -16,7 +16,6 @@ from feature_forge.config import Settings
 from feature_forge.evaluation.metrics import METRIC_REGISTRY, MetricRegistry
 from feature_forge.evaluation.model_factory import ModelFactory
 from feature_forge.evaluation.sandbox import SandboxedExecutor
-from feature_forge.experiment.matrix import ExperimentMatrix
 from feature_forge.experiment.tracker import ExperimentTracker, NoOpTracker
 from feature_forge.llm.base import LLMClient
 from feature_forge.llm.cache import DiskCache
@@ -207,23 +206,6 @@ class TestDiskCacheContract:
     def test_has_get_set_clear(self):
         for method in ("get", "set", "clear", "close"):
             assert hasattr(DiskCache, method)
-
-
-# ── ExperimentMatrix builder contract ──────────────────────────────────
-
-
-class TestExperimentMatrixContract:
-    def test_builder_returns_self(self):
-        m = ExperimentMatrix()
-        assert m.datasets(["a"]) is m
-        assert m.seeds([1]) is m
-        assert m.models(["xgb"]) is m
-        assert m.add_param("x", [1]) is m
-
-    def test_generate_returns_list_of_dicts(self):
-        configs = ExperimentMatrix().datasets(["a"]).seeds([1]).generate()
-        assert isinstance(configs, list)
-        assert all(isinstance(c, dict) for c in configs)
 
 
 # ── SandboxedExecutor security contract ────────────────────────────────

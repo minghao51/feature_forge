@@ -7,7 +7,6 @@ references within floating-point tolerance.
 from __future__ import annotations
 
 import hashlib
-import itertools
 import json
 
 import numpy as np
@@ -31,7 +30,6 @@ from feature_forge.evaluation.metrics import (
     rmse_score,
 )
 from feature_forge.evaluation.sandbox import SandboxedExecutor
-from feature_forge.experiment.matrix import ExperimentMatrix
 from feature_forge.llm.cache import compute_cache_key
 from feature_forge.utils import strip_markdown_fences
 
@@ -87,30 +85,6 @@ class TestMetricsDifferential:
         ours = r2_score_metric(y_true, y_pred)
         ref = float(r2_score(y_true, y_pred))
         assert ours == pytest.approx(ref, abs=1e-10)
-
-
-# ── ExperimentMatrix vs itertools.product differential ─────────────────
-
-
-class TestExperimentMatrixDifferential:
-    def test_vs_itertools_product(self):
-        datasets = ["titanic", "houses"]
-        seeds = [0, 1, 2]
-        models = ["xgboost", "rf"]
-        ours = ExperimentMatrix().datasets(datasets).seeds(seeds).models(models).generate()
-        keys = ["dataset", "seed", "model"]
-        ref = [
-            dict(zip(keys, combo, strict=True))
-            for combo in itertools.product(datasets, seeds, models)
-        ]
-        assert len(ours) == len(ref)
-        for ref_combo in ref:
-            assert any(
-                c["dataset"] == ref_combo["dataset"]
-                and c["seed"] == ref_combo["seed"]
-                and c["model"] == ref_combo["model"]
-                for c in ours
-            )
 
 
 # ── Sandbox vs direct pandas differential ──────────────────────────────

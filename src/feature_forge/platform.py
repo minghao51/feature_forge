@@ -2,7 +2,7 @@
 
 Provides a one-liner API for running method comparison experiments.
 Wraps DatasetRegistry, MethodRegistry, CVEvaluator, ModelFactory,
-ExperimentRunner, and Reporter.
+ExperimentCaseExecutor, and Reporter.
 """
 
 from __future__ import annotations
