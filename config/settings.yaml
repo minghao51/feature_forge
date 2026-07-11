@@ -7,7 +7,6 @@ metric: "auc"
 n_rounds: 4
 min_effective: 2
 random_state: 42
-verbose: 1
 
 llm:
   model: "deepseek-chat"
@@ -35,5 +34,4 @@ memory:
 
 evaluation:
   cv_folds: 5
-  test_size: 0.4
   feature_eval_backend: "threading"

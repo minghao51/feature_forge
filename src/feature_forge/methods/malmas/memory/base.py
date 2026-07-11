@@ -222,11 +222,6 @@ class AgentMemory:
         self.global_summary.append(summary)
         self._trim_sequence(self.global_summary)
 
-    def summarize_conceptual(self) -> str:
-        """Return all conceptual rules as a string."""
-        self._trim_sequence(self.conceptual)
-        return "\n".join(self.conceptual)
-
     # ── Prompt Context Generation ───────────────────────────────────
 
     def generate_prompt_section(

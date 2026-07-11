@@ -88,18 +88,11 @@ class TestEvaluationConfig:
     def test_default_values(self):
         cfg = EvaluationConfig()
         assert cfg.cv_folds == 5
-        assert cfg.test_size == 0.4
         assert cfg.feature_eval_backend == "threading"
 
     def test_cv_folds_validation(self):
         with pytest.raises(ValidationError, match="cv_folds"):
             EvaluationConfig(cv_folds=1)
-
-    def test_test_size_validation(self):
-        with pytest.raises(ValidationError, match="test_size"):
-            EvaluationConfig(test_size=0.0)
-        with pytest.raises(ValidationError, match="test_size"):
-            EvaluationConfig(test_size=1.0)
 
     def test_feature_eval_backend_validation(self):
         with pytest.raises(ValidationError, match="feature_eval_backend"):

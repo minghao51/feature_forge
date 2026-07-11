@@ -118,20 +118,6 @@ class TestDeepSeekProvider:
         result = provider._extract_content(mock_response)
         assert result == ""
 
-    def test_extract_reasoning_content_present(self):
-        provider = DeepSeekProvider(api_key="sk-test")
-        mock_response = MagicMock()
-        mock_response.choices[0].message.reasoning_content = "thinking step 1"
-        result = provider._extract_reasoning_content(mock_response)
-        assert result == "thinking step 1"
-
-    def test_extract_reasoning_content_none(self):
-        provider = DeepSeekProvider(api_key="sk-test")
-        mock_response = MagicMock()
-        mock_response.choices[0].message.reasoning_content = None
-        result = provider._extract_reasoning_content(mock_response)
-        assert result is None
-
     def test_extract_usage_with_values(self):
         provider = DeepSeekProvider(api_key="sk-test")
         mock_response = MagicMock()

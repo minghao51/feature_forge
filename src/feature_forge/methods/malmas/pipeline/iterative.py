@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pandas as pd
 
@@ -19,9 +19,6 @@ from feature_forge.methods.malmas.pipeline.core import CodeGenerator, CorePipeli
 from feature_forge.methods.malmas.pipeline.result import PipelineResult
 from feature_forge.observability.structlog_config import get_logger
 from feature_forge.types import FeatureSpec
-
-if TYPE_CHECKING:
-    from feature_forge.methods.malmas.memory.conceptual import ConceptualMemory
 
 logger = get_logger(__name__)
 
@@ -275,19 +272,10 @@ class IterativePipeline(BaseIterativePipeline):
             config.memory.persistence_dir or "memory_files/agent_memories"
         )
         self.memories: dict[str, AgentMemory] = {}
-        self._conceptual_memory: ConceptualMemory | None = None
 
     @property
     def _strategy_label(self) -> str:
         return self.router.strategy
-
-    @property
-    def conceptual_memory(self) -> ConceptualMemory:
-        if self._conceptual_memory is None:
-            from feature_forge.methods.malmas.memory.conceptual import ConceptualMemory
-
-            self._conceptual_memory = ConceptualMemory(self.llm_client)
-        return self._conceptual_memory
 
     async def _select_agents(
         self,

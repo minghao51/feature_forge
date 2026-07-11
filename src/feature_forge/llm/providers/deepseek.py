@@ -84,10 +84,6 @@ class DeepSeekProvider(OpenAIProvider):
         message = raw_response.choices[0].message
         return message.content or ""
 
-    def _extract_reasoning_content(self, raw_response: Any) -> str | None:
-        message = raw_response.choices[0].message
-        return getattr(message, "reasoning_content", None)
-
     def _extract_usage(self, raw_response: Any) -> tuple[int, int, int]:
         usage = raw_response.usage
         if usage is None:

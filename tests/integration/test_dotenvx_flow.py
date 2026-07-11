@@ -74,7 +74,6 @@ class TestDotenvxFlow:
             "memory": {"max_size": 100, "persistence_dir": "memory_files/agent_memories"},
             "evaluation": {
                 "cv_folds": 5,
-                "test_size": 0.4,
                 "fail_on_feature_error": False,
                 "fail_on_agent_error": False,
                 "sandbox_timeout_seconds": 5.0,
@@ -158,13 +157,11 @@ class TestDotenvxFlow:
     def test_evaluation_config_from_env(self, clean_env, monkeypatch):
         """Test that evaluation config loads from environment variables."""
         monkeypatch.setenv("FF_EVALUATION__CV_FOLDS", "10")
-        monkeypatch.setenv("FF_EVALUATION__TEST_SIZE", "0.2")
         monkeypatch.setenv("FF_EVALUATION__SANDBOX_TIMEOUT_SECONDS", "10.0")
 
         settings = Settings()
 
         assert settings.evaluation.cv_folds == 10
-        assert settings.evaluation.test_size == 0.2
         assert settings.evaluation.sandbox_timeout_seconds == 10.0
 
     def test_router_config_from_env(self, clean_env, monkeypatch):

@@ -36,16 +36,12 @@ class LLMResponse:
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
         total_tokens: int = 0,
-        raw_response: Any | None = None,
-        reasoning_content: str | None = None,
     ) -> None:
         self.content = content
         self.model = model
         self.prompt_tokens = prompt_tokens
         self.completion_tokens = completion_tokens
         self.total_tokens = total_tokens
-        self.raw_response = raw_response
-        self.reasoning_content = reasoning_content
 
     def __repr__(self) -> str:
         return (
@@ -138,10 +134,6 @@ class LLMClient(ABC):
     def _extract_content(self, raw_response: Any) -> str:
         """Extract text content from the provider's raw response."""
         raise NotImplementedError
-
-    def _extract_reasoning_content(self, raw_response: Any) -> str | None:
-        """Extract reasoning/thinking content if the provider supports it."""
-        return None
 
     def _extract_usage(self, raw_response: Any) -> tuple[int, int, int]:
         """Extract (prompt_tokens, completion_tokens, total_tokens) from raw response."""
@@ -282,7 +274,6 @@ class LLMClient(ABC):
             raw = await _call_api_inner()
 
         content = self._extract_content(raw)
-        reasoning_content = self._extract_reasoning_content(raw)
         prompt_tokens, completion_tokens, total_tokens = self._extract_usage(raw)
         latency_ms = round((time.perf_counter() - t0) * 1000, 1)
 
@@ -304,8 +295,6 @@ class LLMClient(ABC):
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
-            raw_response=raw,
-            reasoning_content=reasoning_content,
         )
 
         if self._cache is not None and cache_key is not None:

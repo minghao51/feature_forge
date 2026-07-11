@@ -143,7 +143,6 @@ class MemoryConfig(BaseModel):
 
     max_size: int = 100
     persistence_dir: str = "memory_files/agent_memories"
-    use_conceptual: bool = False
 
 
 class RetryConfig(BaseModel):
@@ -188,7 +187,6 @@ class EvaluationConfig(BaseModel):
 
     Attributes:
         cv_folds: Number of cross-validation folds.
-        test_size: Fraction of data for test split.
         fail_on_feature_error: Raise on feature evaluation failure instead of logging.
         fail_on_agent_error: Raise on agent generation failure instead of skipping.
         sandbox_timeout_seconds: Max seconds for sandbox worker execution.
@@ -197,7 +195,6 @@ class EvaluationConfig(BaseModel):
     """
 
     cv_folds: int = 5
-    test_size: float = 0.4
     fail_on_feature_error: bool = False
     fail_on_agent_error: bool = False
     sandbox_timeout_seconds: float = 5.0
@@ -211,13 +208,6 @@ class EvaluationConfig(BaseModel):
     def _validate_cv_folds(cls, v: int) -> int:
         if v < 2:
             raise ValueError(f"cv_folds must be >= 2, got {v}")
-        return v
-
-    @field_validator("test_size")
-    @classmethod
-    def _validate_test_size(cls, v: float) -> float:
-        if not 0.0 < v < 1.0:
-            raise ValueError(f"test_size must be in (0, 1), got {v}")
         return v
 
     @field_validator("sandbox_timeout_seconds")
@@ -274,7 +264,6 @@ class Settings(BaseSettings):
     n_rounds: int = 4
     min_effective: int = 2
     random_state: int = 42
-    verbose: int = 1
 
     # Subsystem configs
     llm: LLMConfig = Field(default_factory=LLMConfig)

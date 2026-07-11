@@ -244,12 +244,6 @@ class TestConfigValidators:
         with pytest.raises(ValueError, match="cv_folds"):
             EvaluationConfig(cv_folds=folds)
 
-    @given(test_size=st.floats(0.01, 0.99))
-    @settings(max_examples=20)
-    def test_test_size_valid(self, test_size):
-        cfg = EvaluationConfig(test_size=test_size)
-        assert cfg.test_size == test_size
-
     @given(retries=st.integers(0, 20))
     @settings(max_examples=10)
     def test_max_retries_valid(self, retries):

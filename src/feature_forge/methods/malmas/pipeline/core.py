@@ -261,9 +261,6 @@ class CorePipeline:
         )
         self._baseline_cache: dict[tuple[frozenset[str], int, int], float] = {}
 
-    def clear_baseline_cache(self) -> None:
-        self._baseline_cache.clear()
-
     @staticmethod
     def _baseline_cache_key(
         X_train: pd.DataFrame, y_train: pd.Series
