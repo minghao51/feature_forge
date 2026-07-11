@@ -50,8 +50,17 @@ def create_llm_client(
     When ``config.provider`` is ``"auto"`` (default), the provider is
     inferred from the model name. Otherwise the explicit provider is used.
 
+    When ``cache`` is not explicitly provided and ``config.cache_responses``
+    is true, a :class:`DiskCache` is instantiated automatically so that
+    repeated requests are served from cache.
+
     Only the required provider module is imported.
     """
+    if cache is None and getattr(config, "cache_responses", False):
+        from feature_forge.llm.cache import DiskCache
+
+        cache = DiskCache()
+
     import importlib
 
     provider: str = config.provider

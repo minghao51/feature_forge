@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import SecretStr
 
@@ -95,3 +97,42 @@ class TestCreateLLMClient:
         config = LLMConfig(model="deepseek-chat", provider="deepseek", api_key=secret)
         client = create_llm_client(config)
         assert client.get_api_key() == "sk-secret-value"
+
+    @pytest.mark.llm
+    def test_cache_wired_when_cache_responses_true(self) -> None:
+        from feature_forge.llm.cache import DiskCache
+
+        config = LLMConfig(
+            model="deepseek-chat",
+            provider="deepseek",
+            api_key=SecretStr("sk-test"),
+            cache_responses=True,
+        )
+        client = create_llm_client(config)
+        assert isinstance(client._cache, DiskCache)
+        assert client._cache.enabled is True
+
+    @pytest.mark.llm
+    def test_cache_not_wired_when_cache_responses_false(self) -> None:
+        config = LLMConfig(
+            model="deepseek-chat",
+            provider="deepseek",
+            api_key=SecretStr("sk-test"),
+            cache_responses=False,
+        )
+        client = create_llm_client(config)
+        assert client._cache is None
+
+    @pytest.mark.llm
+    def test_explicit_cache_overrides_config(self, tmp_path: Path) -> None:
+        from feature_forge.llm.cache import DiskCache
+
+        explicit = DiskCache(cache_dir=str(tmp_path / "explicit"), enabled=False)
+        config = LLMConfig(
+            model="deepseek-chat",
+            provider="deepseek",
+            api_key=SecretStr("sk-test"),
+            cache_responses=True,
+        )
+        client = create_llm_client(config, cache=explicit)
+        assert client._cache is explicit

@@ -19,7 +19,7 @@ Last updated: 2026-07-11
 | Sandboxed code execution (AST validation + process isolation) | Full | N/A |
 | Cross-validation feature evaluation (CVEvaluator) | Full | N/A |
 | LLM provider abstraction (OpenAI, DeepSeek, Anthropic, LiteLLM) | Full | N/A |
-| Disk-backed LLM response cache (DiskCache) | Unwired — `DiskCache` exists but `create_llm_client` never passes `cache=`. Slated for Phase 2.1 wiring (gated by `LLMConfig.cache_responses`). | N/A |
+| Disk-backed LLM response cache (DiskCache) | Full | N/A |
 | Retry with exponential backoff | Full | N/A |
 | Experiment tracking (WandB, MLflow, NoOp) | Full | N/A |
 | Experiment platform (ExperimentalPlatform facade) | Full | N/A |
@@ -62,6 +62,7 @@ All files below raise `NotImplementedError` or return 501:
 | R7 | `_column_fingerprint` and per-column stats recomputed on every agent `generate()` call | Added `_fingerprint_cache` and `_column_stats_cache` ClassVars on `BaseFeatureAgent` |
 | R8 | `_baseline_cache_key` hashed full `y_train` values each round | Uses `id(y_train)` instead |
 | R9 | Loky large-matrix guard warned but did not switch backends, risking OOM | Now falls back to the `threading` backend when the matrix is too large |
+| R10 | `DiskCache` was fully implemented but never instantiated — `create_llm_client` always passed `cache=None`, so the cache hit/miss branches in `LLMClient` were unreachable and repeated LLM calls re-hit the API | `create_llm_client` now auto-instantiates `DiskCache()` when `cache` is unset and `LLMConfig.cache_responses` is true (default ON); explicit `cache=` still overrides (`src/feature_forge/llm/factory.py`) |
 
 ## Security Concerns
 
