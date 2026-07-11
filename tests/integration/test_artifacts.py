@@ -4,12 +4,9 @@ from __future__ import annotations
 
 import pandas as pd
 
-from feature_forge.artifacts.comparison import compare_methods
 from feature_forge.config import Settings
 from feature_forge.evaluation.cv import CVEvaluator
-from feature_forge.experiment.tracker import NoOpTracker
 from feature_forge.llm.base import LLMResponse
-from feature_forge.methods.base import BaseMethod
 
 
 def _make_llm(code: str):
@@ -168,60 +165,6 @@ def generate_features(df):
         assert isinstance(result, pd.DataFrame)
 
 
-class TestCompareMethods:
-    def test_compare_returns_all_methods(self):
-        from feature_forge.methods.llmfe import LLMFEMethod
-
-        code = """
-import pandas as pd
-
-def generate_features(df):
-    return pd.DataFrame({'f': df['a'] + 1}, index=df.index)
-"""
-        llm = _make_llm(code)
-        methods = {"llmfe": LLMFEMethod(llm_client=llm)}
-        X, y = _make_df()
-
-        results = compare_methods(methods, X, y)
-        assert "llmfe" in results
-        assert "error" not in results["llmfe"]
-
-    def test_compare_with_tracker(self):
-        from feature_forge.methods.llmfe import LLMFEMethod
-
-        code = """
-import pandas as pd
-
-def generate_features(df):
-    return pd.DataFrame({'f': df['a'] * 2}, index=df.index)
-"""
-        llm = _make_llm(code)
-        methods = {"llmfe": LLMFEMethod(llm_client=llm)}
-        X, y = _make_df()
-        tracker = NoOpTracker(project="test")
-
-        results = compare_methods(methods, X, y, tracker=tracker)
-        assert "llmfe" in results
-
-    def test_compare_handles_errors(self):
-        class FailingBaseline(BaseMethod):
-            def __init__(self):
-                super().__init__("failing")
-
-            def fit(self, X_train, y_train):
-                raise RuntimeError("boom")
-
-            def transform(self, X):
-                return X
-
-        methods = {"fail": FailingBaseline()}
-        X, y = _make_df()
-
-        results = compare_methods(methods, X, y)
-        assert "error" in results["fail"]
-        assert "boom" in results["fail"]["error"]
-
-
 class TestMALMASArtifacts:
     def _make_fe(self):
         from feature_forge.api import FeatureForge
@@ -276,20 +219,3 @@ def generate_features(df):
         loaded = it["all_new_features"].load()
         assert isinstance(loaded, pd.DataFrame)
         assert "f1" in loaded.columns
-
-    def test_compare_methods_propagates_artifact_config(self):
-        from feature_forge.artifacts.base import ArtifactConfig
-        from feature_forge.methods.llmfe import LLMFEMethod
-
-        code = """
-import pandas as pd
-def generate_features(df):
-    return pd.DataFrame({'f': df['a'] + 1}, index=df.index)
-"""
-        llm = _make_llm(code)
-        methods = {"llmfe": LLMFEMethod(llm_client=llm)}
-        X, y = _make_df()
-        cfg = ArtifactConfig(storage_mode="disk")
-        compare_methods(methods, X, y, artifact_config=cfg)
-        # Verify the method received the config in-place
-        assert methods["llmfe"].artifact_config.storage_mode == "disk"

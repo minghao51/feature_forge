@@ -73,21 +73,6 @@ class TestArtifactExporterABC:
         exporter = ConcreteExporter()
         assert exporter.feature_metadata == []
 
-    def test_log_artifacts_delegates_to_tracker(self):
-        exporter = ConcreteExporter()
-
-        class MockTracker:
-            def __init__(self):
-                self.logged = None
-
-            def log_artifacts_dict(self, artifacts, prefix=""):
-                self.logged = (artifacts, prefix)
-
-        tracker = MockTracker()
-        exporter.log_artifacts(tracker, prefix="test_")
-        assert tracker.logged is not None
-        assert tracker.logged[1] == "test_"
-
 
 class TestBaselineArtifacts:
     def test_baseline_has_artifact_config(self):

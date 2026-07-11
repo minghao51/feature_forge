@@ -262,7 +262,7 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
         """Build structured provenance records for each selected feature.
 
         Returns:
-            List of ProvenanceRecord-compatible dicts.
+            List of provenance dicts, one per selected feature.
         """
         if not self.pipeline_result:
             return []
@@ -324,7 +324,3 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
         artifacts["provenance"] = self.provenance_records
         artifacts["transform_failures"] = self.transform_failures
         return artifacts
-
-
-MALMASFeatureEngineer = FeatureForge
-"""Backwards-compatible alias. Use :class:`FeatureForge` in new code."""
