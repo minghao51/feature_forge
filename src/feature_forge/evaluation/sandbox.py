@@ -32,6 +32,28 @@ from feature_forge.observability.structlog_config import get_logger
 
 logger = get_logger(__name__)
 
+BANNED_IMPORTS: set[str] = {
+    "os",
+    "sys",
+    "subprocess",
+    "shutil",
+    "socket",
+    "requests",
+    "urllib",
+    "http",
+    "ftplib",
+    "telnetlib",
+    "pickle",
+    "ctypes",
+}
+"""Canonical denylist of import roots blocked during code validation.
+
+This is the single source of truth for the pre-execution AST check in
+:mod:`feature_forge.methods.malmas.pipeline.codegen` and any other caller.
+The runtime enforcement seam is :class:`SandboxedExecutor` (which uses the
+stricter allowlist ``ALLOWED_IMPORTS`` = {pandas, numpy, math}).
+"""
+
 
 def _to_parquet_safe(df: pd.DataFrame) -> pd.DataFrame:
     """Convert DataFrame columns to parquet-serializable types.

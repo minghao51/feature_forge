@@ -15,7 +15,8 @@ from feature_forge.llm.base import LLMClient
 from feature_forge.methods.malmas.agents.base import Agent, AgentRegistry
 from feature_forge.methods.malmas.agents.router import RouterAgent
 from feature_forge.methods.malmas.memory.base import AgentMemory
-from feature_forge.methods.malmas.pipeline.core import CodeGenerator, CorePipeline
+from feature_forge.methods.malmas.pipeline.codegen import CodeGenerator
+from feature_forge.methods.malmas.pipeline.core import CorePipeline
 from feature_forge.methods.malmas.pipeline.result import PipelineResult
 from feature_forge.observability.structlog_config import get_logger
 from feature_forge.types import FeatureSpec

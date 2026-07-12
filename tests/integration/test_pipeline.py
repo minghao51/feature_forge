@@ -16,7 +16,8 @@ from feature_forge.methods.malmas.pipeline.ablations import (
     NoRouterPipeline,
     SingleAgentPipeline,
 )
-from feature_forge.methods.malmas.pipeline.core import CodeGenerator, CorePipeline
+from feature_forge.methods.malmas.pipeline.codegen import CodeGenerator
+from feature_forge.methods.malmas.pipeline.core import CorePipeline
 from feature_forge.methods.malmas.pipeline.iterative import IterativePipeline
 from feature_forge.methods.malmas.pipeline.result import PipelineResult
 
