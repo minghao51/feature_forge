@@ -5,13 +5,16 @@ from __future__ import annotations
 import importlib.metadata
 import warnings
 from abc import abstractmethod
-from typing import Any, ClassVar, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
 
 import pandas as pd
 
 from feature_forge.artifacts.base import ArtifactConfig, ArtifactExporter
 from feature_forge.artifacts.storage import DataFrameStorage
 from feature_forge.observability.structlog_config import get_logger
+
+if TYPE_CHECKING:
+    from feature_forge.evaluation.cv import CVEvaluator
 
 logger = get_logger(__name__)
 
@@ -136,6 +139,58 @@ class BaseMethod(ArtifactExporter):
             and self.evaluator is not None
             and self.evaluator.config.evaluation.fail_on_feature_error
         )
+
+    def _evaluate_and_select(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        new_features: pd.DataFrame,
+        evaluator: CVEvaluator,
+        baseline_score: float,
+        cumulative_cols: list[str],
+    ) -> tuple[pd.DataFrame, dict[str, float]]:
+        """Evaluate ``new_features`` against baseline; keep those with positive gain.
+
+        Appends kept column names to ``cumulative_cols`` in place.
+
+        Returns:
+            ``(kept_features, kept_gains)`` — the kept columns as a DataFrame
+            (indexed like ``X``) and a mapping of kept column → gain.
+        """
+        kept_features = pd.DataFrame(index=X.index)
+        kept_gains: dict[str, float] = {}
+        if new_features.columns.size > 0:
+            all_gains = evaluator.evaluate_features_batch(
+                X, y, new_features, baseline_score=baseline_score
+            )
+            for col, gain in all_gains.items():
+                if gain > 0:
+                    kept_features[col] = new_features[col].values
+                    kept_gains[col] = gain
+                    cumulative_cols.append(col)
+        return kept_features, kept_gains
+
+    def _finalize_iterative_fit(
+        self,
+        X_train: pd.DataFrame,
+        iterations: list[dict[str, Any]],
+        cumulative_cols: list[str],
+        iteration_codes: list[str],
+    ) -> pd.DataFrame:
+        """Finalize an iterative fit: persist state, artifacts, and the enhanced frame.
+
+        Sets ``_iteration_codes`` / ``_kept_features``, stores the ``iterations``
+        and ``generated_code`` artifacts, caches ``X_train_enhanced`` under
+        ``pipeline_result`` (consumed by ``fit_transform``), and returns the
+        enhanced frame.
+        """
+        self._iteration_codes = iteration_codes
+        self._kept_features = cumulative_cols
+        self._artifacts["iterations"] = iterations
+        self._artifacts["generated_code"] = "\n\n".join(iteration_codes)
+        X_train_enhanced = self._transform_via_iteration_codes(X_train)
+        self._artifacts["pipeline_result"] = {"X_train_enhanced": X_train_enhanced}
+        return X_train_enhanced
 
     def _transform_via_iteration_codes(self, X: pd.DataFrame) -> pd.DataFrame:
         iteration_codes: list[str] = getattr(self, "_iteration_codes", None) or []

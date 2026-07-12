@@ -217,29 +217,23 @@ class MalmusMethod(BaseMethod):
                 iteration_record["feature_definitions"] = [f.model_dump() for f in parsed.features]
 
                 new_features = self.sandbox.execute(eval_code_block, X)
-                kept_features = pd.DataFrame(index=X.index)
-                kept_gains: dict[str, float] = {}
+                kept_features, kept_gains = self._evaluate_and_select(
+                    X,
+                    y,
+                    new_features,
+                    evaluator,
+                    baseline_score,
+                    cumulative_cols,
+                )
                 kept_this_round: list[FeatureDefinition] = []
-
-                if new_features.columns.size > 0:
-                    all_gains = evaluator.evaluate_features_batch(
-                        X,
-                        y,
-                        new_features,
-                        baseline_score=baseline_score,
+                for col in kept_gains:
+                    matching_def = next(
+                        (d for d in parsed.features if d.name == col),
+                        None,
                     )
-                    for col, gain in all_gains.items():
-                        if gain > 0:
-                            kept_features[col] = new_features[col].values
-                            kept_gains[col] = gain
-                            cumulative_cols.append(col)
-                            matching_def = next(
-                                (d for d in parsed.features if d.name == col),
-                                None,
-                            )
-                            if matching_def:
-                                all_defs.append(matching_def)
-                                kept_this_round.append(matching_def)
+                    if matching_def:
+                        all_defs.append(matching_def)
+                        kept_this_round.append(matching_def)
 
                 # Generate code containing ONLY the kept features for this iteration
                 code_block = self._defs_to_code(kept_this_round) if kept_this_round else ""
@@ -271,20 +265,10 @@ class MalmusMethod(BaseMethod):
 
             iterations.append(iteration_record)
 
-        self._iteration_codes = [
-            it["generated_code"] for it in iterations if it.get("generated_code")
-        ]
-        self._kept_features = cumulative_cols
+        filtered_codes = [it["generated_code"] for it in iterations if it.get("generated_code")]
         self._feature_defs = all_defs
-        self._artifacts["iterations"] = iterations
         self._artifacts["feature_definitions"] = [d.model_dump() for d in all_defs]
-        self._artifacts["generated_code"] = "\n\n".join(
-            it.get("generated_code", "") for it in iterations if it.get("generated_code")
-        )
-
-        # Cache enhanced training dataframe for fit_transform()
-        X_train_enhanced = self._transform_via_iteration_codes(X)
-        self._artifacts["pipeline_result"] = {"X_train_enhanced": X_train_enhanced}
+        self._finalize_iterative_fit(X, iterations, cumulative_cols, filtered_codes)
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         if self.mode == "iterative":

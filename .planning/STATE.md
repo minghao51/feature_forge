@@ -50,6 +50,7 @@ None currently open.
 | Ref | Issue | Resolution |
 |-----|-------|------------|
 | R12 | `NoMemoryStaticRouterPipeline._post_round` was flagged as a possible bug (ellipsis body skipping `router.update_performance()`) | **Not a bug — intentional ablation.** Body is `pass` (not `...`); class docstring documents "keeps router performance state fixed across rounds"; `test_no_memory_static_router_does_not_update_router_performance` (`tests/integration/test_pipeline.py:500`) asserts router performance is unchanged across rounds |
+| R13 | The per-column keep/gain loop and the iterative-fit tail (set state + cache `X_train_enhanced`) were verbatim-duplicated across `caafe`/`llmfe`/`malmus` (~25 LOC × 3), so a fix in one could drift from the others | Extracted `_evaluate_and_select` and `_finalize_iterative_fit` onto `BaseMethod` (alongside the existing `_transform_via_iteration_codes`); the three iterative methods now call them, removing ~62 LOC of duplication (`src/feature_forge/methods/base.py`) |
 
 ## Fixed Issues
 

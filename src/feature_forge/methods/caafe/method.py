@@ -147,21 +147,14 @@ class CAAFEMethod(BaseMethod):
 
             try:
                 new_features = self.sandbox.execute(code_block, X_train)
-                kept_features = pd.DataFrame(index=X_train.index)
-                kept_gains: dict[str, float] = {}
-
-                if new_features.columns.size > 0:
-                    all_gains = evaluator.evaluate_features_batch(
-                        X_train,
-                        y_train,
-                        new_features,
-                        baseline_score=baseline_score,
-                    )
-                    for col, gain in all_gains.items():
-                        if gain > 0:
-                            kept_features[col] = new_features[col].values
-                            kept_gains[col] = gain
-                            cumulative_cols.append(col)
+                kept_features, kept_gains = self._evaluate_and_select(
+                    X_train,
+                    y_train,
+                    new_features,
+                    evaluator,
+                    baseline_score,
+                    cumulative_cols,
+                )
 
                 iteration_record["all_new_features"] = self._storage.store(
                     f"caafe_iter_{i}_all", new_features
@@ -188,14 +181,7 @@ class CAAFEMethod(BaseMethod):
             iteration_codes.append(code_block)
             iterations.append(iteration_record)
 
-        self._iteration_codes = iteration_codes
-        self._kept_features = cumulative_cols
-        self._artifacts["iterations"] = iterations
-        self._artifacts["generated_code"] = "\n\n".join(iteration_codes)
-
-        # Cache enhanced training dataframe for fit_transform()
-        X_train_enhanced = self._transform_via_iteration_codes(X_train)
-        self._artifacts["pipeline_result"] = {"X_train_enhanced": X_train_enhanced}
+        self._finalize_iterative_fit(X_train, iterations, cumulative_cols, iteration_codes)
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         if self.variant == "fidelity":
