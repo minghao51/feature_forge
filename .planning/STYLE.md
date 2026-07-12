@@ -22,7 +22,9 @@ src/feature_forge/              # Main package
         router.py               # RouterAgent
         unary.py                # UnaryFeatureAgent (example thin subclass)
       pipeline/                 # Core → Iterative + ablation variants
-        core.py                 # CorePipeline (single-round)
+        core.py                 # CorePipeline (single-round orchestration)
+        codegen.py              # CodeGenerator + _validate_code_ast
+        result.py               # PipelineResult dataclass
         iterative.py            # BaseIterativePipeline → IterativePipeline
         ablations.py            # NoMemoryPipeline, SingleAgentPipeline, etc.
       memory/                   # 3-tier memory (procedural, feedback, conceptual)
@@ -40,29 +42,26 @@ src/feature_forge/              # Main package
     providers/                  # DeepSeek, OpenAI, Anthropic, LiteLLM
   evaluation/                   # Model evaluation
     cv.py                       # CVEvaluator (k-fold cross-validation)
-    sandbox.py                  # SandboxedExecutor (AST validation + subprocess)
+    sandbox.py                  # SandboxedExecutor + BANNED_IMPORTS policy
     metrics.py                  # Metric functions + MetricRegistry
     model_factory.py            # Model factories + ModelRegistry
   data/                         # Dataset management
     registry.py                 # DatasetRegistry (entry-point + Kaggle + local)
     ingestion.py                # Data loading and validation
   experiment/                   # Experiment harness
-    runner.py                   # ExperimentRunner
-    tracker.py                  # ExperimentTracker + NoOpTracker
+    tracker.py                  # ExperimentTracker ABC + NoOpTracker
+    wandb_backend.py            # WandBTracker
+    mlflow_backend.py           # MLflowTracker
+    factory.py                  # create_tracker_from_config()
     reporter.py                 # Markdown report generation
-    matrix.py                   # ExperimentMatrix (cartesian product)
     case_executor.py            # ExperimentCaseExecutor
     execution.py                # Sequential + ProcessPool adapters
   observability/                # Logging and tracing
     structlog_config.py         # structlog setup (TTY pretty / JSON)
     langfuse_tracer.py          # Langfuse integration
-  artifacts/                    # Artifact storage and comparison
+  artifacts/                    # Artifact storage
     base.py                     # ArtifactExporter ABC, ArtifactConfig
     storage.py                  # DataFrameStorage (memory/disk/hybrid)
-    schema.py                   # Pydantic schemas for artifact validation
-    comparison.py               # Method comparison artifacts
-    diff.py                     # Artifact diffing
-    dashboard.py                # Dashboard generation
 
 config/                         # Non-secret configuration
   settings.yaml                 # Default settings (committed in plaintext)

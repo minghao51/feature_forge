@@ -38,7 +38,7 @@ Layered: **Plugin-registry pattern with entry points for methods, agents, metric
 |-------|----------|---------|
 | Public API (sklearn) | `src/feature_forge/api.py` | `FeatureForge(BaseEstimator, TransformerMixin)` — fit/transform with pipeline dispatch |
 | Platform API | `src/feature_forge/platform.py` | `ExperimentalPlatform` facade — method comparison with cartesian matrix |
-| Experiment harness | `src/feature_forge/experiment/` | `ExperimentMatrix` → `ExperimentRunner` → `CaseExecutor` — sequential or process-pool |
+| Experiment harness | `src/feature_forge/experiment/` | `ExperimentalPlatform` → `ExperimentCaseExecutor` — sequential or process-pool; tracker via `create_tracker_from_config` |
 | Methods (plugin registry) | `src/feature_forge/methods/` | `BaseMethod` + `MethodRegistry` (entry-point discovery) — 5 methods |
 | MALMAS agents | `src/feature_forge/methods/malmas/agents/` | 6 specialized agents + `RouterAgent` — entry-point pluggable |
 | MALMAS pipeline | `src/feature_forge/methods/malmas/pipeline/` | `CorePipeline` (single-round) → `IterativePipeline` (multi-round with router/memory) |
@@ -48,7 +48,7 @@ Layered: **Plugin-registry pattern with entry points for methods, agents, metric
 | Evaluation | `src/feature_forge/evaluation/` | `CVEvaluator` (k-fold) + `SandboxedExecutor` (AST validation + subprocess worker) |
 | Data loading | `src/feature_forge/data/` | `DatasetRegistry` (entry-point) + `ingestion` — titanic, house_prices built-in |
 | Observability | `src/feature_forge/observability/` | structlog config + Langfuse tracer |
-| Artifacts | `src/feature_forge/artifacts/` | `ArtifactExporter` base + storage/comparison/diff/dashboard |
+| Artifacts | `src/feature_forge/artifacts/` | `ArtifactExporter` base + `DataFrameStorage` (memory/disk/hybrid) |
 | Configuration | `src/feature_forge/config.py` | `Settings(BaseSettings)` — YAML → env (`FF_*`) → .env (dotenvx) |
 | Types | `src/feature_forge/types.py` | `FeatureSpec`, `DatasetName`, `MetricName`, newtypes |
 
@@ -139,7 +139,7 @@ No user authentication. All auth is API-key-based for external services: LLM pro
 | `FF_LLM__PROVIDER` | llm | `auto`, `deepseek`, `openai`, `anthropic`, `litellm` |
 | `FF_LLM__TEMPERATURE` | llm | Sampling temperature |
 | `FF_LLM__MAX_TOKENS` | llm | Max response tokens |
-| `FF_TRACKER__BACKEND` | tracker | `wandb`, `mlflow`, or `none` |
+| `FF_TRACKER__BACKEND` | tracker | `wandb`, `mlflow`, or `none` (default: `none`) |
 | `FF_TRACKER__PROJECT` | tracker | Tracker project name |
 | `FF_ROUTER__STRATEGY` | router | `data_driven`, `performance_driven`, `hybrid`, `llm` |
 | `FF_MEMORY__MAX_SIZE` | memory | Max entries per memory type |
