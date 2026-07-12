@@ -45,9 +45,11 @@ All files below raise `NotImplementedError` or return 501:
 
 ## Known Bugs
 
-| Severity | Issue | Location |
-|----------|-------|----------|
-| Medium | `NoMemoryStaticRouterPipeline._post_round` is an ellipsis body (`...`), silently skipping all post-round logic including `router.update_performance()` — may cause stale router state in ablation experiments. Intent needs confirming (freeze router state vs typo). | `src/feature_forge/methods/malmas/pipeline/ablations.py:55` |
+None currently open.
+
+| Ref | Issue | Resolution |
+|-----|-------|------------|
+| R12 | `NoMemoryStaticRouterPipeline._post_round` was flagged as a possible bug (ellipsis body skipping `router.update_performance()`) | **Not a bug — intentional ablation.** Body is `pass` (not `...`); class docstring documents "keeps router performance state fixed across rounds"; `test_no_memory_static_router_does_not_update_router_performance` (`tests/integration/test_pipeline.py:500`) asserts router performance is unchanged across rounds |
 
 ## Fixed Issues
 
