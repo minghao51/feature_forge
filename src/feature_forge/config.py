@@ -98,7 +98,7 @@ class TrackerConfig(BaseModel):
         entity: Team/entity name (WandB only).
     """
 
-    backend: Literal["wandb", "mlflow", "none"] = "wandb"
+    backend: Literal["wandb", "mlflow", "none"] = "none"
     project: str = "feature-forge"
     entity: str | None = None
 

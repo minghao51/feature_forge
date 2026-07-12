@@ -21,7 +21,7 @@ llm:
   reasoning_effort: "medium"
 
 tracker:
-  backend: "wandb"
+  backend: "none"
   project: "feature-forge"
 
 router:

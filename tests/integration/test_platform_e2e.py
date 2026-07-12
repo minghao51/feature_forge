@@ -9,21 +9,7 @@ import pytest
 
 from feature_forge import ExperimentalPlatform
 from feature_forge.experiment.execution import ExperimentResult
-from feature_forge.experiment.tracker import NoOpTracker
 from feature_forge.methods import BaseMethod
-
-
-@pytest.fixture(autouse=True)
-def _noop_default_tracker(monkeypatch):
-    """Default platform runs to NoOpTracker so e2e tests don't phone home.
-
-    Tests that exercise real tracking pass an explicit ``tracker=`` arg,
-    which bypasses ``create_tracker_from_config`` entirely.
-    """
-    monkeypatch.setattr(
-        "feature_forge.platform.create_tracker_from_config",
-        lambda config: NoOpTracker(project="test-e2e"),
-    )
 
 
 class DummyBaseline(BaseMethod):

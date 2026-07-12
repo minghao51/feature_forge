@@ -110,7 +110,7 @@ class TestSettings:
         assert settings.metric == "auc"
         assert settings.n_rounds == 4
         assert settings.llm.model == "deepseek-chat"
-        assert settings.tracker.backend == "wandb"
+        assert settings.tracker.backend == "none"
 
     def test_metric_validation(self):
         with pytest.raises(ValidationError, match="metric"):
@@ -138,7 +138,7 @@ class TestSettings:
 class TestTrackerConfig:
     def test_default_backend(self):
         cfg = TrackerConfig()
-        assert cfg.backend == "wandb"
+        assert cfg.backend == "none"
 
     def test_mlflow_backend(self):
         cfg = TrackerConfig(backend="mlflow")
