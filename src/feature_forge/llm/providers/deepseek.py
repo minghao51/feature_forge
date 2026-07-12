@@ -79,13 +79,3 @@ class DeepSeekProvider(OpenAIProvider):
             max_tokens=max_tokens,
             **kwargs,
         )
-
-    def _extract_content(self, raw_response: Any) -> str:
-        message = raw_response.choices[0].message
-        return message.content or ""
-
-    def _extract_usage(self, raw_response: Any) -> tuple[int, int, int]:
-        usage = raw_response.usage
-        if usage is None:
-            return 0, 0, 0
-        return usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
