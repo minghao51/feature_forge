@@ -231,3 +231,48 @@ class TestExperimentalPlatform:
                 parallel=True,
                 progress=False,
             )
+
+    @patch("feature_forge.platform.ExperimentCaseExecutor")
+    def test_run_uses_config_tracker_when_no_override(self, mock_executor_cls):
+        mock_executor = MagicMock()
+        mock_executor_cls.return_value = mock_executor
+        mock_executor.execute.return_value = MagicMock(
+            dataset="demo",
+            method="dummy",
+            model="xgboost",
+            seed=42,
+            cv_score=0.7,
+            gain=0.1,
+            baseline_score=0.6,
+            num_features_generated=1,
+            error=None,
+        )
+        from feature_forge.experiment import NoOpTracker
+
+        platform = ExperimentalPlatform(config={"tracker": {"backend": "none"}})
+        platform.run(datasets=["demo"], methods=["dummy"], progress=False)
+        kwargs = mock_executor_cls.call_args.kwargs
+        assert isinstance(kwargs["tracker"], NoOpTracker)
+
+    @patch("feature_forge.platform.ExperimentCaseExecutor")
+    def test_run_explicit_tracker_overrides_config(self, mock_executor_cls):
+        mock_executor = MagicMock()
+        mock_executor_cls.return_value = mock_executor
+        mock_executor.execute.return_value = MagicMock(
+            dataset="demo",
+            method="dummy",
+            model="xgboost",
+            seed=42,
+            cv_score=0.7,
+            gain=0.1,
+            baseline_score=0.6,
+            num_features_generated=1,
+            error=None,
+        )
+        from feature_forge.experiment import NoOpTracker
+
+        explicit = NoOpTracker(project="override")
+        platform = ExperimentalPlatform(config={"tracker": {"backend": "wandb"}})
+        platform.run(datasets=["demo"], methods=["dummy"], tracker=explicit, progress=False)
+        kwargs = mock_executor_cls.call_args.kwargs
+        assert kwargs["tracker"] is explicit

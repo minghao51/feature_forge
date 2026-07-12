@@ -14,7 +14,7 @@ import pandas as pd
 from feature_forge.config import Settings, get_settings
 from feature_forge.data import DatasetRegistry
 from feature_forge.evaluation import MetricRegistry, ModelRegistry
-from feature_forge.experiment import ExperimentTracker, NoOpTracker, Reporter
+from feature_forge.experiment import ExperimentTracker, Reporter, create_tracker_from_config
 from feature_forge.experiment.case_executor import (
     CaseComputationInput,
     ExperimentCaseExecutor,
@@ -146,7 +146,9 @@ class ExperimentalPlatform:
             mode: Method-specific mode (e.g. ``'single_shot'``, ``'iterative'``).
             cv_folds: Override CV folds for this run.
             seeds: Random seeds (default: ``[42]``).
-            tracker: Optional experiment tracker (default: ``NoOpTracker``).
+            tracker: Optional experiment tracker override. When omitted, the
+                tracker is built from ``settings.tracker`` (``backend`` /
+                ``project`` / ``entity``) via ``create_tracker_from_config``.
             parallel: Run experiments in parallel via process pool.
             max_workers: Max parallel workers when ``parallel=True``.
             progress: Show ``tqdm`` progress bar.
@@ -176,7 +178,7 @@ class ExperimentalPlatform:
                         )
 
         run_settings = self._get_settings()
-        run_tracker = tracker or NoOpTracker(project="feature-forge-platform")
+        run_tracker = tracker or create_tracker_from_config(run_settings.tracker)
         executor = ExperimentCaseExecutor(
             settings=run_settings,
             tracker=run_tracker,

@@ -8,6 +8,7 @@ from feature_forge.experiment.execution import (
     ProcessPoolExecutionAdapter,
     SequentialExecutionAdapter,
 )
+from feature_forge.experiment.factory import create_tracker_from_config
 from feature_forge.experiment.mlflow_backend import MLflowTracker
 from feature_forge.experiment.reporter import Reporter
 from feature_forge.experiment.tracker import ExperimentTracker, NoOpTracker
@@ -25,4 +26,5 @@ __all__ = [
     "Reporter",
     "SequentialExecutionAdapter",
     "WandBTracker",
+    "create_tracker_from_config",
 ]

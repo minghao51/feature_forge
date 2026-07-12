@@ -63,6 +63,7 @@ All files below raise `NotImplementedError` or return 501:
 | R8 | `_baseline_cache_key` hashed full `y_train` values each round | Uses `id(y_train)` instead |
 | R9 | Loky large-matrix guard warned but did not switch backends, risking OOM | Now falls back to the `threading` backend when the matrix is too large |
 | R10 | `DiskCache` was fully implemented but never instantiated — `create_llm_client` always passed `cache=None`, so the cache hit/miss branches in `LLMClient` were unreachable and repeated LLM calls re-hit the API | `create_llm_client` now auto-instantiates `DiskCache()` when `cache` is unset and `LLMConfig.cache_responses` is true (default ON); explicit `cache=` still overrides (`src/feature_forge/llm/factory.py`) |
+| R11 | `TrackerConfig.backend` (`wandb`/`mlflow`/`none`) was never consulted — `ExperimentalPlatform.run()` hardcoded `NoOpTracker`, so MLflow and WandB were unreachable from the platform despite being advertised | New `create_tracker_from_config` maps config → backend (`src/feature_forge/experiment/factory.py`); `ExperimentalPlatform.run()` now consults it when no explicit `tracker=` is passed (`src/feature_forge/platform.py`) |
 
 ## Security Concerns
 

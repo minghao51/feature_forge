@@ -14,6 +14,7 @@ import pandas as pd
 import pytest
 
 from feature_forge.exceptions import TrackingError
+from feature_forge.experiment.factory import create_tracker_from_config
 from feature_forge.experiment.mlflow_backend import MLflowTracker
 from feature_forge.experiment.tracker import ExperimentTracker, NoOpTracker
 from feature_forge.experiment.wandb_backend import WandBTracker
@@ -199,3 +200,39 @@ class TestLogArtifactItem:
         with patch.object(tracker, "log_params") as mock_log:
             tracker._log_artifact_item("broken", BrokenLazyRef())
             mock_log.assert_called_once()
+
+
+class TestCreateTrackerFromConfig:
+    """Verify create_tracker_from_config maps backend → concrete tracker."""
+
+    def test_wandb_backend(self):
+        from feature_forge.config import TrackerConfig
+
+        config = TrackerConfig(backend="wandb", project="proj", entity="team")
+        tracker = create_tracker_from_config(config)
+        assert isinstance(tracker, WandBTracker)
+        assert tracker.project == "proj"
+        assert tracker.entity == "team"
+
+    def test_mlflow_backend(self):
+        from feature_forge.config import TrackerConfig
+
+        config = TrackerConfig(backend="mlflow", project="proj")
+        tracker = create_tracker_from_config(config)
+        assert isinstance(tracker, MLflowTracker)
+        assert tracker.project == "proj"
+
+    def test_none_backend_returns_noop(self):
+        from feature_forge.config import TrackerConfig
+
+        config = TrackerConfig(backend="none", project="proj")
+        tracker = create_tracker_from_config(config)
+        assert isinstance(tracker, NoOpTracker)
+        assert tracker.project == "proj"
+
+    def test_returns_experiment_tracker(self):
+        from feature_forge.config import TrackerConfig
+
+        for backend in ("wandb", "mlflow", "none"):
+            config = TrackerConfig(backend=backend, project="proj")
+            assert isinstance(create_tracker_from_config(config), ExperimentTracker)
