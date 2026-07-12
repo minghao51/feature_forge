@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.metadata
 import json
 import warnings
 from collections.abc import Callable
@@ -48,20 +47,14 @@ class DatasetRegistry:
         if self._entry_points_loaded:
             return
         self._entry_points_loaded = True
-        for ep in importlib.metadata.entry_points(group=self.ENTRY_POINT_GROUP):
-            if ep.name in self._datasets:
+        from feature_forge.evaluation.registry_utils import discover_entry_points
+
+        loaders = discover_entry_points(self.ENTRY_POINT_GROUP)
+        for name, loader in loaders.items():
+            if name in self._datasets:
                 continue
-            try:
-                loader = ep.load()
-            except Exception as exc:
-                warnings.warn(
-                    f"Failed to load dataset entry point '{ep.name}': {exc}",
-                    RuntimeWarning,
-                    stacklevel=3,
-                )
-                continue
-            self._entry_point_loaders[ep.name] = loader
-            self._datasets[ep.name] = {
+            self._entry_point_loaders[name] = loader
+            self._datasets[name] = {
                 "source": "entry_point",
                 "target": None,
                 "task": "classification",

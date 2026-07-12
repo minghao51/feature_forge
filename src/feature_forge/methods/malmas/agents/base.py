@@ -6,7 +6,6 @@ Discovery happens via Python entry points or `AgentRegistry.get_builtin_agents()
 
 from __future__ import annotations
 
-import importlib.metadata
 import json
 import re
 import time
@@ -383,10 +382,9 @@ class AgentRegistry:
     @classmethod
     def discover(cls) -> dict[str, type[Agent]]:
         """Discover all registered agents from entry points."""
-        agents: dict[str, type[Agent]] = {}
-        for ep in importlib.metadata.entry_points(group=cls.ENTRY_POINT_GROUP):
-            agents[ep.name] = ep.load()
-        return agents
+        from feature_forge.evaluation.registry_utils import discover_entry_points
+
+        return discover_entry_points(cls.ENTRY_POINT_GROUP)  # type: ignore[return-value]
 
     _BUILTIN_PROMPT_AGENTS: ClassVar[dict[str, str]] = {
         "unary": "unary",

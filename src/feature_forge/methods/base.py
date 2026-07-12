@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.metadata
 import warnings
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
@@ -226,46 +225,34 @@ class MethodRegistry:
     @classmethod
     def discover(cls) -> dict[str, type[BaseMethod]]:
         """Discover all registered methods from entry points."""
+        from feature_forge.evaluation.registry_utils import discover_entry_points
+
+        loaded = discover_entry_points(cls.ENTRY_POINT_GROUP)
+        required = {
+            "fit",
+            "transform",
+            "fit_transform",
+            "generated_scripts",
+            "feature_metadata",
+            "get_artifacts",
+        }
         discovered: dict[str, type[BaseMethod]] = {}
-        for ep in importlib.metadata.entry_points(group=cls.ENTRY_POINT_GROUP):
-            try:
-                loaded = ep.load()
-            except Exception as exc:
+        for name, obj in loaded.items():
+            if not isinstance(obj, type):
                 warnings.warn(
-                    f"Failed to load method entry point '{ep.name}': {exc}",
+                    f"Method entry point '{name}' is not a class. Skipping.",
                     RuntimeWarning,
                     stacklevel=2,
                 )
                 continue
-            if not isinstance(loaded, type):
+            if not required.issubset(dir(obj)):
                 warnings.warn(
-                    f"Method entry point '{ep.name}' is not a class. Skipping.",
+                    f"Method entry point '{name}' does not satisfy MethodProtocol. Skipping.",
                     RuntimeWarning,
                     stacklevel=2,
                 )
                 continue
-            required = {
-                "fit",
-                "transform",
-                "fit_transform",
-                "generated_scripts",
-                "feature_metadata",
-                "get_artifacts",
-            }
-            if not required.issubset(dir(loaded)):
-                warnings.warn(
-                    f"Method entry point '{ep.name}' does not satisfy MethodProtocol. Skipping.",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-                continue
-            if ep.name in discovered:
-                warnings.warn(
-                    f"Duplicate method entry point name '{ep.name}'. Last registered wins.",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-            discovered[ep.name] = loaded
+            discovered[name] = obj
         return discovered
 
     @classmethod
