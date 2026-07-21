@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import json
 from typing import Any
 
@@ -69,6 +70,23 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             if f"/{dir_name}/" in item.nodeid or f"\\{dir_name}\\" in item.nodeid:
                 item.add_marker(getattr(pytest.mark, marker_name))
                 break
+
+
+@pytest.fixture(autouse=True)
+def _release_mp_semaphores_after_test():
+    """Force garbage collection after each test.
+
+    Several tests drive multiprocessing-based execution backends (the sandbox
+    and ProcessPoolExecutionAdapter). ProcessPoolExecutor allocates internal
+    call/result Queues whose SemLocks are backed by /dev/shm files; those
+    files are only reclaimed when the Queue object is garbage-collected. On a
+    long CI run the accumulated leaked semaphores exhaust /dev/shm and the
+    next ProcessPoolExecutor(...) fails with OSError [Errno 12] Cannot
+    allocate memory at SemLock.__init__. Running gc.collect() after each test
+    promptly finalizes those Queues and releases the semaphores.
+    """
+    yield
+    gc.collect()
 
 
 @pytest.fixture

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 import time
 
 import numpy as np
@@ -51,6 +53,30 @@ class _FastEvaluator:
     def evaluate_feature(self, X_train, y_train, feature_df, baseline_score):
         del X_train, y_train, baseline_score
         return float(feature_df.iloc[:, 0].mean()) * 1e-6
+
+
+def test_pyarrow_parquet_engine_imports() -> None:
+    """Guard the sandbox IPC happy path.
+
+    The sandbox transports DataFrames between parent and worker via parquet.
+    On some CI runners ``pyarrow._parquet.so`` fails to mmap inside a
+    ``multiprocessing.spawn`` child, which silently turns every sandbox-using
+    test into a timeout. Importing the engine here surfaces the failure as a
+    fast, named test error instead of a 9-minute sandbox-timeout cascade.
+    """
+    import pyarrow.parquet  # noqa: F401 — import side effect is the test
+
+    # Round-trip a tiny frame end-to-end so a partially-broken wheel (engine
+    # imports but cannot actually read/write) is caught too.
+    frame = pd.DataFrame({"a": [1, 2, 3], "b": [0.1, 0.2, 0.3]})
+    with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as fh:
+        path = fh.name
+    try:
+        frame.to_parquet(path)
+        round_tripped = pd.read_parquet(path)
+    finally:
+        os.unlink(path)
+    pd.testing.assert_frame_equal(round_tripped, frame)
 
 
 def test_feature_eval_smoke_budget() -> None:

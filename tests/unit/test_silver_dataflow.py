@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -21,6 +22,11 @@ ad_hoc_utils = pytest.importorskip(
     "hamilton.ad_hoc_utils",
     reason="requires the optional pipeline extra",
 )
+
+# render_silver_dag() shells out to the `dot` binary. The ubuntu-24.04 CI image
+# does not ship graphviz by default (only the `pipeline` CI job installs it),
+# so guard the DAG-rendering test with an importorskip-style check.
+_dot_available = shutil.which("dot") is not None
 
 
 def review_marker() -> str:
@@ -416,6 +422,7 @@ class TestSilverDataflow:
         assert "should-not-be-persisted" not in persisted_json
         assert '"configured":true' in persisted_json or '"configured": true' in persisted_json
 
+    @pytest.mark.skipif(not _dot_available, reason="graphviz `dot` binary not on PATH")
     def test_documentation_profile_renders_dag_without_execution(self, tmp_path: Path) -> None:
         driver = build_driver(profile=ExecutionProfile.DOCUMENTATION)
         output_path = tmp_path / "silver-dag.png"

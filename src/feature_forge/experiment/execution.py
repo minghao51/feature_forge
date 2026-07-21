@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import gc
 import re
+import sys
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
@@ -154,10 +156,23 @@ class SequentialExecutionAdapter(ExecutionBackend):
 
 
 class ProcessPoolExecutionAdapter(ExecutionBackend):
-    """Process-pool backend using a top-level worker."""
+    """Process-pool backend using a top-level worker.
 
-    def __init__(self, max_workers: int = 1, *, mp_start_method: str = "spawn") -> None:
+    The default start method is platform-aware: ``fork`` on Linux (near-instant
+    worker startup via copy-on-write of the parent's already-imported modules),
+    ``spawn`` elsewhere (fork is deprecated on macOS, unavailable on Windows).
+    Callers can override via ``mp_start_method``.
+    """
+
+    def __init__(
+        self,
+        max_workers: int = 1,
+        *,
+        mp_start_method: str | None = None,
+    ) -> None:
         self.max_workers = max_workers
+        if mp_start_method is None:
+            mp_start_method = "fork" if sys.platform.startswith("linux") else "spawn"
         self.mp_start_method = mp_start_method
 
     def run(
@@ -195,7 +210,22 @@ class ProcessPoolExecutionAdapter(ExecutionBackend):
         stopped = False
         context = get_context(self.mp_start_method)
         progress_bar = tqdm(total=len(cases), desc="Experiments (parallel)") if progress else None
-        executor = ProcessPoolExecutor(max_workers=self.max_workers, mp_context=context)
+        try:
+            executor = ProcessPoolExecutor(max_workers=self.max_workers, mp_context=context)
+        except OSError as exc:
+            # The runner cannot allocate a process pool right now. On Linux this
+            # surfaces as OSError [Errno 12] Cannot allocate memory when the
+            # ProcessPoolExecutor's internal call/result Queues try to create
+            # SemLocks under /dev/shm. Fall back to in-process sequential
+            # execution so callers still get correct results — they just lose
+            # parallelism. This is also the correct behavior for environments
+            # that ban multiprocessing entirely.
+            logger.warning(
+                "process_pool_unavailable_fallback_sequential",
+                error=str(exc),
+                max_workers=self.max_workers,
+            )
+            return self._run_sequential(cases, worker, progress=progress, fail_fast=fail_fast, on_start=on_start)
         pending: dict[Future[OutputT], int] = {}
         try:
             while next_index < len(cases) and len(pending) < self.max_workers:
@@ -236,7 +266,59 @@ class ProcessPoolExecutionAdapter(ExecutionBackend):
             executor.shutdown(wait=True, cancel_futures=True)
             if progress_bar is not None:
                 progress_bar.close()
+            # ProcessPoolExecutor's internal call/result queues allocate
+            # SemLocks from /dev/shm that are only freed when the executor
+            # object is garbage-collected. On long test suites the cumulative
+            # leaked semaphores exhaust /dev/shm and the next
+            # ProcessPoolExecutor(...) fails with OSError [Errno 12] Cannot
+            # allocate memory at SemLock.__init__. Drop the local ref and
+            # force a collection so the SemLocks are released before return.
+            del executor
+            gc.collect()
         return [cast(OutputT, result) for result in results]
+
+    @staticmethod
+    def _run_sequential(
+        cases: list[InputT],
+        worker: Callable[[InputT], OutputT],
+        *,
+        progress: bool,
+        fail_fast: bool,
+        on_start: Callable[[InputT], None] | None,
+    ) -> list[OutputT]:
+        """In-process fallback used when ProcessPoolExecutor cannot start.
+
+        Mirrors :class:`SequentialExecutionAdapter.run` but additionally
+        performs the same per-case serialization check that the process-pool
+        path does, so unpickleable cases are reported as ``stage="serialization"``
+        failures rather than silently succeeding in-process.
+        """
+        results: list[OutputT] = []
+        iterator = tqdm(cases, total=len(cases), desc="Experiments") if progress else cases
+        failed = False
+        for case in iterator:
+            if failed:
+                results.append(cast(OutputT, cancelled_result(case, "cancelled by fail_fast")))
+                continue
+            serialization_failure = _serialization_failure(case)
+            if serialization_failure is not None:
+                results.append(
+                    cast(
+                        OutputT,
+                        failed_result(case, serialization_failure, stage="serialization"),
+                    )
+                )
+                failed = fail_fast
+                continue
+            try:
+                if on_start is not None:
+                    on_start(case)
+                result = worker(case)
+            except BaseException as exc:
+                result = cast(OutputT, failed_result(case, exc))
+            results.append(result)
+            failed = fail_fast and result_failed(result)
+        return results
 
     @staticmethod
     def _submit(
