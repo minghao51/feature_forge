@@ -29,10 +29,10 @@ git clone https://github.com/minghao51/feature_forge.git
 cd feature-forge
 
 # Install with uv (recommended)
-uv sync
+uv sync --group dev
 
-# Or with pip
-pip install -e ".[base,docs,opinion]"
+# Add Hamilton and the local DuckDB catalog
+uv sync --extra pipeline --group dev
 ```
 
 ## Quick Start
@@ -171,10 +171,14 @@ pre-commit run --all-files
 
 ## Documentation
 
+- [Medallion Pipeline](pipeline/index.md) — Architecture, layers, contracts, and plugin impact
+- [Operations Runbook](operations/index.md) — Profiles, replay/resume, verification, and recovery
+- [Generated References](generated/index.md) — Live DAGs, schemas, checks, catalog, and CLI
 - [Methods & References](methods.md) — Full documentation of all methods, pipelines, and academic sources
 - [Implementation Plan](plan/00_index.md)
 - [API Reference](api_reference.md)
 - [Migration Guide](migration_guide.md)
+- [Medallion Migration](migration/medallion.md)
 - [Quick Start](quick_start.md)
 - [MALMAS Technical Roadmap](MALMAS_Technical_Roadmap.md)
 

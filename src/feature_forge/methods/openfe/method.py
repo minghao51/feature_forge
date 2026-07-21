@@ -8,7 +8,7 @@ operators and feature importances.
 from __future__ import annotations
 
 import warnings
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
@@ -16,6 +16,9 @@ from feature_forge.artifacts.base import ArtifactConfig
 from feature_forge.exceptions import EvaluationError
 from feature_forge.methods.base import BaseMethod
 from feature_forge.observability.structlog_config import get_logger
+
+if TYPE_CHECKING:
+    from feature_forge.experiment.context import CaseExecutionContext
 
 logger = get_logger(__name__)
 
@@ -37,6 +40,19 @@ class OpenFEMethod(BaseMethod):
         self.metric = metric
         self._ofe: Any = None
         self._features: Any = None
+
+    @classmethod
+    def from_run_context(cls, ctx: CaseExecutionContext) -> OpenFEMethod:
+        """Build an OpenFE adapter from a resolved case context.
+
+        OpenFE is the only non-LLM built-in method, so no ``llm_client`` is
+        consumed. ``n_jobs`` and ``metric`` come from the case-resolved
+        evaluation config and metric.
+        """
+        return cls(
+            n_jobs=ctx.evaluation.max_cv_workers or 1,
+            metric=ctx.metric,
+        )
 
     def fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> OpenFEMethod:
         try:

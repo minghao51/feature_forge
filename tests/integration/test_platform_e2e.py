@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 import pandas as pd
-import pytest
 
 from feature_forge import ExperimentalPlatform
 from feature_forge.experiment.execution import ExperimentResult
@@ -369,18 +368,29 @@ class TestPlatformE2E:
         )
         assert seq_sorted == par_sorted
 
-    def test_parallel_rejects_instance_local_registered_method(self):
+    def test_parallel_supports_portable_instance_local_registered_method(self, tmp_path):
         platform = ExperimentalPlatform()
         platform.register_method("dummy", DummyBaseline)
-
-        with pytest.raises(
-            ValueError,
-            match="parallel=True currently supports only registry-discovered methods",
-        ):
-            platform.run(
-                datasets=["titanic"],
-                methods=["dummy"],
-                models=["xgboost"],
-                parallel=True,
-                progress=False,
-            )
+        sample_dir = tmp_path / "portable"
+        sample_dir.mkdir()
+        pd.DataFrame({"a": list(range(12)), "target": [0, 1] * 6}).to_csv(
+            sample_dir / "train.csv", index=False
+        )
+        platform.register_dataset(
+            "portable",
+            {
+                "source": "local",
+                "path": str(sample_dir),
+                "target": "target",
+                "task": "classification",
+            },
+        )
+        results = platform.run(
+            datasets=["portable"],
+            methods=["dummy"],
+            models=["random_forest"],
+            cv_folds=2,
+            parallel=True,
+            progress=False,
+        )
+        assert results[0]["error"] is None

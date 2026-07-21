@@ -114,3 +114,36 @@ class TestReporter:
         reporter = Reporter([])
         stats = reporter.summary_stats()
         assert stats["total_runs"] == 0
+
+    def test_summary_stats_treats_missing_error_as_success(self):
+        reporter = Reporter([{"dataset": "a", "score": 0.8}])
+        stats = reporter.summary_stats()
+        assert stats["successful_runs"] == 1
+        assert stats["failed_runs"] == 0
+
+    def test_get_best_can_minimize_metric(self):
+        reporter = Reporter(
+            [
+                {"dataset": "a", "metric": "rmse", "score": 2.0},
+                {"dataset": "a", "metric": "rmse", "score": 1.0},
+            ]
+        )
+        best = reporter.get_best(metric="score", group_by="dataset")
+        assert best.iloc[0]["score"] == 1.0
+
+    def test_mixed_legacy_and_enriched_results_render(self):
+        reporter = Reporter(
+            [
+                {"dataset": "a", "method": "m", "model": "rf", "cv_score": 0.8},
+                {
+                    "dataset": "a",
+                    "method": "m",
+                    "model": "rf",
+                    "cv_score": 0.9,
+                    "directional_gain": 0.1,
+                    "uncertainty": {"lower_bound": 0.01},
+                    "platinum_manifest_uri": "04_platinum/runs/r/manifest.json",
+                },
+            ]
+        )
+        assert "cv_score" in reporter.to_markdown()

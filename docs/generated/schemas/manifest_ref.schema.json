@@ -1,0 +1,44 @@
+{
+  "$defs": {
+    "Layer": {
+      "description": "Durable maturity layer for an experiment artifact.",
+      "enum": [
+        "bronze",
+        "silver",
+        "gold",
+        "platinum"
+      ],
+      "title": "Layer",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Reference to a committed layer manifest.",
+  "properties": {
+    "layer": {
+      "$ref": "#/$defs/Layer"
+    },
+    "relative_path": {
+      "const": "manifest.json",
+      "default": "manifest.json",
+      "title": "Relative Path",
+      "type": "string"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "sha256": {
+      "title": "Sha256",
+      "type": "string"
+    }
+  },
+  "required": [
+    "layer",
+    "run_id",
+    "sha256"
+  ],
+  "title": "ManifestRef",
+  "type": "object"
+}

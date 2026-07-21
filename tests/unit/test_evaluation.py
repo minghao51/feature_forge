@@ -244,6 +244,54 @@ class TestCVEvaluator:
         )
         assert isinstance(gain, float)
 
+    def test_metric_direction_resolved_in_init(self):
+        from feature_forge.evaluation.metrics import MetricDirection
+
+        maximize = CVEvaluator(config=Settings(task="classification", metric="auc"))
+        minimize = CVEvaluator(config=Settings(task="regression", metric="rmse"))
+        assert maximize.metric_direction is MetricDirection.MAXIMIZE
+        assert minimize.metric_direction is MetricDirection.MINIMIZE
+
+    def test_evaluate_feature_returns_raw_gain_for_minimize_metric(self, monkeypatch):
+        # RMSE: lower is better. If baseline=0.5 and new=0.3, the raw gain
+        # returned by evaluate_feature must be -0.2 (NOT sign-flipped).
+        evaluator = CVEvaluator(config=Settings(task="regression", metric="rmse"))
+        scores = iter([0.5, 0.3])
+        monkeypatch.setattr(evaluator, "_cv_score", lambda *a, **k: next(scores))
+        X = pd.DataFrame({"a": [0.0, 1.0, 2.0, 3.0]})
+        y = pd.Series([0.0, 1.0, 2.0, 3.0])
+        feat = pd.DataFrame({"b": [0.0, 1.0, 2.0, 3.0]})
+        baseline = evaluator.evaluate_baseline(X, y)
+        raw_gain = evaluator.evaluate_feature(X, y, feat, baseline_score=baseline)
+        assert raw_gain == pytest.approx(-0.2)
+
+    def test_evaluate_feature_directional_flips_sign_for_minimize_metric(self, monkeypatch):
+        # Same scenario as above, but the directional variant must return +0.2
+        # so that "directional > 0" means "improvement" for minimize metrics.
+        evaluator = CVEvaluator(config=Settings(task="regression", metric="rmse"))
+        scores = iter([0.5, 0.3])
+        monkeypatch.setattr(evaluator, "_cv_score", lambda *a, **k: next(scores))
+        X = pd.DataFrame({"a": [0.0, 1.0, 2.0, 3.0]})
+        y = pd.Series([0.0, 1.0, 2.0, 3.0])
+        feat = pd.DataFrame({"b": [0.0, 1.0, 2.0, 3.0]})
+        baseline = evaluator.evaluate_baseline(X, y)
+        directional = evaluator.evaluate_feature_directional(X, y, feat, baseline_score=baseline)
+        assert directional == pytest.approx(0.2)
+
+    def test_directional_is_identity_for_maximize_metric(self, monkeypatch):
+        # For a maximize metric, raw and directional gains must be equal.
+        evaluator = CVEvaluator(config=Settings(task="classification", metric="auc"))
+        scores = iter([0.4, 0.7])
+        monkeypatch.setattr(evaluator, "_cv_score", lambda *a, **k: next(scores))
+        X = pd.DataFrame({"a": [0.0, 1.0, 2.0, 3.0]})
+        y = pd.Series([0, 1, 0, 1])
+        feat = pd.DataFrame({"b": [0.0, 1.0, 2.0, 3.0]})
+        baseline = evaluator.evaluate_baseline(X, y)
+        raw = evaluator.evaluate_feature(X, y, feat, baseline_score=baseline)
+        # `_directional` on a maximize metric is the identity function.
+        assert evaluator._directional(raw) == pytest.approx(raw)
+        assert evaluator._directional(raw) == pytest.approx(0.3)
+
 
 class TestPrefilterCandidateColumns:
     def test_empty_dataframe_returns_empty(self):

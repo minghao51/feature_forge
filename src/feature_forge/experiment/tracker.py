@@ -38,6 +38,15 @@ class ExperimentTracker(ABC):
     def log_artifact(self, path: str, artifact_type: str = "dataset") -> None:
         """Log an artifact."""
 
+    def log_artifact_reference(
+        self, uri: str, *, sha256: str | None = None, artifact_type: str = "manifest"
+    ) -> None:
+        """Log a durable reference only; never upload artifact contents."""
+        values = {"artifact_uri": uri, "artifact_type": artifact_type}
+        if sha256 is not None:
+            values["artifact_sha256"] = sha256
+        self.log_params(values)
+
     @abstractmethod
     def finish(self) -> None:
         """Finish the current run."""

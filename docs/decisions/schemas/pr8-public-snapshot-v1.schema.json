@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://feature-forge.invalid/schemas/pr8-public-snapshot-v1.schema.json",
+  "title": "Feature Forge PR 8 public catalog snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "snapshot_id",
+    "catalog_schema_version",
+    "datasets",
+    "runs",
+    "features",
+    "lineage_edges",
+    "checks",
+    "metrics"
+  ],
+  "properties": {
+    "schema_version": { "const": "1" },
+    "snapshot_id": { "type": "string", "pattern": "^snap_[a-f0-9]{64}$" },
+    "catalog_schema_version": { "const": 1 },
+    "datasets": { "type": "array", "items": { "$ref": "#/$defs/dataset" } },
+    "runs": { "type": "array", "items": { "$ref": "#/$defs/run" } },
+    "features": { "type": "array", "items": { "$ref": "#/$defs/feature" } },
+    "lineage_edges": { "type": "array", "items": { "$ref": "#/$defs/lineage_edge" } },
+    "checks": { "type": "array", "items": { "$ref": "#/$defs/check" } },
+    "metrics": { "type": "array", "items": { "$ref": "#/$defs/metric" } }
+  },
+  "$defs": {
+    "dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dataset_id", "run_count", "feature_count"],
+      "properties": {
+        "dataset_id": { "type": "string", "pattern": "^ds_[a-f0-9]{16}$" },
+        "run_count": { "type": "integer", "minimum": 0 },
+        "feature_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "dataset_id",
+        "method_id",
+        "model_id",
+        "seed",
+        "state",
+        "stage_count",
+        "selected_feature_count"
+      ],
+      "properties": {
+        "run_id": { "type": "string", "pattern": "^run_[a-f0-9]{16}$" },
+        "dataset_id": { "type": "string", "pattern": "^ds_[a-f0-9]{16}$" },
+        "method_id": { "type": "string", "pattern": "^id_[a-f0-9]{16}$" },
+        "model_id": { "type": "string", "pattern": "^id_[a-f0-9]{16}$" },
+        "seed": { "type": "integer" },
+        "state": { "enum": ["planned", "running", "succeeded", "failed", "cancelled"] },
+        "stage_count": { "type": "integer", "minimum": 0 },
+        "selected_feature_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "feature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["feature_id", "run_id", "disposition", "decision_code"],
+      "properties": {
+        "feature_id": { "type": "string", "pattern": "^feature_[a-f0-9]{16}$" },
+        "run_id": { "type": "string", "pattern": "^run_[a-f0-9]{16}$" },
+        "disposition": { "enum": ["selected", "rejected"] },
+        "decision_code": { "enum": ["accepted", "quality_gate", "validation", "budget", "unknown"] }
+      }
+    },
+    "lineage_edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["child_run_id", "parent_run_id", "parent_layer", "ordinal"],
+      "properties": {
+        "child_run_id": { "type": "string", "pattern": "^run_[a-f0-9]{16}$" },
+        "parent_run_id": { "type": "string", "pattern": "^run_[a-f0-9]{16}$" },
+        "parent_layer": { "enum": ["bronze", "silver", "gold", "platinum"] },
+        "ordinal": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["check_id", "severity", "passed", "required"],
+      "properties": {
+        "check_id": { "type": "string", "pattern": "^check_[a-f0-9]{16}$" },
+        "severity": { "enum": ["info", "warning", "error"] },
+        "passed": { "type": "boolean" },
+        "required": { "type": "boolean" }
+      }
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric_id", "run_id", "arm", "metric_name", "value"],
+      "properties": {
+        "metric_id": { "type": "string", "pattern": "^metric_[a-f0-9]{16}$" },
+        "run_id": { "type": "string", "pattern": "^run_[a-f0-9]{16}$" },
+        "arm": { "enum": ["baseline", "enhanced"] },
+        "metric_name": { "enum": ["accuracy", "auc", "mae", "rmse", "r2"] },
+        "value": { "type": "number" }
+      }
+    }
+  }
+}

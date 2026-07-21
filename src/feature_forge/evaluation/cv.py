@@ -6,7 +6,10 @@ features and measuring the cross-validated performance change.
 
 from __future__ import annotations
 
+import json
+import time
 import warnings
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -14,12 +17,20 @@ import pandas as pd
 from sklearn.model_selection import KFold, StratifiedKFold
 
 from feature_forge.config import Settings
-from feature_forge.evaluation.metrics import get_metric
+from feature_forge.evaluation.metrics import MetricDirection, get_metric, get_metric_direction
 from feature_forge.evaluation.model_factory import ModelFactory
 from feature_forge.exceptions import EvaluationError
 from feature_forge.observability.structlog_config import get_logger
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class FoldEvaluation:
+    """Fold metrics and row-keyed predictions for one evaluation arm."""
+
+    fold_metrics: pd.DataFrame
+    predictions: pd.DataFrame
 
 
 class CVEvaluator:
@@ -37,7 +48,25 @@ class CVEvaluator:
         self.config = config or Settings()
         self.model_factory = model_factory or ModelFactory()
         self.metric_fn = get_metric(self.config.metric)
+        # Optimization direction for the configured metric. Selectors should
+        # consult `metric_direction` (or call `_directional` / the
+        # `*_directional` evaluation methods) instead of assuming
+        # "higher is better" — RMSE/MAE/NRMSE improve when the score drops.
+        self.metric_direction: MetricDirection = get_metric_direction(self.config.metric)
         self.cv_folds = self.config.evaluation.cv_folds
+
+    def _directional(self, raw_gain: float) -> float:
+        """Flip the sign of a raw gain so that positive always means improvement.
+
+        Mirrors the Platinum path's signed-delta convention
+        (``dataflows/platinum.py:_paired_summary``). ``evaluate_feature`` and
+        ``evaluate_features_batch`` continue to return raw gains for artifact
+        transparency; selection decisions should use this helper or the
+        ``*_directional`` evaluation methods.
+        """
+        if self.metric_direction is MetricDirection.MINIMIZE:
+            return -raw_gain
+        return raw_gain
 
     def _get_cv_splitter(self, y: pd.Series) -> Any:
         """Return appropriate CV splitter for task type."""
@@ -98,6 +127,29 @@ class CVEvaluator:
         )
         return gain
 
+    def evaluate_feature_directional(
+        self,
+        X_base: pd.DataFrame,
+        y: pd.Series,
+        feature_df: pd.DataFrame,
+        baseline_score: float | None = None,
+        model_name: str | None = None,
+    ) -> float:
+        """Directional improvement: positive means better regardless of metric.
+
+        Equivalent to ``_directional(evaluate_feature(...))``. Use this in
+        feature selectors so minimize-metrics (RMSE/MAE/NRMSE) keep
+        improvements instead of discarding them.
+        """
+        raw_gain = self.evaluate_feature(
+            X_base,
+            y,
+            feature_df,
+            baseline_score=baseline_score,
+            model_name=model_name,
+        )
+        return self._directional(raw_gain)
+
     def _cv_score(
         self,
         X: pd.DataFrame,
@@ -136,6 +188,107 @@ class CVEvaluator:
 
         return float(np.mean(scores))
 
+    def evaluate_on_folds(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        row_ids: pd.Series,
+        folds: pd.DataFrame,
+        *,
+        arm: str,
+        model_name: str | None = None,
+        error_context: dict[str, str] | None = None,
+        estimator_threads: int = 1,
+        blas_threads: int = 1,
+    ) -> FoldEvaluation:
+        """Evaluate using authoritative persisted validation-fold assignments."""
+        if len(X) != len(y) or len(X) != len(row_ids):
+            raise EvaluationError("Evaluation features, target, and row IDs are misaligned")
+        if row_ids.isna().any() or row_ids.duplicated().any():
+            raise EvaluationError("Evaluation row IDs must be unique and non-null")
+        required = {"row_id", "fold"}
+        if not required.issubset(folds.columns) or folds["row_id"].duplicated().any():
+            raise EvaluationError("Fold assignments must contain unique row_id/fold pairs")
+        fold_by_id = folds.set_index("row_id")["fold"]
+        if set(fold_by_id.index) != set(row_ids):
+            raise EvaluationError("Fold assignments do not match evaluation row IDs")
+        ordered_folds = fold_by_id.loc[row_ids.tolist()].reset_index(drop=True)
+        metric_rows: list[dict[str, Any]] = []
+        prediction_rows: list[dict[str, Any]] = []
+        context = error_context or {}
+        for fold_id in sorted(ordered_folds.unique().tolist()):
+            validation_mask = ordered_folds == fold_id
+            train_idx = np.flatnonzero(~validation_mask.to_numpy())
+            val_idx = np.flatnonzero(validation_mask.to_numpy())
+            X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
+            y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
+            started = time.perf_counter()
+            try:
+                X_train_proc, train_state = self._fit_preprocess(X_train)
+                X_val_proc = self._transform_preprocess(X_val, train_state)
+                model = self.model_factory.get_model(model_name=model_name, task=self.config.task)
+                params = model.get_params(deep=False) if hasattr(model, "get_params") else {}
+                thread_params = {
+                    key: estimator_threads for key in ("n_jobs", "thread_count") if key in params
+                }
+                if thread_params:
+                    model.set_params(**thread_params)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    from threadpoolctl import threadpool_limits  # type: ignore[import-untyped]
+
+                    with threadpool_limits(limits=blas_threads):
+                        model.fit(X_train_proc, y_train)
+                        if hasattr(model, "predict_proba") and self.config.metric == "auc":
+                            y_pred = model.predict_proba(X_val_proc)
+                            if y_pred.ndim > 1 and y_pred.shape[1] == 2:
+                                y_pred = y_pred[:, 1]
+                        else:
+                            y_pred = model.predict(X_val_proc)
+                score = self.metric_fn(y_val.values, y_pred)
+            except (ValueError, RuntimeError) as exc:
+                detail = ", ".join(f"{key}={value}" for key, value in sorted(context.items()))
+                suffix = f" ({detail})" if detail else ""
+                raise EvaluationError(
+                    f"CV fold {fold_id} failed for arm={arm}, model={model_name or 'xgboost'}, "
+                    f"metric={self.config.metric}{suffix}: {exc}"
+                ) from exc
+            metric_rows.append(
+                {
+                    "arm": arm,
+                    "fold": int(fold_id),
+                    "metric": self.config.metric,
+                    "score": float(score),
+                    "n_train": len(train_idx),
+                    "n_validation": len(val_idx),
+                    "duration_ms": (time.perf_counter() - started) * 1000,
+                    "status": "succeeded",
+                    "error": None,
+                }
+            )
+            predictions = np.asarray(y_pred)
+            for offset, row_position in enumerate(val_idx):
+                predicted = predictions[offset]
+                prediction_rows.append(
+                    {
+                        "arm": arm,
+                        "fold": int(fold_id),
+                        "row_id": str(row_ids.iloc[row_position]),
+                        "target_json": json.dumps(
+                            y_val.iloc[offset].item()
+                            if hasattr(y_val.iloc[offset], "item")
+                            else y_val.iloc[offset]
+                        ),
+                        "prediction_json": json.dumps(
+                            predicted.tolist() if hasattr(predicted, "tolist") else predicted
+                        ),
+                    }
+                )
+        return FoldEvaluation(
+            fold_metrics=pd.DataFrame(metric_rows),
+            predictions=pd.DataFrame(prediction_rows),
+        )
+
     def evaluate_features_batch(
         self,
         X_base: pd.DataFrame,
@@ -154,6 +307,26 @@ class CVEvaluator:
             delayed(_eval_single)(col) for col in features_df.columns
         )
         return dict(results)
+
+    def evaluate_features_batch_directional(
+        self,
+        X_base: pd.DataFrame,
+        y: pd.Series,
+        features_df: pd.DataFrame,
+        baseline_score: float,
+        n_jobs: int = -1,
+    ) -> dict[str, float]:
+        """Like ``evaluate_features_batch`` but returns directional gains.
+
+        Each value is ``_directional(raw_gain)`` so that ``value > 0`` always
+        means "the feature improves the configured metric" — regardless of
+        whether the metric is maximized or minimized. Feature selectors should
+        prefer this over the raw batch method.
+        """
+        raw = self.evaluate_features_batch(
+            X_base, y, features_df, baseline_score=baseline_score, n_jobs=n_jobs
+        )
+        return {col: self._directional(gain) for col, gain in raw.items()}
 
     def _fit_preprocess(self, X: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, Any]]:
         """Fit preprocessing: compute medians and category mappings from X.

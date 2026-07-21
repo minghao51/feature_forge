@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from feature_forge.config import Settings
+from feature_forge.evaluation.metrics import MetricDirection
 from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.exceptions import PipelineError
 from feature_forge.llm.base import LLMClient
@@ -300,8 +301,17 @@ class TestCorePipelineXTestFaultTolerance:
 
 
 class _CountingEvaluator:
+    # Minimal CVEvaluator stub for baseline-cache / backend-selection tests.
+    # Exposes the direction metadata that CorePipeline._evaluate_and_select
+    # now consults.
+    metric_direction = MetricDirection.MAXIMIZE
+
+    class _Config:
+        metric = "auc"
+
     def __init__(self) -> None:
         self.calls = 0
+        self.config = self._Config()
 
     def evaluate_baseline(self, X_train, y_train):
         del X_train, y_train
@@ -469,3 +479,123 @@ class TestFeatureEvalBackendSelection:
             code="",
         )
         assert evaluator.calls == 2
+
+
+class _DirectionalEvaluator:
+    """Stub evaluator with configurable direction and per-column raw gains.
+
+    Used to verify CorePipeline._evaluate_and_select keeps features whose raw
+    gain indicates improvement under the configured direction.
+    """
+
+    def __init__(self, direction: MetricDirection, gains: dict[str, float]) -> None:
+        self.metric_direction = direction
+        self.gains = gains
+        self.config = type(
+            "Cfg", (), {"metric": "rmse" if direction is MetricDirection.MINIMIZE else "auc"}
+        )
+
+    def evaluate_baseline(self, X_train, y_train):
+        del X_train, y_train
+        return 0.5
+
+    def evaluate_feature(self, X_train, y_train, feature_df, baseline_score):
+        del X_train, y_train, baseline_score
+        # Return the raw gain for the single column in feature_df.
+        col = feature_df.columns[0]
+        return self.gains[col]
+
+
+class TestCorePipelineDirectionAwareSelection:
+    """Direction-aware selection in CorePipeline._evaluate_and_select."""
+
+    def test_minimize_metric_keeps_negative_raw_gain(self):
+        # RMSE: lower is better. A feature that drops the score from 0.5 → 0.3
+        # has raw gain -0.2 but is an improvement and must be kept.
+        config = Settings(metric="rmse", evaluation={"feature_eval_backend": "threading"})
+        evaluator = _DirectionalEvaluator(
+            MetricDirection.MINIMIZE, {"useful": -0.2, "harmful": 0.1}
+        )
+        pipeline = CorePipeline(
+            config=config, llm_client=FakeLLM(responses=["{}"]), evaluator=evaluator
+        )
+        X_train = pd.DataFrame({"a": [1.0, 2.0, 3.0, 4.0]})
+        y_train = pd.Series([1.0, 2.0, 3.0, 4.0])
+        # Both columns are non-constant so they survive prefiltering.
+        features = pd.DataFrame({"useful": [0.1, 0.2, 0.3, 0.4], "harmful": [0.9, 0.8, 0.7, 0.6]})
+
+        result = pipeline._evaluate_and_select(
+            features_train=features,
+            features_test=pd.DataFrame(),
+            X_train=X_train,
+            y_train=y_train,
+            X_test=None,
+            all_specs=[],
+            agents=[],
+            code="",
+        )
+
+        # "useful" improves RMSE (raw gain -0.2); "harmful" worsens it (raw +0.1).
+        assert list(result.selected_features_train.columns) == ["useful"]
+        # Raw gains preserved on PipelineResult for artifacts/memory.
+        assert result.gains == {"useful": -0.2, "harmful": 0.1}
+
+    def test_maximize_metric_keeps_positive_raw_gain(self):
+        # AUC: higher is better. Positive raw gain is kept, negative discarded.
+        config = Settings(metric="auc", evaluation={"feature_eval_backend": "threading"})
+        evaluator = _DirectionalEvaluator(
+            MetricDirection.MAXIMIZE, {"useful": 0.2, "harmful": -0.1}
+        )
+        pipeline = CorePipeline(
+            config=config, llm_client=FakeLLM(responses=["{}"]), evaluator=evaluator
+        )
+        X_train = pd.DataFrame({"a": [1.0, 2.0, 3.0, 4.0]})
+        y_train = pd.Series([0, 1, 0, 1])
+        features = pd.DataFrame({"useful": [0.1, 0.2, 0.3, 0.4], "harmful": [0.9, 0.8, 0.7, 0.6]})
+
+        result = pipeline._evaluate_and_select(
+            features_train=features,
+            features_test=pd.DataFrame(),
+            X_train=X_train,
+            y_train=y_train,
+            X_test=None,
+            all_specs=[],
+            agents=[],
+            code="",
+        )
+
+        assert list(result.selected_features_train.columns) == ["useful"]
+        assert result.gains == {"useful": 0.2, "harmful": -0.1}
+
+    def test_minimize_metric_failure_sentinel_never_selected(self):
+        # Under MINIMIZE, the failure sentinel must still be excluded even
+        # though +inf would otherwise look "good" if we sorted ascending.
+        config = Settings(metric="rmse", evaluation={"feature_eval_backend": "threading"})
+        evaluator = _DirectionalEvaluator(MetricDirection.MINIMIZE, {"good": -0.3})
+        pipeline = CorePipeline(
+            config=config,
+            llm_client=FakeLLM(responses=["{}"]),
+            evaluator=evaluator,
+        )
+        pipeline._eval_single_feature = (  # type: ignore[method-assign]
+            lambda evaluator_, X_train, y_train, feature_df, col, baseline_score: (
+                ValueError("boom") if col == "broken" else -0.3
+            )
+        )
+        X_train = pd.DataFrame({"a": [1.0, 2.0, 3.0, 4.0]})
+        y_train = pd.Series([1.0, 2.0, 3.0, 4.0])
+        features = pd.DataFrame({"good": [0.1, 0.2, 0.3, 0.4], "broken": [0.9, 0.8, 0.7, 0.6]})
+
+        result = pipeline._evaluate_and_select(
+            features_train=features,
+            features_test=pd.DataFrame(),
+            X_train=X_train,
+            y_train=y_train,
+            X_test=None,
+            all_specs=[],
+            agents=[],
+            code="",
+        )
+
+        # Only the improving feature is selected; the broken one is excluded.
+        assert list(result.selected_features_train.columns) == ["good"]

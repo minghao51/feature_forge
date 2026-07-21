@@ -8,7 +8,7 @@ Supports two modes:
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import pandas as pd
 
@@ -26,6 +26,9 @@ from feature_forge.methods.llmfe.prompts import (
 )
 from feature_forge.observability.structlog_config import get_logger
 from feature_forge.utils import run_coro_sync, strip_markdown_fences
+
+if TYPE_CHECKING:
+    from feature_forge.experiment.context import CaseExecutionContext
 
 logger = get_logger(__name__)
 
@@ -62,6 +65,22 @@ class LLMFEMethod(BaseMethod):
         self.evaluator = evaluator
         self.sandbox = EvaluationKit.from_settings(settings).sandbox
         self._iteration_codes: list[str] = []
+
+    @classmethod
+    def from_run_context(cls, ctx: CaseExecutionContext) -> LLMFEMethod:
+        """Build an LLMFE adapter from a resolved case context.
+
+        Reuses the context-owned ``llm_client`` (instead of self-building one
+        from settings), the case-resolved ``settings``/``evaluator``, and the
+        case's ``mode`` (defaulting to single_shot when unset).
+        """
+        mode: Literal["single_shot", "iterative"] = ctx.case.mode or "single_shot"  # type: ignore[assignment]
+        return cls(
+            llm_client=ctx.llm_client,
+            settings=ctx.settings,
+            evaluator=ctx.evaluator,
+            mode=mode,
+        )
 
     def fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> LLMFEMethod:
         run_coro_sync(self.async_fit(X_train, y_train))

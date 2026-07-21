@@ -10,7 +10,7 @@ Variants:
 from __future__ import annotations
 
 import warnings
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import pandas as pd
 
@@ -24,6 +24,9 @@ from feature_forge.methods.base import BaseMethod
 from feature_forge.methods.caafe.prompts import CAAFEUnifiedParams, get_registry
 from feature_forge.observability.structlog_config import get_logger
 from feature_forge.utils import run_coro_sync, strip_markdown_fences
+
+if TYPE_CHECKING:
+    from feature_forge.experiment.context import CaseExecutionContext
 
 logger = get_logger(__name__)
 
@@ -62,6 +65,24 @@ class CAAFEMethod(BaseMethod):
             self.sandbox = SandboxedExecutor()
         self._caafe: Any = None
         self._iteration_codes: list[str] = []
+
+    @classmethod
+    def from_run_context(cls, ctx: CaseExecutionContext) -> CAAFEMethod:
+        """Build a CAAFE adapter from a resolved case context.
+
+        Maps the case's ``mode`` to the CAAFE ``variant`` (``"fidelity"`` is
+        passed through; anything else becomes ``"unified"``). The unified
+        variant receives the context-owned ``llm_client`` — this closes the
+        historical gap where unified CAAFE raised through the platform had
+        ``llm_client=None`` and failed at fit time.
+        """
+        mode = ctx.case.mode
+        variant: Literal["unified", "fidelity"] = "fidelity" if mode == "fidelity" else "unified"
+        return cls(
+            llm_client=ctx.llm_client,
+            evaluator=ctx.evaluator,
+            variant=variant,
+        )
 
     def fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> CAAFEMethod:
         if self.variant == "fidelity":

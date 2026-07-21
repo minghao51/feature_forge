@@ -1,0 +1,96 @@
+{
+  "additionalProperties": false,
+  "description": "Requested global and per-case resource ceilings.",
+  "properties": {
+    "backoff_base_seconds": {
+      "default": 1.0,
+      "exclusiveMinimum": 0,
+      "title": "Backoff Base Seconds",
+      "type": "number"
+    },
+    "backoff_max_seconds": {
+      "default": 30.0,
+      "exclusiveMinimum": 0,
+      "title": "Backoff Max Seconds",
+      "type": "number"
+    },
+    "blas_threads": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Blas Threads",
+      "type": "integer"
+    },
+    "candidate_batch_size": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Candidate Batch Size",
+      "type": "integer"
+    },
+    "cv_backend": {
+      "default": "threading",
+      "enum": [
+        "threading",
+        "loky"
+      ],
+      "title": "Cv Backend",
+      "type": "string"
+    },
+    "cv_workers": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Cv Workers",
+      "type": "integer"
+    },
+    "experiment_workers": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Experiment Workers",
+      "type": "integer"
+    },
+    "llm_concurrency": {
+      "default": 3,
+      "minimum": 1,
+      "title": "Llm Concurrency",
+      "type": "integer"
+    },
+    "max_attempts": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Max Attempts",
+      "type": "integer"
+    },
+    "memory_budget_mb": {
+      "anyOf": [
+        {
+          "minimum": 128,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Memory Budget Mb"
+    },
+    "model_threads": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Model Threads",
+      "type": "integer"
+    },
+    "sandbox_workers": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Sandbox Workers",
+      "type": "integer"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "title": "ResourceConfig",
+  "type": "object"
+}

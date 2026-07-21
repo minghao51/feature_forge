@@ -225,7 +225,7 @@ experiments/                    # Experiment ablation directories
 - `uv-lock` — keeps lockfile in sync
 - `ruff-check --fix` + `ruff-format` (excludes notebooks/)
 - `conventional-pre-commit` for commit messages
-- Local hooks: `pip-audit`, `repo-hygiene`, `docs-references`, `mypy` (src only), `quarto-render` (notebooks)
+- Local hooks: `pip-audit`, `repo-hygiene`, `docs-references`, `mypy` (src only)
 
 ## Build/Dev Commands
 
@@ -239,8 +239,9 @@ uv run ruff check src/                     → Lint source code
 uv run ruff check src/ --fix               → Lint and auto-fix
 uv run ruff format src/                    → Format source code
 uv run mypy src/                           → Type-check source code
-uv run python -m feature_forge             → (Not applicable — library, not CLI)
-make docs                                  → Build documentation site
+uv run feature-forge --help                → Show the verification/catalog/planning CLI
+make docs-generated                        → Regenerate deterministic pipeline references
+make docs-check                            → Check generated freshness and strict MkDocs
+make docs                                  → Regenerate and build the documentation site
 make docs-serve                            → Serve docs locally with live reload
-make notebooks                             → Render all notebooks
 ```

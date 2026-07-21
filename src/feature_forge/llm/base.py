@@ -166,6 +166,9 @@ class LLMClient(ABC):
         Raises:
             LLMError: On API failure after all retries exhausted.
         """
+        from feature_forge.llm.replay import ensure_provider_allowed
+
+        ensure_provider_allowed("completion")
         return await self._retry(self._do_complete, messages, temperature, max_tokens, **kwargs)  # type: ignore[no-any-return]
 
     async def complete_json(
@@ -190,6 +193,9 @@ class LLMClient(ABC):
         Raises:
             LLMError: On API failure or invalid JSON after all retries.
         """
+        from feature_forge.llm.replay import ensure_provider_allowed
+
+        ensure_provider_allowed("JSON completion")
         return await self._retry(  # type: ignore[no-any-return]
             self._do_complete_json, messages, schema_description, temperature, max_tokens
         )

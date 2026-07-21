@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import time
 
+import numpy as np
 import pandas as pd
 import pytest
 
 from feature_forge.config import Settings
 from feature_forge.evaluation.cv import CVEvaluator
+from feature_forge.evaluation.metrics import MetricDirection
 from feature_forge.llm.base import LLMClient
 from feature_forge.methods.malmas.pipeline.core import CorePipeline
 
@@ -38,6 +40,10 @@ class _FakeLLM(LLMClient):
 
 
 class _FastEvaluator:
+    # Mirror the CVEvaluator surface that CorePipeline._evaluate_and_select
+    # reads (R18 direction-aware selection).
+    metric_direction = MetricDirection.MAXIMIZE
+
     def evaluate_baseline(self, X_train, y_train):
         del X_train, y_train
         return 0.5
@@ -71,6 +77,46 @@ def test_feature_eval_smoke_budget() -> None:
     assert isinstance(gain, float)
     # Smoke budget (lenient for CI variance).
     assert elapsed < 20.0
+
+
+def test_explicit_fold_evidence_parity_and_budget() -> None:
+    """Reproducible same-fold characterization for legacy versus evidence output."""
+    config = Settings(task="classification", metric="auc", evaluation={"cv_folds": 2})
+    evaluator = CVEvaluator(config=config)
+    rows = 300
+    X = pd.DataFrame(
+        {
+            "a": [i % 13 for i in range(rows)],
+            "b": [i % 7 for i in range(rows)],
+            "c": [i % 5 for i in range(rows)],
+        }
+    )
+    y = pd.Series([i % 2 for i in range(rows)])
+    row_ids = pd.Series([f"r{i}" for i in range(rows)])
+    assignments = np.full(rows, -1, dtype=np.int64)
+    for fold, (_, validation) in enumerate(evaluator._get_cv_splitter(y).split(X, y)):
+        assignments[validation] = fold
+    folds = pd.DataFrame({"row_id": row_ids, "fold": assignments})
+
+    started = time.perf_counter()
+    legacy_score = evaluator.evaluate_baseline(X, y, model_name="random_forest")
+    legacy_seconds = time.perf_counter() - started
+    started = time.perf_counter()
+    evidence = evaluator.evaluate_on_folds(
+        X,
+        y,
+        row_ids,
+        folds,
+        arm="baseline",
+        model_name="random_forest",
+    )
+    evidence_seconds = time.perf_counter() - started
+
+    assert evidence.fold_metrics["score"].mean() == pytest.approx(legacy_score, abs=1e-12)
+    assert len(evidence.predictions) == rows
+    assert len(evidence.fold_metrics) == 2
+    assert legacy_seconds < 20.0
+    assert evidence_seconds < 20.0
 
 
 @pytest.mark.parametrize("backend", ["threading", "loky"])

@@ -148,6 +148,21 @@ mlruns/
 # MkDocs
 .cache/mkdocs-jupyter/
 
-.claude/
+# Feature Forge local runtime and medallion state
+# `docs/generated/` is intentionally committed and freshness-checked in CI.
 .feature_forge_artifacts/
+.feature_forge_artifacts-*/
+.hamilton-cache/
+.hamilton_cache/
+*.duckdb
+*.duckdb.wal
+.*.duckdb.write-lock/
+.*.duckdb.rebuild-*
+
+# Local agent state; keep the active medallion handoffs reviewable.
+.claude/*
+!.claude/handoffs/
+.claude/handoffs/*
+!.claude/handoffs/2026-07-13-medallion-refactor.md
+!.claude/handoffs/2026-07-14-*.md
 .playwright-mcp/

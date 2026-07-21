@@ -23,6 +23,12 @@ llm:
 tracker:
   backend: "none"
   project: "feature-forge"
+  failure_policy: "optional"
+
+catalog:
+  enabled: true
+  path: ".feature_forge_artifacts/control/catalog/catalog.duckdb"
+  stale_run_seconds: 3600
 
 router:
   strategy: "hybrid"

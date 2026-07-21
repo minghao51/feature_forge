@@ -1,0 +1,84 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "agent": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Agent"
+    },
+    "candidate_id": {
+      "minLength": 1,
+      "title": "Candidate Id",
+      "type": "string"
+    },
+    "code_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Code Sha256",
+      "type": "string"
+    },
+    "dependencies": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Dependencies",
+      "type": "array"
+    },
+    "method": {
+      "minLength": 1,
+      "title": "Method",
+      "type": "string"
+    },
+    "method_version": {
+      "minLength": 1,
+      "title": "Method Version",
+      "type": "string"
+    },
+    "prompt_bundle_fingerprint": {
+      "minLength": 1,
+      "title": "Prompt Bundle Fingerprint",
+      "type": "string"
+    },
+    "round_index": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Round Index"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source_columns": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Source Columns",
+      "type": "array"
+    }
+  },
+  "required": [
+    "candidate_id",
+    "method",
+    "method_version",
+    "prompt_bundle_fingerprint",
+    "code_sha256"
+  ],
+  "title": "FeatureProvenance",
+  "type": "object"
+}

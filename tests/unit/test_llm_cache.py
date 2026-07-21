@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from feature_forge.config import RetryConfig
+from feature_forge.exceptions import LLMError
 from feature_forge.llm.base import LLMClient, LLMResponse
 from feature_forge.llm.cache import DiskCache
 from feature_forge.llm.providers.deepseek import DeepSeekProvider
@@ -151,6 +152,10 @@ class TestLLMClientCaching:
         fake.set_retry_config(RetryConfig(max_retries=3, backoff_base=0.01, backoff_max=0.01))
 
         msg = [{"role": "user", "content": "test"}]
+        with pytest.raises(LLMError, match="invalid JSON"):
+            await fake.complete_json(msg, schema_description="A JSON object")
+        assert fake.call_count == 1
+
         result = await fake.complete_json(msg, schema_description="A JSON object")
         assert result == {"result": "ok"}
         assert fake.call_count == 2

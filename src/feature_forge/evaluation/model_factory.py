@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable
+from importlib import metadata
 from typing import Any, ClassVar
 
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
@@ -58,6 +59,7 @@ def create_catboost(task: str, random_state: int = 42) -> Any:
         "learning_rate": 0.02,
         "verbose": False,
         "random_state": random_state,
+        "thread_count": 1,
     }
     return CatBoostClassifier(**kwargs) if task == "classification" else CatBoostRegressor(**kwargs)
 
@@ -164,8 +166,9 @@ class ModelRegistry:
 class ModelFactory:
     """Factory for creating ML models by name and task."""
 
-    def __init__(self, random_state: int = 42) -> None:
+    def __init__(self, random_state: int = 42, model_threads: int = 1) -> None:
         self.random_state = random_state
+        self.model_threads = model_threads
 
     def get_model(self, model_name: str | None, task: str) -> Any:
         """Create a model instance.
@@ -179,4 +182,36 @@ class ModelFactory:
         """
         name = (model_name or "xgboost").lower()
         factory = ModelRegistry.get(name)
-        return factory(task, self.random_state)
+        estimator = factory(task, self.random_state)
+        if hasattr(estimator, "get_params") and hasattr(estimator, "set_params"):
+            parameters = estimator.get_params(deep=False)
+            thread_parameter = next(
+                (key for key in ("n_jobs", "thread_count", "num_threads") if key in parameters),
+                None,
+            )
+            if thread_parameter is not None:
+                estimator.set_params(**{thread_parameter: self.model_threads})
+        return estimator
+
+    def describe_model(self, model_name: str | None, task: str) -> dict[str, Any]:
+        """Resolve immutable estimator identity and effective hyperparameters."""
+        name = (model_name or "xgboost").lower()
+        estimator = self.get_model(name, task)
+        module = type(estimator).__module__
+        package = module.split(".", maxsplit=1)[0]
+        distributions = metadata.packages_distributions().get(package, [package])
+        distribution = distributions[0]
+        try:
+            version = metadata.version(distribution)
+        except metadata.PackageNotFoundError:
+            version = "unknown"
+        params = estimator.get_params(deep=True) if hasattr(estimator, "get_params") else {}
+        return {
+            "name": name,
+            "estimator_class": f"{module}.{type(estimator).__qualname__}",
+            "distribution": distribution,
+            "distribution_version": version,
+            "resolved_params": params,
+            "task": task,
+            "seed": self.random_state,
+        }

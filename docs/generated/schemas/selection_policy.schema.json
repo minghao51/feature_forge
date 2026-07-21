@@ -1,0 +1,47 @@
+{
+  "additionalProperties": false,
+  "description": "Final evidence-based feature selection policy.",
+  "properties": {
+    "max_selected_features": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Selected Features"
+    },
+    "minimum_practical_gain": {
+      "default": 0.0,
+      "minimum": 0,
+      "title": "Minimum Practical Gain",
+      "type": "number"
+    },
+    "profile": {
+      "default": "compatibility",
+      "enum": [
+        "compatibility",
+        "recommended"
+      ],
+      "title": "Profile",
+      "type": "string"
+    },
+    "require_positive_lower_bound": {
+      "default": false,
+      "title": "Require Positive Lower Bound",
+      "type": "boolean"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "title": "SelectionPolicy",
+  "type": "object"
+}

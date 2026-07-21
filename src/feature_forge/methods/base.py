@@ -101,6 +101,11 @@ class BaseMethod(ArtifactExporter):
             return []
         meta: list[dict[str, Any]] = []
         for it in iterations:
+            # Iteration records store *directional* gains (sign-flipped for
+            # minimize metrics) because they are populated from the
+            # `_evaluate_and_select` `kept_gains` mapping. The `gain > 0`
+            # check below therefore means "improved the configured metric"
+            # regardless of optimization direction.
             for col, gain in it.get("gains", {}).items():
                 meta.append(
                     {
@@ -148,18 +153,27 @@ class BaseMethod(ArtifactExporter):
         baseline_score: float,
         cumulative_cols: list[str],
     ) -> tuple[pd.DataFrame, dict[str, float]]:
-        """Evaluate ``new_features`` against baseline; keep those with positive gain.
+        """Evaluate ``new_features`` against baseline; keep those that improve the metric.
 
-        Appends kept column names to ``cumulative_cols`` in place.
+        Selection is direction-aware: uses
+        :meth:`CVEvaluator.evaluate_features_batch_directional` so a positive
+        returned gain always means "improvement", whether the configured
+        metric is maximized (AUC/ACC/F1/R²) or minimized (RMSE/MAE/NRMSE).
+
+        The returned ``kept_gains`` are therefore **directional** (sign-flipped
+        for minimize metrics); consumers that persist raw deltas should call
+        ``evaluator.evaluate_features_batch`` separately. Appends kept column
+        names to ``cumulative_cols`` in place.
 
         Returns:
             ``(kept_features, kept_gains)`` — the kept columns as a DataFrame
-            (indexed like ``X``) and a mapping of kept column → gain.
+            (indexed like ``X``) and a mapping of kept column → directional gain.
         """
         kept_features = pd.DataFrame(index=X.index)
         kept_gains: dict[str, float] = {}
         if new_features.columns.size > 0:
-            all_gains = evaluator.evaluate_features_batch(
+            # Directional gains: positive => improvement under either direction.
+            all_gains = evaluator.evaluate_features_batch_directional(
                 X, y, new_features, baseline_score=baseline_score
             )
             for col, gain in all_gains.items():

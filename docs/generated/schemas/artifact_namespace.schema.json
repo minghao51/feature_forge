@@ -1,0 +1,33 @@
+{
+  "$defs": {
+    "Layer": {
+      "description": "Durable maturity layer for an experiment artifact.",
+      "enum": [
+        "bronze",
+        "silver",
+        "gold",
+        "platinum"
+      ],
+      "title": "Layer",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Stable location for one run and one durable layer.",
+  "properties": {
+    "layer": {
+      "$ref": "#/$defs/Layer"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "layer",
+    "run_id"
+  ],
+  "title": "ArtifactNamespace",
+  "type": "object"
+}

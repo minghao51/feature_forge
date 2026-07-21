@@ -239,7 +239,7 @@ class TestMalmusMethodIterative:
         llm = FakeJsonLLM(ITERATIVE_JSON)
         mock_evaluator.evaluate_baseline.return_value = 0.7
         mock_evaluator.evaluate_feature.return_value = 0.05
-        mock_evaluator.evaluate_features_batch.return_value = {"ratio_ab": 0.05}
+        mock_evaluator.evaluate_features_batch_directional.return_value = {"ratio_ab": 0.05}
 
         method = MalmusMethod(
             llm_client=llm, mode="iterative", n_features=1, evaluator=mock_evaluator
@@ -256,7 +256,7 @@ class TestMalmusMethodIterative:
         llm = FakeJsonLLM(ITERATIVE_JSON)
         mock_evaluator.evaluate_baseline.return_value = 0.7
         mock_evaluator.evaluate_feature.return_value = -0.02
-        mock_evaluator.evaluate_features_batch.return_value = {"ratio_ab": -0.02}
+        mock_evaluator.evaluate_features_batch_directional.return_value = {"ratio_ab": -0.02}
 
         method = MalmusMethod(
             llm_client=llm, mode="iterative", n_features=1, evaluator=mock_evaluator
@@ -274,7 +274,7 @@ class TestMalmusMethodIterative:
         llm = FakeJsonLLM(ITERATIVE_JSON)
         mock_evaluator.evaluate_baseline.return_value = 0.85
         mock_evaluator.evaluate_feature.return_value = 0.03
-        mock_evaluator.evaluate_features_batch.return_value = {"ratio_ab": 0.03}
+        mock_evaluator.evaluate_features_batch_directional.return_value = {"ratio_ab": 0.03}
 
         method = MalmusMethod(
             llm_client=llm, mode="iterative", n_features=1, evaluator=mock_evaluator
@@ -289,7 +289,7 @@ class TestMalmusMethodIterative:
         llm = FakeJsonLLM(ITERATIVE_JSON)
         mock_evaluator.evaluate_baseline.return_value = 0.7
         mock_evaluator.evaluate_feature.return_value = 0.05
-        mock_evaluator.evaluate_features_batch.return_value = {"ratio_ab": 0.05}
+        mock_evaluator.evaluate_features_batch_directional.return_value = {"ratio_ab": 0.05}
 
         method = MalmusMethod(
             llm_client=llm, mode="iterative", n_features=1, evaluator=mock_evaluator
@@ -306,7 +306,7 @@ class TestMalmusMethodIterative:
         llm = FakeJsonLLM(ITERATIVE_JSON)
         mock_evaluator.evaluate_baseline.return_value = 0.7
         mock_evaluator.evaluate_feature.return_value = 0.05
-        mock_evaluator.evaluate_features_batch.return_value = {"ratio_ab": 0.05}
+        mock_evaluator.evaluate_features_batch_directional.return_value = {"ratio_ab": 0.05}
 
         method = MalmusMethod(
             llm_client=llm, mode="iterative", n_features=1, evaluator=mock_evaluator
@@ -326,7 +326,7 @@ class TestMalmusMethodIterative:
         llm = FakeJsonLLM(ITERATIVE_JSON)
         mock_evaluator.evaluate_baseline.return_value = 0.7
         mock_evaluator.evaluate_feature.return_value = 0.05
-        mock_evaluator.evaluate_features_batch.return_value = {"ratio_ab": 0.05}
+        mock_evaluator.evaluate_features_batch_directional.return_value = {"ratio_ab": 0.05}
 
         method = MalmusMethod(
             llm_client=llm, mode="iterative", n_features=1, evaluator=mock_evaluator

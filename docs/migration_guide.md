@@ -1,5 +1,9 @@
 # Migration Guide
 
+For the optional Hamilton and manifest-backed runtime, see
+[Migrating to the medallion runtime](migration/medallion.md). The guide below covers the
+earlier MALMAS/package/API migrations.
+
 ## From MALMAS to Feature Forge
 
 ### Configuration

@@ -83,6 +83,17 @@ def pool_worker(case: ExperimentCase) -> ExperimentResult:
         gain=0.1,
         baseline_score=0.8,
         num_features_generated=1,
+        run_id=f"run-{case.seed}",
+        state="succeeded",
+        manifest_uri=f"04_platinum/runs/run-{case.seed}/manifest.json",
+        uncertainty={"lower_bound": 0.01, "upper_bound": 0.19},
+        silver_fingerprint="silver",
+        gold_fingerprint="gold",
+        platinum_fingerprint="platinum",
+        directional_gain=0.1,
+        selection_profile="recommended",
+        metric="auc",
+        metric_direction="maximize",
     )
 
 
@@ -103,6 +114,11 @@ def test_case_executor_success_and_tracker_side_effects(monkeypatch):
     assert result.error is None
     assert result.dataset == "demo"
     assert result.method == "dummy"
+    assert result.num_candidate_features == 1
+    assert result.num_executed_features == 1
+    assert result.num_accepted_features == 1
+    assert result.num_accepted_output_columns == 1
+    assert result.feature_failure_counts == {}
     assert tracker.inits == 1
     assert tracker.finishes == 1
     assert tracker.metrics_logs == 1

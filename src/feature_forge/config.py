@@ -21,6 +21,7 @@ Example:
 from __future__ import annotations
 
 import functools
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, SecretStr, field_validator
@@ -30,6 +31,8 @@ from pydantic_settings import (
     SettingsConfigDict,
     YamlConfigSettingsSource,
 )
+
+from feature_forge.contracts.orchestration import ResourceConfig
 
 
 class LLMConfig(BaseModel):
@@ -101,6 +104,15 @@ class TrackerConfig(BaseModel):
     backend: Literal["wandb", "mlflow", "none"] = "none"
     project: str = "feature-forge"
     entity: str | None = None
+    failure_policy: Literal["optional", "required"] = "optional"
+
+
+class CatalogConfig(BaseModel):
+    """Configuration for the rebuildable local DuckDB index."""
+
+    enabled: bool = True
+    path: Path = Path(".feature_forge_artifacts/control/catalog/catalog.duckdb")
+    stale_run_seconds: float = Field(default=3600.0, gt=0)
 
 
 class RouterConfig(BaseModel):
@@ -199,6 +211,7 @@ class EvaluationConfig(BaseModel):
     fail_on_agent_error: bool = False
     sandbox_timeout_seconds: float = 5.0
     sandbox_max_memory_mb: int = 512
+    max_sandbox_workers: int = 1
     max_candidate_features: int = 50
     max_cv_workers: int | None = None
     feature_eval_backend: Literal["threading", "loky"] = "threading"
@@ -231,11 +244,11 @@ class EvaluationConfig(BaseModel):
             raise ValueError(f"max_candidate_features must be >= 1, got {v}")
         return v
 
-    @field_validator("max_cv_workers")
+    @field_validator("max_cv_workers", "max_sandbox_workers")
     @classmethod
     def _validate_max_cv_workers(cls, v: int | None) -> int | None:
         if v is not None and v < 1:
-            raise ValueError(f"max_cv_workers must be >= 1 when set, got {v}")
+            raise ValueError(f"worker limit must be >= 1 when set, got {v}")
         return v
 
 
@@ -268,10 +281,12 @@ class Settings(BaseSettings):
     # Subsystem configs
     llm: LLMConfig = Field(default_factory=LLMConfig)
     tracker: TrackerConfig = Field(default_factory=TrackerConfig)
+    catalog: CatalogConfig = Field(default_factory=CatalogConfig)
     router: RouterConfig = Field(default_factory=RouterConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     retry: RetryConfig = Field(default_factory=RetryConfig)
     evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
+    resources: ResourceConfig = Field(default_factory=ResourceConfig)
 
     @field_validator("n_rounds")
     @classmethod

@@ -1,0 +1,46 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "accepted_output_columns": {
+      "minimum": 0,
+      "title": "Accepted Output Columns",
+      "type": "integer"
+    },
+    "candidates_accepted": {
+      "minimum": 0,
+      "title": "Candidates Accepted",
+      "type": "integer"
+    },
+    "candidates_executed": {
+      "minimum": 0,
+      "title": "Candidates Executed",
+      "type": "integer"
+    },
+    "candidates_proposed": {
+      "minimum": 0,
+      "title": "Candidates Proposed",
+      "type": "integer"
+    },
+    "failure_counts": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "title": "Failure Counts",
+      "type": "object"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "candidates_proposed",
+    "candidates_executed",
+    "candidates_accepted",
+    "accepted_output_columns"
+  ],
+  "title": "GoldFeatureCounts",
+  "type": "object"
+}

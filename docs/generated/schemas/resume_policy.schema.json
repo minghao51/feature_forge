@@ -1,0 +1,29 @@
+{
+  "additionalProperties": false,
+  "description": "Fail-closed policy for reusable and damaged artifact packages.",
+  "properties": {
+    "allow_cross_run_reuse": {
+      "default": true,
+      "title": "Allow Cross Run Reuse",
+      "type": "boolean"
+    },
+    "enabled": {
+      "default": false,
+      "title": "Enabled",
+      "type": "boolean"
+    },
+    "recompute_invalid": {
+      "default": false,
+      "title": "Recompute Invalid",
+      "type": "boolean"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "title": "ResumePolicy",
+  "type": "object"
+}

@@ -18,6 +18,7 @@ from joblib import Parallel, delayed  # type: ignore[import-untyped]
 from feature_forge.config import Settings
 from feature_forge.evaluation.cv import CVEvaluator
 from feature_forge.evaluation.kit import EvaluationKit
+from feature_forge.evaluation.metrics import MetricDirection
 from feature_forge.evaluation.prefilter import prefilter_candidate_columns
 from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.exceptions import CodeExecutionError, PipelineError
@@ -117,13 +118,21 @@ class CorePipeline:
         self.code_generator = code_generator or CodeGenerator(
             llm_client, max_tokens=config.llm.codegen_max_tokens
         )
-        self._baseline_cache: dict[tuple[frozenset[str], int, int], float] = {}
+        self._baseline_cache: dict[str, float] = {}
 
     @staticmethod
-    def _baseline_cache_key(
-        X_train: pd.DataFrame, y_train: pd.Series
-    ) -> tuple[frozenset[str], int, int]:
-        return (frozenset(X_train.columns), len(X_train), id(y_train))
+    def _baseline_cache_key(X_train: pd.DataFrame, y_train: pd.Series) -> str:
+        """Return a deterministic, disposable cache key without object identity."""
+        from feature_forge.storage.hashing import fingerprint
+
+        return fingerprint(
+            {
+                "columns": [str(column) for column in X_train.columns],
+                "dtypes": [str(dtype) for dtype in X_train.dtypes],
+                "rows": len(X_train),
+                "target": [int(value) for value in pd.util.hash_pandas_object(y_train, index=True)],
+            }
+        )
 
     async def run(
         self,
@@ -156,6 +165,7 @@ class CorePipeline:
             context if isinstance(context, list) else [dict(context or {}) for _ in agents]
         )
         semaphore = asyncio.Semaphore(self.config.llm.max_concurrent_calls)
+        sandbox_semaphore = asyncio.Semaphore(self.config.evaluation.max_sandbox_workers)
 
         all_specs = await self._generate_specs(
             agents, X_train, y_train, per_agent_contexts, semaphore
@@ -168,7 +178,7 @@ class CorePipeline:
 
         schema = self._build_schema(X_train)
         features_train, code, all_code_parts = await self._execute_train(
-            all_specs, X_train, schema, semaphore
+            all_specs, X_train, schema, semaphore, sandbox_semaphore
         )
 
         features_test = await self._execute_test(all_code_parts, X_test)
@@ -188,13 +198,19 @@ class CorePipeline:
             code,
         )
         pipeline_latency_ms = round((time.perf_counter() - pipeline_t0) * 1000, 1)
+        # `num_effective` is direction-aware: it counts features whose raw gain
+        # improved the configured metric (positive directional gain).
+        maximize_completed = self.evaluator.metric_direction is not MetricDirection.MINIMIZE
+        num_effective = len(
+            [g for g in result.gains.values() if (g > 0 if maximize_completed else g < 0)]
+        )
         logger.info(
             "pipeline_complete",
             num_specs=len(all_specs),
             num_selected=len(result.selected_features_train.columns)
             if not result.selected_features_train.empty
             else 0,
-            num_effective=len([g for g in result.gains.values() if g > 0]),
+            num_effective=num_effective,
             baseline_score=round(result.baseline_score, 6),
             latency_ms=pipeline_latency_ms,
         )
@@ -281,6 +297,7 @@ class CorePipeline:
         X_train: pd.DataFrame,
         schema: dict[str, Any],
         semaphore: asyncio.Semaphore,
+        sandbox_semaphore: asyncio.Semaphore,
     ) -> tuple[pd.DataFrame, str, list[tuple[str, str]]]:
         specs_by_agent: dict[str, list[FeatureSpec]] = defaultdict(list)
         for spec in all_specs:
@@ -329,13 +346,14 @@ class CorePipeline:
 
         sandbox_timeout = self.config.evaluation.sandbox_timeout_seconds
 
-        exec_results = await asyncio.gather(
-            *[
-                _exec_sandbox(
+        async def _execute_one(name: str, code: str) -> tuple[str, pd.DataFrame] | None:
+            async with sandbox_semaphore:
+                return await _exec_sandbox(
                     self.sandbox, name, code, X_train, "malmas_core_train", sandbox_timeout
                 )
-                for name, code in unique_code_parts
-            ]
+
+        exec_results = await asyncio.gather(
+            *[_execute_one(name, code) for name, code in unique_code_parts]
         )
 
         features_train_parts: list[pd.DataFrame] = []
@@ -370,11 +388,16 @@ class CorePipeline:
             return pd.DataFrame()
 
         sandbox_timeout = self.config.evaluation.sandbox_timeout_seconds
+        sandbox_semaphore = asyncio.Semaphore(self.config.evaluation.max_sandbox_workers)
+
+        async def _execute_one(name: str, code: str) -> tuple[str, pd.DataFrame] | None:
+            async with sandbox_semaphore:
+                return await _exec_sandbox(
+                    self.sandbox, name, code, X_test, "malmas_core_test", sandbox_timeout
+                )
+
         test_exec_results = await asyncio.gather(
-            *[
-                _exec_sandbox(self.sandbox, name, code, X_test, "malmas_core_test", sandbox_timeout)
-                for name, code in all_code_parts
-            ],
+            *[_execute_one(name, code) for name, code in all_code_parts],
             return_exceptions=True,
         )
 
@@ -407,6 +430,19 @@ class CorePipeline:
         logger.info(
             "evaluation_baseline", score=round(baseline_score, 6), metric=self.config.metric
         )
+        # Direction-aware selection: for minimize metrics (RMSE/MAE/NRMSE) a
+        # negative raw gain is an improvement. `_directional` flips the sign so
+        # that "directional > 0" always means "improved the configured metric".
+        maximize = self.evaluator.metric_direction is not MetricDirection.MINIMIZE
+
+        def _directional(raw: float) -> float:
+            return raw if maximize else -raw
+
+        # Sentinel used when a candidate fails evaluation. It must always sort
+        # strictly worse than any real gain under either direction so failures
+        # are never selected as "effective".
+        bad_sentinel = float("-inf") if maximize else float("inf")
+
         gains: dict[str, float] = {}
         candidate_columns = self._prefilter_candidate_columns(features_train)
 
@@ -444,18 +480,21 @@ class CorePipeline:
                     raise PipelineError(
                         f"Feature evaluation failed for '{col}': {result}"
                     ) from result
-                gains[col] = float("-inf")
+                gains[col] = bad_sentinel
             else:
                 gains[col] = result
                 logger.debug(
                     "feature_evaluated",
                     feature=col,
                     gain=round(result, 6),
-                    effective=result > 0,
+                    effective=_directional(result) > 0,
                 )
 
-        effective = {k: v for k, v in gains.items() if v > 0}
-        top_k = sorted(effective.items(), key=lambda x: x[1], reverse=True)
+        # Keep raw gains in `gains` (returned on PipelineResult for artifacts
+        # and for downstream memory/agent reporting), but select on the
+        # directional value so minimize metrics keep improvements.
+        effective = {k: v for k, v in gains.items() if _directional(v) > 0}
+        top_k = sorted(effective.items(), key=lambda kv: _directional(kv[1]), reverse=True)
         top_k_names = [name for name, _ in top_k[: self.config.min_effective]]
 
         top_features_train = (

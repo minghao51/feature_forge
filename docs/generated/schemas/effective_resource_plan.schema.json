@@ -1,0 +1,116 @@
+{
+  "additionalProperties": false,
+  "description": "Deterministic safe resource plan applied to every case.",
+  "properties": {
+    "adjustments": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Adjustments",
+      "type": "array"
+    },
+    "backoff_base_seconds": {
+      "exclusiveMinimum": 0,
+      "title": "Backoff Base Seconds",
+      "type": "number"
+    },
+    "backoff_max_seconds": {
+      "exclusiveMinimum": 0,
+      "title": "Backoff Max Seconds",
+      "type": "number"
+    },
+    "blas_threads": {
+      "minimum": 1,
+      "title": "Blas Threads",
+      "type": "integer"
+    },
+    "candidate_batch_size": {
+      "minimum": 1,
+      "title": "Candidate Batch Size",
+      "type": "integer"
+    },
+    "cv_backend": {
+      "enum": [
+        "threading",
+        "loky"
+      ],
+      "title": "Cv Backend",
+      "type": "string"
+    },
+    "cv_workers": {
+      "minimum": 1,
+      "title": "Cv Workers",
+      "type": "integer"
+    },
+    "experiment_workers": {
+      "minimum": 1,
+      "title": "Experiment Workers",
+      "type": "integer"
+    },
+    "heavy_parallel_layer": {
+      "enum": [
+        "outer",
+        "llm",
+        "cv",
+        "none"
+      ],
+      "title": "Heavy Parallel Layer",
+      "type": "string"
+    },
+    "llm_concurrency": {
+      "minimum": 1,
+      "title": "Llm Concurrency",
+      "type": "integer"
+    },
+    "max_attempts": {
+      "minimum": 1,
+      "title": "Max Attempts",
+      "type": "integer"
+    },
+    "memory_budget_mb": {
+      "anyOf": [
+        {
+          "minimum": 128,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Memory Budget Mb"
+    },
+    "model_threads": {
+      "minimum": 1,
+      "title": "Model Threads",
+      "type": "integer"
+    },
+    "sandbox_workers": {
+      "minimum": 1,
+      "title": "Sandbox Workers",
+      "type": "integer"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "experiment_workers",
+    "llm_concurrency",
+    "sandbox_workers",
+    "candidate_batch_size",
+    "cv_workers",
+    "cv_backend",
+    "model_threads",
+    "blas_threads",
+    "max_attempts",
+    "backoff_base_seconds",
+    "backoff_max_seconds",
+    "heavy_parallel_layer"
+  ],
+  "title": "EffectiveResourcePlan",
+  "type": "object"
+}

@@ -1,0 +1,100 @@
+{
+  "$defs": {
+    "CatalogIssue": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "minLength": 1,
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "CatalogIssue",
+      "type": "object"
+    },
+    "VerificationStatus": {
+      "enum": [
+        "valid",
+        "invalid",
+        "missing",
+        "incompatible",
+        "operational_error"
+      ],
+      "title": "VerificationStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "details": {
+      "additionalProperties": true,
+      "title": "Details",
+      "type": "object"
+    },
+    "issues": {
+      "items": {
+        "$ref": "#/$defs/CatalogIssue"
+      },
+      "title": "Issues",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/VerificationStatus"
+    },
+    "subject": {
+      "title": "Subject",
+      "type": "string"
+    }
+  },
+  "required": [
+    "subject",
+    "status"
+  ],
+  "title": "VerificationResult",
+  "type": "object"
+}

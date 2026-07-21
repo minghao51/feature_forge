@@ -8,6 +8,7 @@ from __future__ import annotations
 import threading
 import warnings
 from collections.abc import Callable
+from enum import StrEnum
 from typing import Any, ClassVar
 
 import numpy as np
@@ -90,6 +91,24 @@ METRIC_REGISTRY: dict[str, Callable[..., Any]] = {
 }
 
 
+class MetricDirection(StrEnum):
+    """Whether a larger or smaller metric value represents improvement."""
+
+    MAXIMIZE = "maximize"
+    MINIMIZE = "minimize"
+
+
+METRIC_DIRECTIONS: dict[str, MetricDirection] = {
+    "auc": MetricDirection.MAXIMIZE,
+    "acc": MetricDirection.MAXIMIZE,
+    "f1": MetricDirection.MAXIMIZE,
+    "rmse": MetricDirection.MINIMIZE,
+    "mae": MetricDirection.MINIMIZE,
+    "r2": MetricDirection.MAXIMIZE,
+    "nrmse": MetricDirection.MINIMIZE,
+}
+
+
 _registry_lock = threading.Lock()
 
 
@@ -104,6 +123,7 @@ class MetricRegistry:
     ENTRY_POINT_GROUP = "feature_forge.metrics"
 
     _builtin: ClassVar[dict[str, Callable[..., Any]]] = dict(METRIC_REGISTRY)
+    _directions: ClassVar[dict[str, MetricDirection]] = dict(METRIC_DIRECTIONS)
     _discovered: ClassVar[dict[str, Callable[..., Any]] | None] = None
 
     @classmethod
@@ -146,7 +166,13 @@ class MetricRegistry:
         return metrics[name]
 
     @classmethod
-    def register(cls, name: str, fn: Callable[..., Any]) -> None:
+    def register(
+        cls,
+        name: str,
+        fn: Callable[..., Any],
+        *,
+        direction: MetricDirection | str | None = None,
+    ) -> None:
         """Register a metric programmatically."""
         if name in cls._builtin:
             warnings.warn(
@@ -155,14 +181,34 @@ class MetricRegistry:
                 stacklevel=2,
             )
         cls._builtin[name] = fn
+        if direction is not None:
+            cls._directions[name] = MetricDirection(direction)
+
+    @classmethod
+    def get_direction(cls, name: str) -> MetricDirection:
+        """Return explicit metric direction; unknown plugin semantics fail closed."""
+        if name not in cls.get_all():
+            raise EvaluationError(f"Unknown metric: {name}")
+        try:
+            return cls._directions[name]
+        except KeyError as exc:
+            raise EvaluationError(
+                f"Metric '{name}' has no direction metadata; register it with direction="
+            ) from exc
 
     @classmethod
     def reset(cls) -> None:
         """Reset programmatically registered metrics and clear discovered cache."""
         cls._builtin = dict(METRIC_REGISTRY)
+        cls._directions = dict(METRIC_DIRECTIONS)
         cls._discovered = None
 
 
 def get_metric(name: str) -> Callable[..., Any]:
     """Get metric function by name (delegates to MetricRegistry)."""
     return MetricRegistry.get(name)
+
+
+def get_metric_direction(name: str) -> MetricDirection:
+    """Return the registered optimization direction for a metric."""
+    return MetricRegistry.get_direction(name)

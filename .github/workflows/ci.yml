@@ -50,6 +50,20 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  pipeline:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync --extra pipeline --group dev
+      - run: uv run pytest tests/unit/test_silver_dataflow.py -q
+
   security:
     runs-on: ubuntu-24.04
     steps:
@@ -70,3 +84,17 @@ jobs:
       - run: uv sync --group dev
       - run: uv run python scripts/check_repo_hygiene.py
       - run: uv run python scripts/check_docs_references.py
+
+  docs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --extra pipeline --group dev
+      - run: uv run --extra pipeline python scripts/generate_medallion_docs.py --check
+      - run: uv run --extra pipeline pytest tests/unit/test_documentation.py -q
+      - run: uv run python scripts/check_repo_hygiene.py
+      - run: uv run python scripts/check_docs_references.py
+      - run: uv run python scripts/build_docs_offline.py

@@ -1,0 +1,286 @@
+{
+  "final_vars": [
+    "silver_materialization"
+  ],
+  "nodes": [
+    {
+      "dependencies": [],
+      "name": "artifact_store",
+      "tags": {}
+    },
+    {
+      "dependencies": [
+        "bronze_snapshot"
+      ],
+      "name": "bronze_checks",
+      "tags": {
+        "cost": "cheap",
+        "layer": "bronze",
+        "module": "feature_forge.dataflows.silver",
+        "owner": "verification",
+        "persistence": "none",
+        "sensitivity": "metadata"
+      }
+    },
+    {
+      "dependencies": [
+        "bronze_checks",
+        "bronze_snapshot",
+        "dataset_request",
+        "environment_snapshot",
+        "source_metadata"
+      ],
+      "name": "bronze_manifest",
+      "tags": {
+        "cost": "cheap",
+        "layer": "bronze",
+        "module": "feature_forge.dataflows.silver",
+        "owner": "verification",
+        "persistence": "none",
+        "sensitivity": "metadata"
+      }
+    },
+    {
+      "dependencies": [
+        "artifact_store",
+        "bronze_checks",
+        "bronze_manifest",
+        "bronze_snapshot",
+        "dataset_request",
+        "execution_profile",
+        "raw_dataset"
+      ],
+      "name": "bronze_materialization",
+      "tags": {
+        "cost": "io",
+        "layer": "bronze",
+        "module": "feature_forge.dataflows.silver",
+        "owner": "storage",
+        "persistence": "boundary",
+        "sensitivity": "dataset-derived"
+      }
+    },
+    {
+      "dependencies": [
+        "dataset_request",
+        "raw_dataset"
+      ],
+      "name": "bronze_snapshot",
+      "tags": {
+        "cost": "cheap",
+        "layer": "bronze",
+        "module": "feature_forge.dataflows.silver",
+        "owner": "data",
+        "persistence": "boundary",
+        "sensitivity": "dataset-derived"
+      }
+    },
+    {
+      "dependencies": [
+        "bronze_snapshot",
+        "raw_dataset"
+      ],
+      "name": "canonical_features",
+      "tags": {
+        "cost": "cheap",
+        "layer": "silver",
+        "module": "feature_forge.dataflows.silver",
+        "owner": "data",
+        "persistence": "boundary",
+        "sensitivity": "dataset-derived"
+      }
+    },
+    {
+      "dependencies": [
+        "bronze_snapshot",
+        "raw_dataset"
+      ],
+      "name": "canonical_target",
+      "tags": {
+        "cost": "cheap",
+        "layer": "silver",
+        "module": "feature_forge.dataflows.silver",
+        "owner": "data",
+        "persistence": "boundary",
+        "sensitivity": "target"
+      }
+    },
+    {
+      "dependencies": [
+        "bronze_snapshot",
+        "dataset_request"
+      ],
+      "name": "dataset_fingerprint_value",
+      "tags": {
+        "cost": "cheap",
+        "layer": "silver",
+        "module": "feature_forge.dataflows.silver",
+        "owner": "data",
+        "persistence": "none",
+        "sensitivity": "metadata"
+      }
+    },
+    {
+      "dependencies": [
+        "bronze_snapshot",
+        "canonical_features",
+        "canonical_target",
+        "dataset_fingerprint_value"
+      ],
+      "name": "dataset_profile",
+      "tags": {
+        "cost": "cheap",
+        "layer": "silver",
+        "module": "feature_forge.dataflows.silver",
+        "owner": "data",
+        "persistence": "boundary",
+        "sensitivity": "dataset-derived"
+      }
+    },
+    {
+      "dependencies": [],
+      "name": "dataset_registry",
+      "tags": {}
+    },
+    {
+      "dependencies": [],
+      "name": "dataset_request",
+      "tags": {}
+    },
+    {
+      "dependencies": [],
+      "name": "environment_snapshot",
+      "tags": {}
+    },
+    {
+      "dependencies": [],
+      "name": "execution_profile",
+      "tags": {}
+    },
+    {
+      "dependencies": [
+        "canonical_features",
+        "canonical_target",
+        "dataset_request",
+        "row_ids"
+      ],
+      "name": "fold_assignments",
+      "tags": {
+        "cost": "cheap",
+        "layer": "silver",
+        "module": "feature_forge.dataflows.silver",
+        "owner": "data",
+        "persistence": "boundary",
+        "sensitivity": "dataset-derived"
+      }
+    },
+    {
+      "dependencies": [
+        "dataset_registry",
+        "dataset_request",
+        "execution_profile"
+      ],
+      "name": "raw_dataset",
+      "tags": {
+        "cost": "io",
+        "layer": "bronze",
+        "module": "feature_forge.dataflows.silver",
+        "owner": "data",
+        "persistence": "boundary",
+        "sensitivity": "dataset-derived"
+      }
+    },
+    {
+      "dependencies": [
+        "canonical_features"
+      ],
+      "name": "row_ids",
+      "tags": {
+        "cost": "cheap",
+        "layer": "silver",
+        "module": "feature_forge.dataflows.silver",
+        "owner": "data",
+        "persistence": "boundary",
+        "sensitivity": "dataset-derived"
+      }
+    },
+    {
+      "dependencies": [
+        "bronze_snapshot",
+        "canonical_features",
+        "canonical_target",
+        "dataset_request",
+        "fold_assignments",
+        "row_ids"
+      ],
+      "name": "silver_checks",
+      "tags": {
+        "cost": "cheap",
+        "layer": "silver",
+        "module": "feature_forge.dataflows.silver",
+        "owner": "verification",
+        "persistence": "none",
+        "sensitivity": "dataset-derived"
+      }
+    },
+    {
+      "dependencies": [
+        "bronze_materialization",
+        "bronze_snapshot",
+        "dataset_fingerprint_value",
+        "dataset_request",
+        "environment_snapshot",
+        "silver_checks",
+        "source_metadata"
+      ],
+      "name": "silver_manifest",
+      "tags": {
+        "cost": "cheap",
+        "layer": "silver",
+        "module": "feature_forge.dataflows.silver",
+        "owner": "verification",
+        "persistence": "none",
+        "sensitivity": "metadata"
+      }
+    },
+    {
+      "dependencies": [
+        "artifact_store",
+        "bronze_snapshot",
+        "canonical_features",
+        "canonical_target",
+        "dataset_profile",
+        "dataset_request",
+        "execution_profile",
+        "fold_assignments",
+        "row_ids",
+        "silver_checks",
+        "silver_manifest"
+      ],
+      "name": "silver_materialization",
+      "tags": {
+        "cost": "io",
+        "layer": "silver",
+        "module": "feature_forge.dataflows.silver",
+        "owner": "storage",
+        "persistence": "boundary",
+        "sensitivity": "dataset-derived"
+      }
+    },
+    {
+      "dependencies": [
+        "bronze_snapshot"
+      ],
+      "name": "source_metadata",
+      "tags": {
+        "cost": "cheap",
+        "layer": "bronze",
+        "module": "feature_forge.dataflows.silver",
+        "owner": "data",
+        "persistence": "none",
+        "sensitivity": "metadata"
+      }
+    }
+  ],
+  "schema_version": "1"
+}

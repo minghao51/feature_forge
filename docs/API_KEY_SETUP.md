@@ -15,8 +15,7 @@ Set the env var directly before any command:
 
 ```bash
 export FF_LLM__API_KEY="sk-your-deepseek-key-here"
-uv run quarto render notebooks/
-uv run python -c "from feature_forge.config import get_settings; print(get_settings().llm.api_key)"
+dotenvx run -- uv run jupyter lab notebooks/
 ```
 
 ## Method 2: Update the Encrypted .env File
@@ -41,7 +40,7 @@ uv run python -c "from feature_forge.config import get_settings; print(get_setti
 
 4. **Run with decrypted vars**:
    ```bash
-   dotenvx run -- uv run quarto render notebooks/
+   dotenvx run -- uv run jupyter lab notebooks/
    ```
 
 ## Method 3: dotenvx Set (One-Liner)
@@ -69,20 +68,21 @@ print(settings.llm.model)   # "deepseek-chat"
 print(settings.llm.api_key) # SecretStr('**********')
 ```
 
-## For Notebook Rendering
+## For notebooks
 
-When rendering `.qmd` notebooks with real LLM calls, Quarto needs the env var available. Use one of:
+The committed MkDocs notebook pages are not executed during documentation builds. For an
+interactive notebook that makes real provider calls, start Jupyter with the secret available:
 
 ```bash
 # Option A: export first
 export FF_LLM__API_KEY=sk-...
-uv run quarto render notebooks/
+uv run jupyter lab notebooks/
 
 # Option B: inline
-FF_LLM__API_KEY=sk-... uv run quarto render notebooks/
+FF_LLM__API_KEY=sk-... uv run jupyter lab notebooks/
 
 # Option C: via dotenvx
-dotenvx run -- uv run quarto render notebooks/
+dotenvx run -- uv run jupyter lab notebooks/
 ```
 
-**Note:** If the API key is missing, notebooks with `#| error: true` will fail gracefully and show the error in the rendered output instead of crashing the render.
+Required documentation, replay, verification, catalog, and CI commands do not need an API key.
