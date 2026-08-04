@@ -43,7 +43,7 @@ def create_llm_client(
     config: LLMConfig,
     retry_config: RetryConfig | None = None,
     cache: DiskCache | None = None,
-    tracing_enabled: bool = True,
+    tracing_enabled: bool = False,
 ) -> LLMClient:
     """Create an LLM client from configuration.
 
@@ -56,6 +56,9 @@ def create_llm_client(
 
     Only the required provider module is imported.
     """
+    from feature_forge.llm.replay import ensure_provider_allowed
+
+    ensure_provider_allowed("construction")
     if cache is None and getattr(config, "cache_responses", False):
         from feature_forge.llm.cache import DiskCache
 

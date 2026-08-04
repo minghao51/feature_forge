@@ -2,31 +2,8 @@
 
 from __future__ import annotations
 
-import json
-
-import pytest
-
-from feature_forge.llm.base import LLMClient, LLMResponse
-from feature_forge.methods.malmas.memory import AgentMemory, ConceptualMemory, MemoryPersistence
+from feature_forge.methods.malmas.memory import AgentMemory, MemoryPersistence
 from feature_forge.methods.malmas.memory.retrieval import retrieve_top_k
-
-
-class FakeLLM(LLMClient):
-    def __init__(self, response_text: str = "") -> None:
-        super().__init__(model="fake", api_key="fake")
-        self.response_text = response_text
-
-    @property
-    def provider_name(self) -> str:
-        return "fake"
-
-    async def _do_complete(self, messages, temperature=0.2, max_tokens=4096, **kwargs):
-        return LLMResponse(content=self.response_text, model=self.model)
-
-    async def _do_complete_json(
-        self, messages, schema_description, temperature=0.2, max_tokens=4096
-    ):
-        return json.loads(self.response_text or "{}")
 
 
 class TestRetrieval:
@@ -75,15 +52,11 @@ class TestAgentMemory:
         for idx in range(4):
             mem.record_procedure(["a"], "t", f"f{idx}", "num", "d", idx)
             mem.record_feedback(f"fb{idx}", "auc", float(idx), True, idx, ["a"], "num")
-            mem.record_conceptual(f"rule {idx}")
-            mem.record_global_summary(f"summary {idx}")
 
         mem.save()
 
         assert [item["feature_name"] for item in mem.procedural] == ["f2", "f3"]
         assert [item["feature_name"] for item in mem.feedback] == ["fb2", "fb3"]
-        assert mem.conceptual == ["rule 2", "rule 3"]
-        assert mem.global_summary == ["summary 2", "summary 3"]
 
     def test_allows_reusing_evicted_feature_names(self, tmp_path):
         path = str(tmp_path / "mem.json")
@@ -177,39 +150,3 @@ class TestAgentMemory:
         mem = AgentMemory("unary", path)
         result = mem.retrieve_relevant(current_columns={"age"}, current_round=0, top_k=5)
         assert result == mem.generate_prompt_section(use_feedback=True)
-
-
-class TestConceptualMemory:
-    @pytest.mark.asyncio
-    async def test_summarize_agent_insufficient_data(self, tmp_path):
-        path = str(tmp_path / "mem.json")
-        mem = AgentMemory("unary", path)
-        llm = FakeLLM("rule 1")
-        cm = ConceptualMemory(llm)
-        result = await cm.summarize_agent(mem, min_effective=1)
-        assert "Few valid features" in result
-
-    @pytest.mark.asyncio
-    async def test_summarize_agent_with_data(self, tmp_path):
-        path = str(tmp_path / "mem.json")
-        mem = AgentMemory("unary", path)
-        mem.record_procedure(["age"], "log", "age_log", "numerical", "log", 0)
-        mem.record_feedback("age_log", "auc", 0.05, True, 0, ["age"], "numerical")
-        llm = FakeLLM("Use log transforms for skewed numerical features.")
-        cm = ConceptualMemory(llm)
-        result = await cm.summarize_agent(mem, min_effective=1)
-        assert "log transforms" in result
-        assert mem.conceptual_summary == result
-
-    @pytest.mark.asyncio
-    async def test_summarize_global(self, tmp_path):
-        path1 = str(tmp_path / "mem1.json")
-        path2 = str(tmp_path / "mem2.json")
-        mem1 = AgentMemory("unary", path1)
-        mem2 = AgentMemory("cross", path2)
-        llm = FakeLLM("Global rule: combine unary and cross features.")
-        cm = ConceptualMemory(llm)
-        result = await cm.summarize_global({"unary": mem1, "cross": mem2})
-        assert "Global rule" in result
-        assert result in mem1.global_summary
-        assert result in mem2.global_summary

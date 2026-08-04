@@ -145,13 +145,6 @@ class TestLLMClientBase:
         )
         assert key1 != key2
 
-    def test_api_key_secret_property(self):
-        from pydantic import SecretStr
-
-        provider = SimpleProvider()
-        assert provider.api_key_secret is not None
-        assert isinstance(provider.api_key_secret, SecretStr)
-
     @pytest.mark.asyncio
     async def test_retry_no_config(self):
         """_retry calls fn directly when no config set."""

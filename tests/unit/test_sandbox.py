@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -10,8 +11,12 @@ import pytest
 
 from feature_forge.evaluation.sandbox import (
     SandboxedExecutor,
-    _apply_resource_limits,
+    _current_vmsize_bytes,
+    _get_worker_context,
+    _memory_limit_ctx,
+    _read_ipc_frame,
     _to_parquet_safe,
+    _write_ipc_frame,
 )
 from feature_forge.exceptions import CodeExecutionError, SandboxValidationError
 
@@ -69,86 +74,160 @@ class TestToParquetSafe:
         assert result["x"].dtype == float
 
 
-class TestApplyResourceLimits:
-    """Cover _apply_resource_limits edge cases (lines 317-334)."""
+class TestIpcFrameFallback:
+    """The sandbox transports DataFrames parent<->worker via parquet.
 
-    def _inject_mock_resource(self):
-        import sys
+    On some CI runners pyarrow._parquet.so fails to mmap inside a spawn
+    worker even though the parent's parquet write succeeded. The IPC helpers
+    must therefore write a pickle sidecar up front and fall back to it on
+    read failure. These tests pin that contract.
+    """
 
-        mock_resource = MagicMock()
-        mock_resource.RLIMIT_AS = 0
-        mock_resource.getrlimit.return_value = (1024 * 1024 * 1024, 1024 * 1024 * 1024)
+    def test_write_produces_parquet_and_pickle_sidecar(self, tmp_path):
+        df = pd.DataFrame({"a": [1, 2, 3], "b": [0.1, 0.2, 0.3]})
+        # _write_ipc_frame uses its own tempfile; patch the prefix so we can
+        # locate and clean up the artifacts deterministically.
+        with patch("feature_forge.evaluation.sandbox.tempfile.NamedTemporaryFile") as mock:
+            parquet_path = str(tmp_path / "frame.parquet")
+            open(parquet_path, "wb").close()
+            mock.return_value.__enter__.return_value.name = parquet_path
+            mock.return_value.name = parquet_path
+            primary = _write_ipc_frame(df, prefix="test_")
+        assert primary == parquet_path
+        assert os.path.exists(parquet_path)
+        assert os.path.exists(parquet_path + ".pkl")
 
-        def _wrapper_fn(max_memory_mb):
+    def test_read_falls_back_to_pickle_sidecar_when_parquet_fails(self, tmp_path):
+        df = pd.DataFrame({"a": [1, 2, 3], "b": [0.1, 0.2, 0.3]})
+        primary = _write_ipc_frame(df, prefix=str(tmp_path / "frame_")[: -len("frame_")])
+        # Simulate the CI failure: parquet read raises (e.g. mmap denied),
+        # but the pickle sidecar is present and must be used.
+        with patch(
+            "feature_forge.evaluation.sandbox.pd.read_parquet",
+            side_effect=OSError("failed to map segment from shared object"),
+        ):
+            result = _read_ipc_frame(primary)
+        pd.testing.assert_frame_equal(result, df)
+
+    def test_read_raises_when_parquet_fails_and_no_sidecar(self, tmp_path):
+        parquet_path = str(tmp_path / "lone.parquet")
+        open(parquet_path, "wb").close()
+        with patch(
+            "feature_forge.evaluation.sandbox.pd.read_parquet",
+            side_effect=OSError("failed to map segment"),
+        ):
+            with pytest.raises(OSError, match="failed to map segment"):
+                _read_ipc_frame(parquet_path)
+
+
+class TestWorkerContextSelection:
+    """``_get_worker_context`` picks fork on Linux, spawn elsewhere.
+
+    fork gives near-instant worker startup on Linux (copy-on-write shares the
+    parent's already-imported modules), while spawn is the portable fallback
+    for macOS (fork is deprecated there) and Windows (fork unavailable).
+    """
+
+    def test_linux_uses_fork(self):
+        with patch("feature_forge.evaluation.sandbox.sys") as mock_sys:
+            mock_sys.platform = "linux"
+            ctx = _get_worker_context()
+        assert ctx.get_start_method() == "fork"
+
+    def test_macos_uses_spawn(self):
+        with patch("feature_forge.evaluation.sandbox.sys") as mock_sys:
+            mock_sys.platform = "darwin"
+            ctx = _get_worker_context()
+        assert ctx.get_start_method() == "spawn"
+
+    def test_windows_uses_spawn(self):
+        with patch("feature_forge.evaluation.sandbox.sys") as mock_sys:
+            mock_sys.platform = "win32"
+            ctx = _get_worker_context()
+        assert ctx.get_start_method() == "spawn"
+
+    def test_current_platform_returns_a_valid_context(self):
+        # Whatever platform we're on, the helper must return a usable context
+        # whose Process/Pipe/Queue constructors work.
+        ctx = _get_worker_context()
+        assert ctx.get_start_method() in {"fork", "spawn", "forkserver"}
+
+
+class TestMemoryLimitCtx:
+    """``_memory_limit_ctx`` scopes RLIMIT_AS around user-code execution only.
+
+    On Linux RLIMIT_AS caps the process's *total* virtual address space,
+    which on a fresh Python 3.13 spawn worker already exceeds 1GB once
+    pandas/numpy/pyarrow are imported. A cap below that level turns every
+    subsequent allocation into MemoryError. These tests pin the two
+    guardrails that keep the cap from bricking the worker:
+    1. Skip the cap when the target is at or below the current VmSize.
+    2. Back off via a 32MB canary when the cap is otherwise unreachable.
+    """
+
+    def test_skips_when_target_at_or_below_current_vmsize(self):
+        # Force the helper to report a VmSize larger than the target so the
+        # context manager must skip the cap entirely.
+        with patch(
+            "feature_forge.evaluation.sandbox._current_vmsize_bytes",
+            return_value=2 * 1024 * 1024 * 1024,  # 2GB
+        ):
+            import sys
+
+            mock_resource = MagicMock()
+            mock_resource.RLIMIT_AS = 0
             old = sys.modules.get("resource")
             sys.modules["resource"] = mock_resource
-            import importlib
+            try:
+                with _memory_limit_ctx(max_memory_mb=512):
+                    # No setrlimit call should have happened — the cap was
+                    # skipped because target (512MB) ≤ current VmSize (2GB).
+                    mock_resource.setrlimit.assert_not_called()
+            finally:
+                if old is not None:
+                    sys.modules["resource"] = old
+                else:
+                    del sys.modules["resource"]
 
-            importlib.reload(sys.modules["feature_forge.evaluation.sandbox"])
-            from feature_forge.evaluation.sandbox import _apply_resource_limits as fn
-
-            if old is not None:
-                sys.modules["resource"] = old
-            return fn(max_memory_mb), mock_resource
-
-        return _wrapper_fn
-
-    def test_sets_rlimit(self):
-        mock_resource = MagicMock()
-        mock_resource.RLIMIT_AS = 0
-        mock_resource.getrlimit.return_value = (1024 * 1024 * 1024, 1024 * 1024 * 1024)
-
+    def test_canary_backs_off_when_allocation_fails(self):
+        # Simulate a cap that the canary cannot satisfy. The context manager
+        # must restore the original limit and yield control without applying
+        # the (broken) cap.
         import sys
 
+        mock_resource = MagicMock()
+        mock_resource.RLIMIT_AS = 0
+        # Hard limit and soft limit high enough that the cap arithmetic does
+        # not itself skip; the failure path we want exercised is the canary.
+        mock_resource.getrlimit.return_value = (
+            4 * 1024 * 1024 * 1024,
+            4 * 1024 * 1024 * 1024,
+        )
         old = sys.modules.get("resource")
         sys.modules["resource"] = mock_resource
         try:
-            _apply_resource_limits(max_memory_mb=128)
+            with (
+                patch(
+                    "feature_forge.evaluation.sandbox._current_vmsize_bytes",
+                    return_value=0,  # unknown — don't skip via the VmSize path
+                ),
+                patch(
+                    "feature_forge.evaluation.sandbox.bytearray",
+                    side_effect=MemoryError,
+                ),
+            ):
+                with _memory_limit_ctx(max_memory_mb=512):
+                    # The cap was applied, the canary failed, and the
+                    # original limit was restored — so we expect at least
+                    # three setrlimit calls (apply, restore-on-canary-fail).
+                    assert mock_resource.setrlimit.call_count >= 2
         finally:
             if old is not None:
                 sys.modules["resource"] = old
             else:
                 del sys.modules["resource"]
 
-        mock_resource.setrlimit.assert_called_once()
-
-    def test_capped_by_hard_limit(self):
-        import sys
-
-        mock_resource = MagicMock()
-        mock_resource.RLIMIT_AS = 0
-        mock_resource.getrlimit.return_value = (1024 * 1024 * 1024, 64 * 1024 * 1024)
-        old = sys.modules.get("resource")
-        sys.modules["resource"] = mock_resource
-        try:
-            _apply_resource_limits(max_memory_mb=512)
-        finally:
-            if old is not None:
-                sys.modules["resource"] = old
-            else:
-                del sys.modules["resource"]
-        args = mock_resource.setrlimit.call_args[0]
-        assert args[1][0] == 64 * 1024 * 1024
-
-    def test_capped_by_soft_limit(self):
-        import sys
-
-        mock_resource = MagicMock()
-        mock_resource.RLIMIT_AS = 0
-        mock_resource.getrlimit.return_value = (32 * 1024 * 1024, 1024 * 1024 * 1024)
-        old = sys.modules.get("resource")
-        sys.modules["resource"] = mock_resource
-        try:
-            _apply_resource_limits(max_memory_mb=512)
-        finally:
-            if old is not None:
-                sys.modules["resource"] = old
-            else:
-                del sys.modules["resource"]
-        args = mock_resource.setrlimit.call_args[0]
-        assert args[1][0] == 32 * 1024 * 1024
-
-    def test_zero_memory_skips(self):
+    def test_zero_target_yields_without_touching_limits(self):
         import sys
 
         mock_resource = MagicMock()
@@ -156,17 +235,20 @@ class TestApplyResourceLimits:
         old = sys.modules.get("resource")
         sys.modules["resource"] = mock_resource
         try:
-            _apply_resource_limits(max_memory_mb=0)
+            with _memory_limit_ctx(max_memory_mb=0):
+                mock_resource.setrlimit.assert_not_called()
         finally:
             if old is not None:
                 sys.modules["resource"] = old
             else:
                 del sys.modules["resource"]
-        mock_resource.setrlimit.assert_not_called()
 
-    def test_import_fallback_no_error(self):
-        result = _apply_resource_limits(max_memory_mb=128)
-        assert result is None
+    def test_vmsize_helper_returns_nonnegative(self):
+        # On Linux this reads /proc/self/status; elsewhere it returns 0.
+        # Either way it must be a non-negative int and not raise.
+        result = _current_vmsize_bytes()
+        assert isinstance(result, int)
+        assert result >= 0
 
 
 class TestSandboxExecutorEdgeCases:

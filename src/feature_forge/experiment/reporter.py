@@ -6,6 +6,8 @@ from typing import Any
 
 import pandas as pd
 
+from feature_forge.evaluation.metrics import MetricDirection, MetricRegistry
+
 
 class Reporter:
     """Generate markdown/HTML reports from experiment results.
@@ -23,42 +25,43 @@ class Reporter:
         """Generate markdown comparison table."""
         if self.df.empty:
             return "No results to report."
-        # Select numeric columns for aggregation
         numeric_cols = self.df.select_dtypes(include="number").columns.tolist()
         group_cols = [c for c in ["dataset", "method", "model"] if c in self.df.columns]
+        if group_cols and numeric_cols:
+            summary = self.df.groupby(group_cols)[numeric_cols].mean().reset_index()
+        else:
+            summary = self.df
         try:
-            if group_cols and numeric_cols:
-                summary = self.df.groupby(group_cols)[numeric_cols].mean().reset_index()
-                return summary.to_markdown(index=False)
-            return self.df.to_markdown(index=False)
+            return summary.to_markdown(index=False)
         except ImportError:
             # tabulate not installed, return simple string representation
-            if group_cols and numeric_cols:
-                summary = self.df.groupby(group_cols)[numeric_cols].mean().reset_index()
-                return str(summary)
-            return str(self.df)
+            return str(summary)
 
-    def to_html(self) -> str:
-        """Generate HTML comparison table."""
-        if self.df.empty:
-            return "<p>No results to report.</p>"
-        return self.df.to_html(index=False)
+    def get_best(
+        self,
+        metric: str = "cv_score",
+        group_by: str = "dataset",
+        *,
+        direction: MetricDirection | str | None = None,
+    ) -> pd.DataFrame:
+        """Get best result per group.
 
-    def get_best(self, metric: str = "score", group_by: str = "dataset") -> pd.DataFrame:
-        """Get best result per group."""
+        ``metric`` defaults to ``"cv_score"`` to match the column produced by
+        ``ExperimentalPlatform.run`` (and ``ExperimentalPlatform.report_best``);
+        a direction is auto-resolved from the ``metric`` column when exactly one
+        metric name is present, so minimize metrics (rmse/mae) select the lowest
+        score rather than silently defaulting to maximize.
+        """
         if group_by not in self.df.columns or metric not in self.df.columns:
             return pd.DataFrame()
-        idx = self.df.groupby(group_by)[metric].idxmax()
+        resolved = MetricDirection(direction) if direction is not None else None
+        if resolved is None and "metric" in self.df.columns:
+            metric_names = self.df["metric"].dropna().unique().tolist()
+            if len(metric_names) == 1:
+                resolved = MetricRegistry.get_direction(str(metric_names[0]))
+        idx = (
+            self.df.groupby(group_by)[metric].idxmin()
+            if resolved is MetricDirection.MINIMIZE
+            else self.df.groupby(group_by)[metric].idxmax()
+        )
         return self.df.loc[idx]
-
-    def summary_stats(self) -> dict[str, Any]:
-        """Return summary statistics."""
-        numeric_cols = self.df.select_dtypes(include="number").columns.tolist()
-        return {
-            "total_runs": len(self.df),
-            "successful_runs": len(self.df[self.df.get("error", pd.Series()).isna()]),
-            "failed_runs": len(self.df[self.df.get("error", pd.Series()).notna()]),
-            "mean_metrics": {
-                col: float(self.df[col].mean()) for col in numeric_cols if col != "error"
-            },
-        }

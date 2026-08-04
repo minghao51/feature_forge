@@ -1,0 +1,56 @@
+{
+  "additionalProperties": false,
+  "description": "Final model-evidence selection outcome for one Gold candidate.",
+  "properties": {
+    "candidate_id": {
+      "title": "Candidate Id",
+      "type": "string"
+    },
+    "directional_gain": {
+      "title": "Directional Gain",
+      "type": "number"
+    },
+    "feature_name": {
+      "title": "Feature Name",
+      "type": "string"
+    },
+    "legacy_gain": {
+      "title": "Legacy Gain",
+      "type": "number"
+    },
+    "lower_bound": {
+      "title": "Lower Bound",
+      "type": "number"
+    },
+    "reason": {
+      "title": "Reason",
+      "type": "string"
+    },
+    "reason_code": {
+      "title": "Reason Code",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "selected": {
+      "title": "Selected",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "candidate_id",
+    "feature_name",
+    "selected",
+    "reason_code",
+    "reason",
+    "legacy_gain",
+    "directional_gain",
+    "lower_bound"
+  ],
+  "title": "PlatinumSelectionDecision",
+  "type": "object"
+}

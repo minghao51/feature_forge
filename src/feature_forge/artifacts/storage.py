@@ -7,6 +7,7 @@ for managing where DataFrames live (memory vs disk).
 from __future__ import annotations
 
 import os
+import tempfile
 
 import pandas as pd
 
@@ -96,17 +97,37 @@ class DataFrameStorage:
     def _make_path(self, key: str) -> str:
         """Build a file path for a given key."""
         ext = self.config.storage_format
-        safe_key = key.replace("/", "_").replace(" ", "_")
+        safe_key = key.replace("\\", "_").replace("/", "_").replace(" ", "_")
+        if safe_key in {"", ".", ".."}:
+            raise ValueError("artifact key must contain a safe filename component")
+        if self.config.run_id is not None:
+            return os.path.join(
+                self.config.storage_dir, "runs", self.config.run_id, f"{safe_key}.{ext}"
+            )
         return os.path.join(self.config.storage_dir, f"{safe_key}.{ext}")
 
     @staticmethod
     def _write(df: pd.DataFrame, path: str, fmt: str) -> None:
         """Write a DataFrame to disk."""
-        if fmt == "parquet":
-            df.to_parquet(path)
-        elif fmt == "csv":
-            df.to_csv(path)
-        elif fmt == "feather":
-            df.to_feather(path)
-        else:
-            raise ValueError(f"Unsupported format: {fmt}")
+        parent = os.path.dirname(path)
+        os.makedirs(parent, exist_ok=True)
+        fd, temporary_path = tempfile.mkstemp(prefix=".artifact-", dir=parent)
+        os.close(fd)
+        try:
+            if fmt == "parquet":
+                df.to_parquet(temporary_path)
+            elif fmt == "csv":
+                df.to_csv(temporary_path)
+            elif fmt == "feather":
+                df.to_feather(temporary_path)
+            else:
+                raise ValueError(f"Unsupported format: {fmt}")
+            with open(temporary_path, "rb") as handle:
+                os.fsync(handle.fileno())
+            os.replace(temporary_path, path)
+        except BaseException:
+            try:
+                os.unlink(temporary_path)
+            except FileNotFoundError:
+                pass
+            raise

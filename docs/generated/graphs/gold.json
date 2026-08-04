@@ -1,0 +1,151 @@
+{
+  "final_vars": [
+    "gold_materialization"
+  ],
+  "nodes": [
+    {
+      "dependencies": [],
+      "name": "artifact_store",
+      "tags": {}
+    },
+    {
+      "dependencies": [
+        "candidate_feature_specs",
+        "sandbox"
+      ],
+      "name": "candidate_execution_batches",
+      "tags": {
+        "cost": "expensive",
+        "layer": "gold",
+        "module": "feature_forge.dataflows.gold",
+        "owner": "methods",
+        "persistence": "none",
+        "sensitivity": "dataset-derived"
+      }
+    },
+    {
+      "dependencies": [
+        "method",
+        "method_generation_request",
+        "silver_package"
+      ],
+      "name": "candidate_feature_specs",
+      "tags": {
+        "cost": "expensive",
+        "layer": "gold",
+        "module": "feature_forge.dataflows.gold",
+        "owner": "methods",
+        "persistence": "none",
+        "sensitivity": "dataset-derived"
+      }
+    },
+    {
+      "dependencies": [
+        "candidate_verification"
+      ],
+      "name": "candidate_selection",
+      "tags": {
+        "cost": "cheap",
+        "layer": "gold",
+        "module": "feature_forge.dataflows.gold",
+        "owner": "methods",
+        "persistence": "none",
+        "sensitivity": "metadata"
+      }
+    },
+    {
+      "dependencies": [
+        "candidate_execution_batches"
+      ],
+      "name": "candidate_verification",
+      "tags": {
+        "cost": "cheap",
+        "layer": "gold",
+        "module": "feature_forge.dataflows.gold",
+        "owner": "verification",
+        "persistence": "none",
+        "sensitivity": "metadata"
+      }
+    },
+    {
+      "dependencies": [],
+      "name": "environment_snapshot",
+      "tags": {}
+    },
+    {
+      "dependencies": [],
+      "name": "execution_profile",
+      "tags": {}
+    },
+    {
+      "dependencies": [
+        "candidate_selection",
+        "environment_snapshot",
+        "method_generation_request"
+      ],
+      "name": "gold_manifest",
+      "tags": {
+        "cost": "cheap",
+        "layer": "gold",
+        "module": "feature_forge.dataflows.gold",
+        "owner": "storage",
+        "persistence": "none",
+        "sensitivity": "metadata"
+      }
+    },
+    {
+      "dependencies": [
+        "artifact_store",
+        "candidate_selection",
+        "environment_snapshot",
+        "execution_profile",
+        "gold_manifest",
+        "method_generation_request"
+      ],
+      "name": "gold_materialization",
+      "tags": {
+        "cost": "io",
+        "layer": "gold",
+        "module": "feature_forge.dataflows.gold",
+        "owner": "storage",
+        "persistence": "boundary",
+        "sensitivity": "dataset-derived"
+      }
+    },
+    {
+      "dependencies": [],
+      "name": "gold_request",
+      "tags": {}
+    },
+    {
+      "dependencies": [],
+      "name": "method",
+      "tags": {}
+    },
+    {
+      "dependencies": [
+        "gold_request"
+      ],
+      "name": "method_generation_request",
+      "tags": {
+        "cost": "expensive",
+        "layer": "gold",
+        "module": "feature_forge.dataflows.gold",
+        "owner": "methods",
+        "persistence": "none",
+        "sensitivity": "dataset-derived"
+      }
+    },
+    {
+      "dependencies": [],
+      "name": "sandbox",
+      "tags": {}
+    },
+    {
+      "dependencies": [],
+      "name": "silver_package",
+      "tags": {}
+    }
+  ],
+  "schema_version": "1"
+}

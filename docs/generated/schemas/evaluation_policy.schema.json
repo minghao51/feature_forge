@@ -1,0 +1,63 @@
+{
+  "additionalProperties": false,
+  "description": "Deterministic fold evaluation and alignment policy.",
+  "properties": {
+    "aggregation": {
+      "const": "unweighted_mean_of_fold_metrics",
+      "default": "unweighted_mean_of_fold_metrics",
+      "title": "Aggregation",
+      "type": "string"
+    },
+    "alignment": {
+      "default": "normalize_by_row_id",
+      "enum": [
+        "normalize_by_row_id",
+        "strict_order"
+      ],
+      "title": "Alignment",
+      "type": "string"
+    },
+    "blas_threads": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Blas Threads",
+      "type": "integer"
+    },
+    "estimator_threads": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Estimator Threads",
+      "type": "integer"
+    },
+    "minimum_successful_folds": {
+      "default": 2,
+      "minimum": 2,
+      "title": "Minimum Successful Folds",
+      "type": "integer"
+    },
+    "preprocessing": {
+      "const": "fit_on_training_fold",
+      "default": "fit_on_training_fold",
+      "title": "Preprocessing",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "selection_partition": {
+      "default": "discovery",
+      "enum": [
+        "discovery",
+        "evaluation",
+        "all"
+      ],
+      "title": "Selection Partition",
+      "type": "string"
+    }
+  },
+  "title": "EvaluationPolicy",
+  "type": "object"
+}

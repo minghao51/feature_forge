@@ -8,10 +8,10 @@ git clone https://github.com/minghao51/feature_forge.git
 cd feature-forge
 
 # Install with uv
-uv sync --all-extras
+uv sync --group dev
 
-# Or with pip
-pip install -e ".[all,dev]"
+# Add Hamilton and the local DuckDB catalog
+uv sync --extra pipeline --group dev
 ```
 
 ## Basic Usage
@@ -102,4 +102,15 @@ uv run pytest --cov=feature_forge --cov-report=html
 
 # Linting
 uv run ruff check src tests
+```
+
+## Medallion operations
+
+The default experiment path remains compatible and imperative. For the optional durable path,
+read the [pipeline overview](pipeline/index.md) and [operations runbook](operations/index.md).
+
+```bash
+uv run feature-forge run plan --dataset titanic --method openfe
+uv run feature-forge verify catalog
+uv run --extra pipeline feature-forge catalog rebuild
 ```

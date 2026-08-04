@@ -1,0 +1,63 @@
+{
+  "$defs": {
+    "Layer": {
+      "description": "Durable maturity layer for an experiment artifact.",
+      "enum": [
+        "bronze",
+        "silver",
+        "gold",
+        "platinum"
+      ],
+      "title": "Layer",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Read-only verification outcome for a committed artifact namespace.",
+  "properties": {
+    "checked_artifacts": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Checked Artifacts",
+      "type": "array"
+    },
+    "errors": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Errors",
+      "type": "array"
+    },
+    "layer": {
+      "$ref": "#/$defs/Layer"
+    },
+    "manifest_path": {
+      "title": "Manifest Path",
+      "type": "string"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "valid": {
+      "title": "Valid",
+      "type": "boolean"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "valid",
+    "run_id",
+    "layer",
+    "manifest_path"
+  ],
+  "title": "VerificationReport",
+  "type": "object"
+}

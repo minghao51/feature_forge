@@ -1,0 +1,560 @@
+{
+  "$defs": {
+    "ArtifactDescriptor": {
+      "additionalProperties": false,
+      "description": "Hash and schema metadata for one file in a durable package.",
+      "properties": {
+        "column_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Column Count"
+        },
+        "layer": {
+          "$ref": "#/$defs/Layer"
+        },
+        "media_type": {
+          "minLength": 1,
+          "title": "Media Type",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "relative_path": {
+          "minLength": 1,
+          "title": "Relative Path",
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "row_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Row Count"
+        },
+        "schema_fingerprint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Schema Fingerprint"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "layer",
+        "media_type",
+        "relative_path",
+        "sha256",
+        "size_bytes"
+      ],
+      "title": "ArtifactDescriptor",
+      "type": "object"
+    },
+    "CheckResult": {
+      "additionalProperties": false,
+      "description": "Result of one required or advisory validation check.",
+      "properties": {
+        "affected_artifacts": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Affected Artifacts",
+          "type": "array"
+        },
+        "check_id": {
+          "minLength": 1,
+          "title": "Check Id",
+          "type": "string"
+        },
+        "details": {
+          "additionalProperties": true,
+          "title": "Details",
+          "type": "object"
+        },
+        "expected": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected"
+        },
+        "message": {
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "observed": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "severity": {
+          "$ref": "#/$defs/CheckSeverity",
+          "default": "error"
+        }
+      },
+      "required": [
+        "check_id",
+        "passed",
+        "message"
+      ],
+      "title": "CheckResult",
+      "type": "object"
+    },
+    "CheckSeverity": {
+      "description": "Severity used to distinguish advisory and required checks.",
+      "enum": [
+        "info",
+        "warning",
+        "error"
+      ],
+      "title": "CheckSeverity",
+      "type": "string"
+    },
+    "EnvironmentSnapshot": {
+      "additionalProperties": false,
+      "description": "Secret-free runtime information captured with a run.",
+      "properties": {
+        "architecture": {
+          "title": "Architecture",
+          "type": "string"
+        },
+        "artifact_schema_versions": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Artifact Schema Versions",
+          "type": "object"
+        },
+        "feature_forge_version": {
+          "title": "Feature Forge Version",
+          "type": "string"
+        },
+        "operating_system": {
+          "title": "Operating System",
+          "type": "string"
+        },
+        "python_version": {
+          "title": "Python Version",
+          "type": "string"
+        },
+        "random_seeds": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Random Seeds",
+          "type": "object"
+        }
+      },
+      "required": [
+        "python_version",
+        "operating_system",
+        "architecture",
+        "feature_forge_version"
+      ],
+      "title": "EnvironmentSnapshot",
+      "type": "object"
+    },
+    "FailureClass": {
+      "description": "Failure category used to decide whether recovery is safe.",
+      "enum": [
+        "transient",
+        "deterministic",
+        "policy",
+        "resource",
+        "cancelled"
+      ],
+      "title": "FailureClass",
+      "type": "string"
+    },
+    "Layer": {
+      "description": "Durable maturity layer for an experiment artifact.",
+      "enum": [
+        "bronze",
+        "silver",
+        "gold",
+        "platinum"
+      ],
+      "title": "Layer",
+      "type": "string"
+    },
+    "ManifestRef": {
+      "additionalProperties": false,
+      "description": "Reference to a committed layer manifest.",
+      "properties": {
+        "layer": {
+          "$ref": "#/$defs/Layer"
+        },
+        "relative_path": {
+          "const": "manifest.json",
+          "default": "manifest.json",
+          "title": "Relative Path",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "layer",
+        "run_id",
+        "sha256"
+      ],
+      "title": "ManifestRef",
+      "type": "object"
+    },
+    "RunRequest": {
+      "additionalProperties": false,
+      "description": "Inputs that define one experiment case.",
+      "properties": {
+        "cv_folds": {
+          "anyOf": [
+            {
+              "minimum": 2,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cv Folds"
+        },
+        "dataset": {
+          "minLength": 1,
+          "title": "Dataset",
+          "type": "string"
+        },
+        "method": {
+          "minLength": 1,
+          "title": "Method",
+          "type": "string"
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mode"
+        },
+        "model": {
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "options": {
+          "additionalProperties": true,
+          "title": "Options",
+          "type": "object"
+        },
+        "seed": {
+          "title": "Seed",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "dataset",
+        "method",
+        "model",
+        "seed"
+      ],
+      "title": "RunRequest",
+      "type": "object"
+    },
+    "RunState": {
+      "description": "Lifecycle state of a run or stage.",
+      "enum": [
+        "planned",
+        "running",
+        "partial",
+        "succeeded",
+        "failed",
+        "cancelled"
+      ],
+      "title": "RunState",
+      "type": "string"
+    },
+    "StageResult": {
+      "additionalProperties": false,
+      "description": "Persisted outcome for one executable stage.",
+      "properties": {
+        "artifacts": {
+          "items": {
+            "$ref": "#/$defs/ArtifactDescriptor"
+          },
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/CheckResult"
+          },
+          "title": "Checks",
+          "type": "array"
+        },
+        "duration_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration Ms"
+        },
+        "error_message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Message"
+        },
+        "error_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Type"
+        },
+        "failure_class": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FailureClass"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Finished At"
+        },
+        "skipped_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Skipped Reason"
+        },
+        "stage": {
+          "minLength": 1,
+          "title": "Stage",
+          "type": "string"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/RunState"
+        }
+      },
+      "required": [
+        "stage",
+        "state",
+        "started_at"
+      ],
+      "title": "StageResult",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Authoritative manifest for one committed layer package.",
+  "properties": {
+    "artifacts": {
+      "items": {
+        "$ref": "#/$defs/ArtifactDescriptor"
+      },
+      "title": "Artifacts",
+      "type": "array"
+    },
+    "case_fingerprint": {
+      "minLength": 1,
+      "title": "Case Fingerprint",
+      "type": "string"
+    },
+    "completed_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Completed At"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "environment": {
+      "$ref": "#/$defs/EnvironmentSnapshot"
+    },
+    "layer": {
+      "$ref": "#/$defs/Layer"
+    },
+    "layer_fingerprint": {
+      "minLength": 1,
+      "title": "Layer Fingerprint",
+      "type": "string"
+    },
+    "package_kind": {
+      "enum": [
+        "bronze",
+        "silver",
+        "gold",
+        "platinum"
+      ],
+      "title": "Package Kind",
+      "type": "string"
+    },
+    "request": {
+      "$ref": "#/$defs/RunRequest"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "stages": {
+      "items": {
+        "$ref": "#/$defs/StageResult"
+      },
+      "title": "Stages",
+      "type": "array"
+    },
+    "state": {
+      "$ref": "#/$defs/RunState"
+    },
+    "upstream_manifests": {
+      "items": {
+        "$ref": "#/$defs/ManifestRef"
+      },
+      "title": "Upstream Manifests",
+      "type": "array"
+    }
+  },
+  "required": [
+    "layer",
+    "package_kind",
+    "layer_fingerprint",
+    "run_id",
+    "case_fingerprint",
+    "state",
+    "request",
+    "environment",
+    "created_at"
+  ],
+  "title": "RunManifest",
+  "type": "object"
+}

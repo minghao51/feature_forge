@@ -21,9 +21,9 @@ The previous session updated all docs and notebooks for the `baselines/` → `me
 | Cell | What | Detail |
 |------|------|--------|
 | cell_0 (title md) | Rename title | `# MALMAS Deep Dive: Agents, Router, Memory & Pipeline` |
-| cell_0 (subtitle) | Add scope + cross-link | Append: `> This notebook covers the **MALMAS method** internals. For other methods (CAAFE, LLM-FE, OpenFE, Malmus), see [05_methods_deep_dive.ipynb](./05_methods_deep_dive.ipynb).` |
+| cell_0 (subtitle) | Add scope + cross-link | Append: `> This notebook covers the **MALMAS method** internals. For other methods (CAAFE, LLM-FE, OpenFE, Malmus), see [05_methods_deep_dive.ipynb](../notebooks/05_methods_deep_dive.ipynb).` |
 | cell_1 (setup) | Add intro note | After setup heading, add a markdown cell explaining: "The MALMAS method is Feature Forge's core multi-agent pipeline. All components live under `feature_forge.methods.malmas/`." |
-| cell_18 (summary) | Add cross-link | Append: `- For other methods: **[05_methods_deep_dive.ipynb](./05_methods_deep_dive.ipynb)**` |
+| cell_18 (summary) | Add cross-link | Append: `- For other methods: **[05_methods_deep_dive.ipynb](../notebooks/05_methods_deep_dive.ipynb)**` |
 
 ## Task B: Create `notebooks/05_methods_deep_dive.ipynb`
 
@@ -39,7 +39,7 @@ The previous session updated all docs and notebooks for the `baselines/` → `me
 > ⚠️ **LLM cells require an API key.** Non-LLM methods (OpenFE) work without one.
 >
 > This notebook covers the 4 non-MALMAS feature engineering methods available in Feature Forge.
-> For the MALMAS multi-agent pipeline, see [02_pipeline_deep_dive.ipynb](./02_pipeline_deep_dive.ipynb).
+> For the MALMAS multi-agent pipeline, see [02_pipeline_deep_dive.ipynb](../notebooks/02_pipeline_deep_dive.ipynb).
 ```
 
 #### Cell 1 — code (setup)
@@ -379,8 +379,8 @@ else:
 | **Malmus** | Reliable structured output, any provider | Yes | Most reliable parsing but single-method approach |
 
 **Next steps:**
-- [03_benchmarks_and_artifacts.ipynb](./03_benchmarks_and_artifacts.ipynb) — Experiment matrix & artifact analysis
-- [04_custom_method.ipynb](./04_custom_method.ipynb) — Write your own method
+- [03_benchmarks_and_artifacts.ipynb](../notebooks/03_benchmarks_and_artifacts.ipynb) — Experiment matrix & artifact analysis
+- [04_custom_method.ipynb](../notebooks/04_custom_method.ipynb) — Write your own method
 ```
 
 ## Task C: Update `mkdocs.yml`

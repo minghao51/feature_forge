@@ -1,0 +1,68 @@
+{
+  "$defs": {
+    "MetricDirection": {
+      "description": "Whether a larger or smaller metric value represents improvement.",
+      "enum": [
+        "maximize",
+        "minimize"
+      ],
+      "title": "MetricDirection",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Aggregate values reconstructable from fold metric records.",
+  "properties": {
+    "aggregation": {
+      "const": "unweighted_mean_of_fold_metrics",
+      "title": "Aggregation",
+      "type": "string"
+    },
+    "baseline_score": {
+      "title": "Baseline Score",
+      "type": "number"
+    },
+    "directional_gain": {
+      "title": "Directional Gain",
+      "type": "number"
+    },
+    "enhanced_score": {
+      "title": "Enhanced Score",
+      "type": "number"
+    },
+    "legacy_gain": {
+      "title": "Legacy Gain",
+      "type": "number"
+    },
+    "metric": {
+      "title": "Metric",
+      "type": "string"
+    },
+    "metric_direction": {
+      "$ref": "#/$defs/MetricDirection"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "successful_folds": {
+      "minimum": 2,
+      "title": "Successful Folds",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "metric",
+    "metric_direction",
+    "aggregation",
+    "baseline_score",
+    "enhanced_score",
+    "legacy_gain",
+    "directional_gain",
+    "successful_folds"
+  ],
+  "title": "AggregateMetric",
+  "type": "object"
+}

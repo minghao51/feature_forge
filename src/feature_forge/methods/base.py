@@ -66,6 +66,10 @@ class BaseMethod(ArtifactExporter):
     ) -> None:
         super().__init__(artifact_config=artifact_config)
         self.name = name
+        # Feature name emitted by ``feature_metadata`` when a method ran in
+        # single-shot mode (no iteration records). CAAFE sets "fidelity",
+        # LLMFE "single_shot"; methods that always iterate leave this None.
+        self._singleton_fallback_name: str | None = None
         self._storage = DataFrameStorage(artifact_config or ArtifactConfig())
         self._artifacts: dict[str, Any] = {}
         self._kept_features: list[str] | None = None
@@ -95,12 +99,39 @@ class BaseMethod(ArtifactExporter):
         code = self._artifacts.get("generated_code", "")
         return [code] if code else []
 
+    @property
+    def feature_metadata(self) -> list[dict[str, Any]]:
+        """Per-feature metadata, falling back to a single-shot record.
+
+        Iterative methods emit one record per kept feature via
+        :meth:`_iterative_feature_metadata`; methods that ran single-shot emit
+        one record named after :attr:`_singleton_fallback_name`.
+        """
+        meta = self._iterative_feature_metadata(self.name)
+        if meta:
+            return meta
+        if self._singleton_fallback_name is not None:
+            code = self._artifacts.get("generated_code", "")
+            if code:
+                return [{"name": self._singleton_fallback_name, "method": self.name, "code": code}]
+        return []
+
+    @property
+    def provenance_records(self) -> list[dict[str, Any]]:
+        """Per-feature provenance records (iterative methods only)."""
+        return self._iterative_provenance_records(self.name)
+
     def _iterative_feature_metadata(self, method_name: str) -> list[dict[str, Any]]:
         iterations = self._artifacts.get("iterations")
         if not iterations:
             return []
         meta: list[dict[str, Any]] = []
         for it in iterations:
+            # Iteration records store *directional* gains (sign-flipped for
+            # minimize metrics) because they are populated from the
+            # `_evaluate_and_select` `kept_gains` mapping. The `gain > 0`
+            # check below therefore means "improved the configured metric"
+            # regardless of optimization direction.
             for col, gain in it.get("gains", {}).items():
                 meta.append(
                     {
@@ -148,18 +179,27 @@ class BaseMethod(ArtifactExporter):
         baseline_score: float,
         cumulative_cols: list[str],
     ) -> tuple[pd.DataFrame, dict[str, float]]:
-        """Evaluate ``new_features`` against baseline; keep those with positive gain.
+        """Evaluate ``new_features`` against baseline; keep those that improve the metric.
 
-        Appends kept column names to ``cumulative_cols`` in place.
+        Selection is direction-aware: uses
+        :meth:`CVEvaluator.evaluate_features_batch_directional` so a positive
+        returned gain always means "improvement", whether the configured
+        metric is maximized (AUC/ACC/F1/R²) or minimized (RMSE/MAE/NRMSE).
+
+        The returned ``kept_gains`` are therefore **directional** (sign-flipped
+        for minimize metrics); consumers that persist raw deltas should call
+        ``evaluator.evaluate_features_batch`` separately. Appends kept column
+        names to ``cumulative_cols`` in place.
 
         Returns:
             ``(kept_features, kept_gains)`` — the kept columns as a DataFrame
-            (indexed like ``X``) and a mapping of kept column → gain.
+            (indexed like ``X``) and a mapping of kept column → directional gain.
         """
         kept_features = pd.DataFrame(index=X.index)
         kept_gains: dict[str, float] = {}
         if new_features.columns.size > 0:
-            all_gains = evaluator.evaluate_features_batch(
+            # Directional gains: positive => improvement under either direction.
+            all_gains = evaluator.evaluate_features_batch_directional(
                 X, y, new_features, baseline_score=baseline_score
             )
             for col, gain in all_gains.items():

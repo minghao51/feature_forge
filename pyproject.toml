@@ -78,6 +78,12 @@ all = [
     "langfuse>=2.0",
     "diskcache>=5.6.3",
     "pyarrow>=23.0.1",
+    "duckdb>=1.5.4",
+    "sf-hamilton[visualization]>=1.90.0",
+]
+pipeline = [
+    "duckdb>=1.5.4",
+    "sf-hamilton[visualization]>=1.90.0",
 ]
 
 [dependency-groups]
@@ -106,6 +112,7 @@ dev = [
     "mkdocs-jupyter>=0.26.3",
     "types-tqdm>=4.67.3.20260508",
     "types-pyyaml>=6.0.12.20260510",
+    "setuptools>=83.0.0",
 ]
 
 [project.entry-points."feature_forge.methods"]
@@ -137,9 +144,12 @@ house_prices = "feature_forge.data.registry:house_prices_loader"
 
 [project.urls]
 Homepage = "https://github.com/minghao51/feature_forge"
-Documentation = "https://feature-forge.readthedocs.io"
+Documentation = "https://minghao51.github.io/feature_forge/"
 Repository = "https://github.com/minghao51/feature_forge"
 Issues = "https://github.com/minghao51/feature_forge/issues"
+
+[project.scripts]
+feature-forge = "feature_forge.cli:main"
 
 # ─────────────────────────────────────────────────────────────
 # Tool Configurations
@@ -197,6 +207,8 @@ module = [
     "catboost",
     "kaggle",
     "opentelemetry",
+    "hamilton",
+    "hamilton.*",
     "tqdm",
     "litellm",
 ]

@@ -130,10 +130,9 @@ Dynamic agent selection with strategies:
 
 ### `AgentMemory`
 
-Per-agent 3-tier memory:
+Per-agent 2-tier memory:
 - **Procedural**: Successful transforms
 - **Feedback**: Feature gains/losses
-- **Conceptual**: LLM-summarized rules
 
 ```python
 from feature_forge.methods.malmas.memory import AgentMemory

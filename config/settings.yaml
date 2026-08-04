@@ -23,6 +23,12 @@ llm:
 tracker:
   backend: "none"
   project: "feature-forge"
+  failure_policy: "optional"
+
+catalog:
+  enabled: true
+  path: ".feature_forge_artifacts/control/catalog/catalog.duckdb"
+  stale_run_seconds: 3600
 
 router:
   strategy: "hybrid"
@@ -35,3 +41,5 @@ memory:
 evaluation:
   cv_folds: 5
   feature_eval_backend: "threading"
+  evaluation_holdout_fraction: 0.25
+  evaluation_holdout_stratified: true

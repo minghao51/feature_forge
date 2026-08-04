@@ -1,0 +1,33 @@
+{
+  "environment": {
+    "implementation": "CPython",
+    "machine": "arm64",
+    "python": "3.13.1",
+    "system": "Darwin"
+  },
+  "measurement": {
+    "corpus": {
+      "bytes": 1126366,
+      "sha256": "a08206a29c79818350be72c5b42d5c592cf2c6b367cad647493fe9f34fc661d2"
+    },
+    "counts": {
+      "checks": 800,
+      "features": 2000,
+      "fold_metrics": 500,
+      "lineage_edges": 5000,
+      "runs": 100,
+      "stages": 400
+    },
+    "elapsed_seconds": {
+      "corpus_generation": 0.018493,
+      "flat_markdown_render": 0.005341
+    },
+    "flat_markdown": {
+      "bytes": 317997
+    },
+    "profile": "small",
+    "record_count": 8800,
+    "seed": 19
+  },
+  "schema_version": "1"
+}

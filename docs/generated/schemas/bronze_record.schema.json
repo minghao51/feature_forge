@@ -1,0 +1,69 @@
+{
+  "additionalProperties": false,
+  "description": "Reproducibility record for the dataset entering the experiment.",
+  "properties": {
+    "column_count": {
+      "minimum": 1,
+      "title": "Column Count",
+      "type": "integer"
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    },
+    "row_count": {
+      "minimum": 1,
+      "title": "Row Count",
+      "type": "integer"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "snapshot_mode": {
+      "enum": [
+        "reference",
+        "snapshot"
+      ],
+      "title": "Snapshot Mode",
+      "type": "string"
+    },
+    "source": {
+      "minLength": 1,
+      "title": "Source",
+      "type": "string"
+    },
+    "source_checksum": {
+      "minLength": 1,
+      "title": "Source Checksum",
+      "type": "string"
+    },
+    "target": {
+      "minLength": 1,
+      "title": "Target",
+      "type": "string"
+    },
+    "task": {
+      "enum": [
+        "classification",
+        "regression"
+      ],
+      "title": "Task",
+      "type": "string"
+    }
+  },
+  "required": [
+    "source",
+    "source_checksum",
+    "target",
+    "task",
+    "snapshot_mode",
+    "row_count",
+    "column_count"
+  ],
+  "title": "BronzeRecord",
+  "type": "object"
+}

@@ -14,6 +14,8 @@ from typing import Any, Literal
 
 import pandas as pd
 
+from feature_forge.contracts.artifacts import validate_identifier
+
 
 @dataclass
 class ArtifactConfig:
@@ -28,14 +30,18 @@ class ArtifactConfig:
         spill_threshold_bytes: In hybrid mode, DataFrames larger than this are
             written to disk. Ignored for 'memory' and 'disk' modes.
         storage_dir: Directory for disk-based artifacts.
+        run_id: Optional safe identifier used to isolate disk artifacts by run.
     """
 
     storage_mode: Literal["memory", "disk", "hybrid"] = "memory"
     storage_format: Literal["parquet", "csv", "feather"] = "parquet"
     spill_threshold_bytes: int = 50 * 1024 * 1024  # 50 MB
     storage_dir: str = ".feature_forge_artifacts"
+    run_id: str | None = None
 
     def __post_init__(self) -> None:
+        if self.run_id is not None:
+            validate_identifier(self.run_id)
         if self.storage_mode == "memory":
             return
         os.makedirs(self.storage_dir, exist_ok=True)

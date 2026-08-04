@@ -1,0 +1,63 @@
+{
+  "additionalProperties": false,
+  "description": "Inputs that define one experiment case.",
+  "properties": {
+    "cv_folds": {
+      "anyOf": [
+        {
+          "minimum": 2,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cv Folds"
+    },
+    "dataset": {
+      "minLength": 1,
+      "title": "Dataset",
+      "type": "string"
+    },
+    "method": {
+      "minLength": 1,
+      "title": "Method",
+      "type": "string"
+    },
+    "mode": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Mode"
+    },
+    "model": {
+      "minLength": 1,
+      "title": "Model",
+      "type": "string"
+    },
+    "options": {
+      "additionalProperties": true,
+      "title": "Options",
+      "type": "object"
+    },
+    "seed": {
+      "title": "Seed",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "dataset",
+    "method",
+    "model",
+    "seed"
+  ],
+  "title": "RunRequest",
+  "type": "object"
+}

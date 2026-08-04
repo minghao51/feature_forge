@@ -1,0 +1,92 @@
+{
+  "final_vars": [
+    "execute_platinum"
+  ],
+  "nodes": [
+    {
+      "dependencies": [],
+      "name": "artifact_store",
+      "tags": {}
+    },
+    {
+      "dependencies": [],
+      "name": "case_fingerprint",
+      "tags": {}
+    },
+    {
+      "dependencies": [],
+      "name": "environment_snapshot",
+      "tags": {}
+    },
+    {
+      "dependencies": [],
+      "name": "evaluation_policy",
+      "tags": {}
+    },
+    {
+      "dependencies": [],
+      "name": "evaluator",
+      "tags": {}
+    },
+    {
+      "dependencies": [
+        "artifact_store",
+        "case_fingerprint",
+        "environment_snapshot",
+        "evaluation_policy",
+        "evaluator",
+        "execution_profile",
+        "gold_ref",
+        "model_name",
+        "run_id",
+        "selection_policy",
+        "silver_ref",
+        "uncertainty_policy"
+      ],
+      "name": "execute_platinum",
+      "tags": {
+        "cost": "expensive",
+        "layer": "platinum",
+        "module": "feature_forge.dataflows.platinum",
+        "owner": "evaluation",
+        "persistence": "boundary"
+      }
+    },
+    {
+      "dependencies": [],
+      "name": "execution_profile",
+      "tags": {}
+    },
+    {
+      "dependencies": [],
+      "name": "gold_ref",
+      "tags": {}
+    },
+    {
+      "dependencies": [],
+      "name": "model_name",
+      "tags": {}
+    },
+    {
+      "dependencies": [],
+      "name": "run_id",
+      "tags": {}
+    },
+    {
+      "dependencies": [],
+      "name": "selection_policy",
+      "tags": {}
+    },
+    {
+      "dependencies": [],
+      "name": "silver_ref",
+      "tags": {}
+    },
+    {
+      "dependencies": [],
+      "name": "uncertainty_policy",
+      "tags": {}
+    }
+  ],
+  "schema_version": "1"
+}

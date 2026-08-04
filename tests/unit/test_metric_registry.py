@@ -6,7 +6,13 @@ from unittest.mock import patch
 
 import pytest
 
-from feature_forge.evaluation.metrics import METRIC_REGISTRY, MetricRegistry, get_metric
+from feature_forge.evaluation.metrics import (
+    METRIC_REGISTRY,
+    MetricDirection,
+    MetricRegistry,
+    get_metric,
+    get_metric_direction,
+)
 from feature_forge.exceptions import EvaluationError
 
 
@@ -76,3 +82,47 @@ class TestMetricRegistry:
 
         discovered = MetricRegistry.discover()
         assert isinstance(discovered, dict)
+
+
+class TestMetricDirection:
+    """Direction metadata for built-in and plugin metrics."""
+
+    def test_maximize_metrics(self):
+        for name in ("auc", "acc", "f1", "r2"):
+            assert MetricRegistry.get_direction(name) is MetricDirection.MAXIMIZE, name
+
+    def test_minimize_metrics(self):
+        for name in ("rmse", "mae", "nrmse"):
+            assert MetricRegistry.get_direction(name) is MetricDirection.MINIMIZE, name
+
+    def test_get_metric_direction_module_helper(self):
+        assert get_metric_direction("auc") is MetricDirection.MAXIMIZE
+        assert get_metric_direction("rmse") is MetricDirection.MINIMIZE
+
+    def test_register_with_direction_string(self):
+        MetricRegistry.register("custom_max", lambda y, p: 1.0, direction="maximize")
+        MetricRegistry.register("custom_min", lambda y, p: 1.0, direction="minimize")
+        try:
+            assert MetricRegistry.get_direction("custom_max") is MetricDirection.MAXIMIZE
+            assert MetricRegistry.get_direction("custom_min") is MetricDirection.MINIMIZE
+        finally:
+            MetricRegistry.reset()
+
+    def test_register_with_direction_enum(self):
+        MetricRegistry.register("custom_enum", lambda y, p: 1.0, direction=MetricDirection.MINIMIZE)
+        try:
+            assert MetricRegistry.get_direction("custom_enum") is MetricDirection.MINIMIZE
+        finally:
+            MetricRegistry.reset()
+
+    def test_direction_fails_closed_for_directionless_plugin(self):
+        MetricRegistry.register("directionless", lambda y, p: 1.0)
+        try:
+            with pytest.raises(EvaluationError, match="no direction metadata"):
+                MetricRegistry.get_direction("directionless")
+        finally:
+            MetricRegistry.reset()
+
+    def test_direction_fails_closed_for_unknown_metric(self):
+        with pytest.raises(EvaluationError, match="Unknown metric"):
+            MetricRegistry.get_direction("does_not_exist")

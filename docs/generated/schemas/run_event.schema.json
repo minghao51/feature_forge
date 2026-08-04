@@ -1,0 +1,270 @@
+{
+  "$defs": {
+    "FailureClass": {
+      "description": "Failure category used to decide whether recovery is safe.",
+      "enum": [
+        "transient",
+        "deterministic",
+        "policy",
+        "resource",
+        "cancelled"
+      ],
+      "title": "FailureClass",
+      "type": "string"
+    },
+    "FailureRecord": {
+      "additionalProperties": false,
+      "description": "Serializable failure context shared by sequential and process execution.",
+      "properties": {
+        "attempt": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "cause_types": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Cause Types",
+          "type": "array"
+        },
+        "error_type": {
+          "minLength": 1,
+          "title": "Error Type",
+          "type": "string"
+        },
+        "failure_class": {
+          "$ref": "#/$defs/FailureClass"
+        },
+        "message": {
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "retryable": {
+          "default": false,
+          "title": "Retryable",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "stage": {
+          "default": "case",
+          "title": "Stage",
+          "type": "string"
+        }
+      },
+      "required": [
+        "failure_class",
+        "error_type",
+        "message"
+      ],
+      "title": "FailureRecord",
+      "type": "object"
+    },
+    "Layer": {
+      "description": "Durable maturity layer for an experiment artifact.",
+      "enum": [
+        "bronze",
+        "silver",
+        "gold",
+        "platinum"
+      ],
+      "title": "Layer",
+      "type": "string"
+    },
+    "ManifestRef": {
+      "additionalProperties": false,
+      "description": "Reference to a committed layer manifest.",
+      "properties": {
+        "layer": {
+          "$ref": "#/$defs/Layer"
+        },
+        "relative_path": {
+          "const": "manifest.json",
+          "default": "manifest.json",
+          "title": "Relative Path",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "layer",
+        "run_id",
+        "sha256"
+      ],
+      "title": "ManifestRef",
+      "type": "object"
+    },
+    "RunState": {
+      "description": "Lifecycle state of a run or stage.",
+      "enum": [
+        "planned",
+        "running",
+        "partial",
+        "succeeded",
+        "failed",
+        "cancelled"
+      ],
+      "title": "RunState",
+      "type": "string"
+    },
+    "StageDisposition": {
+      "description": "How a stage contributed to the current run.",
+      "enum": [
+        "executed",
+        "reused",
+        "skipped"
+      ],
+      "title": "StageDisposition",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Append-only control-plane event consumed by the future catalog.",
+  "properties": {
+    "attempt": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Attempt",
+      "type": "integer"
+    },
+    "case_id": {
+      "minLength": 1,
+      "title": "Case Id",
+      "type": "string"
+    },
+    "details": {
+      "additionalProperties": true,
+      "title": "Details",
+      "type": "object"
+    },
+    "disposition": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/StageDisposition"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "event_id": {
+      "minLength": 1,
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_type": {
+      "minLength": 1,
+      "title": "Event Type",
+      "type": "string"
+    },
+    "failure": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FailureRecord"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "fingerprint": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Fingerprint"
+    },
+    "layer": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Layer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "manifest_ref": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ManifestRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "stage": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Stage"
+    },
+    "state": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RunState"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "event_id",
+    "run_id",
+    "case_id",
+    "event_type",
+    "occurred_at"
+  ],
+  "title": "RunEvent",
+  "type": "object"
+}

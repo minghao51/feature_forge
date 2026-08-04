@@ -14,6 +14,18 @@ class LLMError(FeatureForgeError):
     """LLM API call failed or returned invalid response."""
 
 
+class TransientLLMError(LLMError):
+    """LLM failure explicitly classified as safe for bounded retry."""
+
+
+class TransientNetworkError(FeatureForgeError):
+    """Network failure explicitly classified as safe for bounded retry."""
+
+
+class ReplayProviderError(FeatureForgeError):
+    """Replay attempted to construct or call an LLM provider."""
+
+
 class CodeExecutionError(FeatureForgeError):
     """Sandboxed code execution failed or was blocked."""
 

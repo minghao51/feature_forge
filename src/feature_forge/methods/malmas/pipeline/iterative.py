@@ -10,6 +10,7 @@ import pandas as pd
 from feature_forge.config import Settings
 from feature_forge.evaluation.cv import CVEvaluator
 from feature_forge.evaluation.kit import EvaluationKit
+from feature_forge.evaluation.metrics import MetricDirection
 from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.llm.base import LLMClient
 from feature_forge.methods.malmas.agents.base import Agent, AgentRegistry
@@ -320,6 +321,7 @@ class IterativePipeline(BaseIterativePipeline):
         gain: float,
         round_idx: int,
         metric: str,
+        maximize: bool,
     ) -> None:
         memory.record_procedure(
             base_columns=spec.base_columns,
@@ -329,7 +331,9 @@ class IterativePipeline(BaseIterativePipeline):
             description=spec.logic,
             round_idx=round_idx,
         )
-        effective = gain > 0
+        # Direction-aware: for minimize metrics, a *negative* raw gain is the
+        # improvement. `effective` must reflect "improved the configured metric".
+        effective = gain > 0 if maximize else gain < 0
         memory.record_feedback(
             feature_name=spec.name,
             metric=metric,
@@ -355,6 +359,9 @@ class IterativePipeline(BaseIterativePipeline):
         core_results: PipelineResult,
         round_idx: int,
     ) -> None:
+        # `PipelineResult.gains` stores raw (un-signed) gains; memory needs the
+        # direction-aware "effective" flag, so resolve it once here.
+        maximize = self.core.evaluator.metric_direction is not MetricDirection.MINIMIZE
         for agent in agents:
             memory = self._get_memory(agent.name)
             agent_gain_df = core_results.agent_gains.get(agent.name, pd.DataFrame())
@@ -367,6 +374,7 @@ class IterativePipeline(BaseIterativePipeline):
                         row["gain"],
                         round_idx,
                         self.config.metric,
+                        maximize,
                     )
             memory.save()
             if not agent_gain_df.empty:

@@ -1,0 +1,44 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "batch_index": {
+      "minimum": 0,
+      "title": "Batch Index",
+      "type": "integer"
+    },
+    "candidate_id": {
+      "minLength": 1,
+      "title": "Candidate Id",
+      "type": "string"
+    },
+    "code_path": {
+      "minLength": 1,
+      "title": "Code Path",
+      "type": "string"
+    },
+    "name": {
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "specification": {
+      "additionalProperties": true,
+      "title": "Specification",
+      "type": "object"
+    }
+  },
+  "required": [
+    "candidate_id",
+    "name",
+    "batch_index",
+    "code_path"
+  ],
+  "title": "FeatureCandidate",
+  "type": "object"
+}

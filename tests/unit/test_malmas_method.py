@@ -17,6 +17,8 @@ class _FakeForge:
         self.config = config
         self.kwargs = kwargs
         self.fit_calls = 0
+        self.transform_calls = 0
+        self.fit_transform_calls = 0
         self.generated_scripts = ["script_a"]
         self.feature_metadata = [{"name": "f1"}]
 
@@ -25,7 +27,15 @@ class _FakeForge:
         self.fit_kwargs = kwargs
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        self.transform_calls += 1
         return pd.DataFrame({"f1": [1] * len(X)}, index=X.index)
+
+    def fit_transform(self, X_train: pd.DataFrame, y_train: pd.Series) -> pd.DataFrame:
+        # Mirrors FeatureForge.fit_transform: fit, then return the cached
+        # enhanced frame without a second sandbox pass via transform().
+        self.fit_transform_calls += 1
+        self.fit(X_train, y_train)
+        return pd.DataFrame({"f1": [1] * len(X_train)}, index=X_train.index)
 
     def get_artifacts(self) -> dict[str, Any]:
         return {"generated_code": "def generate_features(df): ..."}
@@ -66,6 +76,11 @@ def test_fit_transform_returns_feature_forge_output_once() -> None:
     with patch("feature_forge.methods.malmas.method.FeatureForge", _FakeForge):
         method = MALMASMethod(config=_settings())
         enhanced = method.fit_transform(X, y)
+        forge = method._forge  # type: ignore[attr-defined]
 
     assert list(enhanced.columns) == ["f1"]
     assert enhanced.shape == (2, 1)
+    # fit_transform reuses the cached enhanced frame — no second transform() pass.
+    assert isinstance(forge, _FakeForge)
+    assert forge.fit_transform_calls == 1
+    assert forge.transform_calls == 0

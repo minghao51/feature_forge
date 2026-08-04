@@ -10,12 +10,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from feature_forge.llm.providers.openai import OpenAIProvider
-from feature_forge.observability.structlog_config import get_logger
 
 if TYPE_CHECKING:
     from feature_forge.llm.cache import DiskCache
-
-logger = get_logger(__name__)
 
 
 class DeepSeekProvider(OpenAIProvider):
@@ -72,10 +69,4 @@ class DeepSeekProvider(OpenAIProvider):
             extra_body = kwargs.pop("extra_body", {})
             extra_body.setdefault("thinking", {"type": "enabled"})
             kwargs["extra_body"] = extra_body
-        return await self._client.chat.completions.create(
-            model=self.model,
-            messages=messages,  # type: ignore[arg-type]
-            temperature=temperature,
-            max_tokens=max_tokens,
-            **kwargs,
-        )
+        return await super()._call_api(messages, temperature, max_tokens, **kwargs)

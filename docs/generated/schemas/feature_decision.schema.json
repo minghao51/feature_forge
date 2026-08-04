@@ -1,0 +1,48 @@
+{
+  "$defs": {
+    "FeatureDecisionState": {
+      "enum": [
+        "accepted",
+        "rejected",
+        "error"
+      ],
+      "title": "FeatureDecisionState",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "candidate_id": {
+      "minLength": 1,
+      "title": "Candidate Id",
+      "type": "string"
+    },
+    "reason": {
+      "minLength": 1,
+      "title": "Reason",
+      "type": "string"
+    },
+    "reason_code": {
+      "minLength": 1,
+      "title": "Reason Code",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/$defs/FeatureDecisionState"
+    }
+  },
+  "required": [
+    "candidate_id",
+    "state",
+    "reason_code",
+    "reason"
+  ],
+  "title": "FeatureDecision",
+  "type": "object"
+}

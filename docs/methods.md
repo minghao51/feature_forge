@@ -86,7 +86,7 @@ src/feature_forge/methods/
 │   ├── method.py      # MALMASMethod
 │   ├── agents/        # 6 agents + router + registry
 │   ├── pipeline/      # CorePipeline, IterativePipeline, ablations
-│   ├── memory/        # 3-tier memory
+│   ├── memory/        # 2-tier memory
 │   └── prompts/       # YAML prompt loading (local copy)
 ├── malmus/method.py   # MalmusMethod
 └── openfe/method.py   # OpenFEMethod
@@ -366,7 +366,7 @@ unary_cls = AgentRegistry.get_agent("unary")
 
 ## 4. Memory System
 
-The 3-tier memory architecture is based on the MALMAS memory module. Memory is a MALMAS-specific subsystem living under `methods/malmas/memory/`.
+The 2-tier memory architecture is based on the MALMAS memory module. Memory is a MALMAS-specific subsystem living under `methods/malmas/memory/`.
 
 **Source:** MALMAS paper, Section 3.3 ("Memory Module")
 
@@ -376,18 +376,12 @@ The 3-tier memory architecture is based on the MALMAS memory module. Memory is a
 |------|---------|---------|
 | **Procedural** | Records successful transform attempts (columns, transform, feature name, type) | JSON per-agent |
 | **Feedback** | Records evaluation outcomes per feature (metric, gain, effective flag) | JSON per-agent |
-| **Conceptual** | LLM-summarized actionable rules distilled from effective features | JSON per-agent |
 
-### Conceptual Memory (LLM Summarization)
+### Relevance-based Retrieval
 
-The conceptual memory tier uses a two-level LLM summarization process:
+Feedback entries are ranked by relevance to the current columns and round (`retrieve_top_k`), keeping prompt context bounded without raw-history explosion.
 
-1. **Per-Agent Summary**: For each agent, the LLM receives effective feature examples and statistics, then generates 1-3 concise rules to guide future generation.
-2. **Global Summary**: A second LLM call synthesizes all per-agent summaries into 2-5 high-level rules that inform the entire system.
-
-This approach prevents prompt length explosion by replacing raw history with compressed heuristics.
-
-**Implementation:** `src/feature_forge/methods/malmas/memory/base.py`, `src/feature_forge/methods/malmas/memory/conceptual.py`
+**Implementation:** `src/feature_forge/methods/malmas/memory/base.py`
 
 ---
 

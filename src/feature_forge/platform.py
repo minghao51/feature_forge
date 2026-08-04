@@ -7,26 +7,42 @@ ExperimentCaseExecutor, and Reporter.
 
 from __future__ import annotations
 
-from typing import Any
+from pathlib import Path
+from typing import Any, cast
 
 import pandas as pd
 
 from feature_forge.config import Settings, get_settings
+from feature_forge.contracts.orchestration import (
+    FailureRecord,
+    ResourceConfig,
+    ResumePlan,
+    ResumePolicy,
+)
+from feature_forge.contracts.stages import Layer, RunState
 from feature_forge.data import DatasetRegistry
+from feature_forge.dataflows.profile import ExecutionProfile
 from feature_forge.evaluation import MetricRegistry, ModelRegistry
 from feature_forge.experiment import ExperimentTracker, Reporter, create_tracker_from_config
 from feature_forge.experiment.case_executor import (
     CaseComputationInput,
     ExperimentCaseExecutor,
+    LayerExecutor,
     run_case,
 )
+from feature_forge.experiment.context import TaskType, validate_metric_for_task
 from feature_forge.experiment.execution import (
     ExperimentCase,
+    ExperimentResult,
     ProcessPoolExecutionAdapter,
     SequentialExecutionAdapter,
 )
+from feature_forge.experiment.lifecycle import LocalRunRepository
+from feature_forge.experiment.resources import resolve_resource_plan
+from feature_forge.experiment.resume import build_resume_plan
 from feature_forge.methods import BaseMethod, MethodRegistry
 from feature_forge.observability.structlog_config import get_logger
+from feature_forge.storage.local import LocalArtifactStore
 
 logger = get_logger(__name__)
 
@@ -136,6 +152,17 @@ class ExperimentalPlatform:
         parallel: bool = False,
         max_workers: int = 1,
         progress: bool = True,
+        metric: str | None = None,
+        execution_profile: ExecutionProfile = ExecutionProfile.DEVELOPMENT,
+        artifact_policy: str = "legacy",
+        fail_fast: bool = False,
+        dry_run: bool = False,
+        resources: ResourceConfig | dict[str, Any] | None = None,
+        lifecycle_dir: str | Path | None = None,
+        artifact_root: str | Path = ".feature_forge_artifacts",
+        resume_policy: ResumePolicy | dict[str, Any] | None = None,
+        layer_fingerprints: dict[str, dict[str, str]] | None = None,
+        layer_executor: LayerExecutor | None = None,
     ) -> list[dict[str, Any]]:
         """Execute a method comparison experiment.
 
@@ -174,25 +201,179 @@ class ExperimentalPlatform:
                                 mode=mode,
                                 cv_folds=cv_folds,
                                 run_id=f"run_{ds_name}_{method_name}_{model_name}_{seed}",
+                                metric=metric,
+                                execution_profile=execution_profile,
+                                artifact_policy=artifact_policy,
                             )
                         )
 
         run_settings = self._get_settings()
-        run_tracker = tracker or create_tracker_from_config(run_settings.tracker)
-        executor = ExperimentCaseExecutor(
-            settings=run_settings,
-            tracker=run_tracker,
-            extra_methods=self._extra_methods,
-            extra_datasets=self._extra_datasets,
-            extra_models=self._extra_models,
-            extra_metrics=self._extra_metrics,
+        requested_resources = (
+            ResourceConfig.model_validate(resources)
+            if resources is not None
+            else run_settings.resources
+        )
+        effective_plan = resolve_resource_plan(
+            requested_resources,
+            experiment_workers=max_workers if parallel else 1,
+        )
+        logger.info("resource_plan_resolved", **effective_plan.model_dump(mode="json"))
+        resolved_resume_policy = (
+            ResumePolicy.model_validate(resume_policy)
+            if resume_policy is not None
+            else ResumePolicy(enabled=artifact_policy != "legacy")
         )
 
+        if artifact_policy not in {"legacy", "layer_boundaries"}:
+            raise ValueError(f"unsupported artifact policy: {artifact_policy}")
+        if artifact_policy != "legacy" and layer_fingerprints is None:
+            raise ValueError(
+                "non-legacy artifact policy requires per-run resolved layer_fingerprints"
+            )
+        if artifact_policy != "legacy":
+            expected_layers = {layer.value for layer in Layer}
+            for case in cases:
+                run_id = case.effective_run_id
+                case_fingerprints = (layer_fingerprints or {}).get(run_id)
+                actual_layers = set(case_fingerprints or {})
+                if actual_layers != expected_layers:
+                    raise ValueError(
+                        f"non-legacy run '{run_id}' requires exactly {sorted(expected_layers)} "
+                        f"layer fingerprints; received {sorted(actual_layers)}"
+                    )
+
+        if dry_run:
+            available_datasets = set(self.list_datasets())
+            available_methods = set(self.list_methods())
+            available_models = set(self.list_models())
+            unknown = {
+                "datasets": sorted(set(datasets) - available_datasets),
+                "methods": sorted(set(methods) - available_methods),
+                "models": sorted(set(models) - available_models),
+                "metrics": [metric]
+                if metric is not None and metric not in set(self.list_metrics())
+                else [],
+            }
+            invalid = {key: values for key, values in unknown.items() if values}
+            if invalid:
+                raise ValueError(f"dry-run registry resolution failed: {invalid}")
+            for dataset_name in datasets:
+                metadata = self._get_dataset_registry().info(dataset_name)
+                declared_task = metadata.get("task") if isinstance(metadata, dict) else None
+                task = declared_task or run_settings.task
+                if task not in {"classification", "regression"}:
+                    raise ValueError(
+                        f"dry-run dataset '{dataset_name}' has unsupported task: {task}"
+                    )
+                requested_metric = metric or (
+                    run_settings.metric
+                    if run_settings.metric
+                    in (
+                        {"auc", "acc", "f1"}
+                        if task == "classification"
+                        else {"rmse", "mae", "r2", "nrmse"}
+                    )
+                    else ("auc" if task == "classification" else "r2")
+                )
+                validate_metric_for_task(
+                    requested_metric,
+                    task=cast(TaskType, task),
+                    dataset_name=dataset_name,
+                )
+            stages = (
+                ["legacy_case"]
+                if artifact_policy == "legacy"
+                else ["bronze", "silver", "gold", "platinum"]
+            )
+            planned: list[ExperimentResult] = []
+            store = LocalArtifactStore(artifact_root)
+            for case in cases:
+                resume_plan: ResumePlan | None = None
+                if artifact_policy != "legacy":
+                    run_id = case.run_id or (
+                        f"run_{case.dataset}_{case.method}_{case.model}_{case.seed}"
+                    )
+                    case_fingerprints = (layer_fingerprints or {}).get(run_id)
+                    if case_fingerprints is None:
+                        raise ValueError(
+                            f"dry-run is missing resolved layer fingerprints for '{run_id}'"
+                        )
+                    resume_plan = build_resume_plan(
+                        store=store,
+                        run_id=run_id,
+                        expected_fingerprints={
+                            Layer(name): value for name, value in case_fingerprints.items()
+                        },
+                        policy=resolved_resume_policy,
+                        dry_run=True,
+                    )
+                planned.append(
+                    ExperimentResult(
+                        dataset=case.dataset,
+                        method=case.method,
+                        model=case.model,
+                        seed=case.seed,
+                        run_id=case.run_id,
+                        state=RunState.PLANNED.value,
+                        resource_plan=effective_plan.model_dump(mode="json"),
+                        execution_plan={
+                            "stages": stages,
+                            "execution_profile": execution_profile.value,
+                            "artifact_policy": artifact_policy,
+                            "network_allowed": False,
+                            "persistent_writes": False,
+                            "resume": (
+                                resume_plan.model_dump(mode="json")
+                                if resume_plan is not None
+                                else None
+                            ),
+                        },
+                    )
+                )
+            return [result.__dict__ for result in planned]
+
+        if artifact_policy != "legacy" and layer_executor is None:
+            raise ValueError("non-legacy artifact policy requires a layer_executor")
+
+        journal = (
+            LocalRunRepository(lifecycle_dir)
+            if lifecycle_dir is not None
+            else (
+                LocalRunRepository(".feature_forge_artifacts/control")
+                if artifact_policy != "legacy"
+                else None
+            )
+        )
+        if journal is not None:
+            for case in cases:
+                run_id = case.effective_run_id
+                journal.record(
+                    run_id=run_id,
+                    case_id=run_id,
+                    event_type="case_planned",
+                    state=RunState.PLANNED,
+                    attempt=1,
+                    details={"resource_plan": effective_plan.model_dump(mode="json")},
+                )
+
+        def record_case_running(value: ExperimentCase | CaseComputationInput) -> None:
+            if journal is None:
+                return
+            case = value.case if isinstance(value, CaseComputationInput) else value
+            run_id = case.effective_run_id
+            journal.record(
+                run_id=run_id,
+                case_id=run_id,
+                event_type="case_running",
+                state=RunState.RUNNING,
+                attempt=1,
+            )
+
         if parallel:
-            if self._extra_methods:
+            if tracker is not None:
                 raise ValueError(
-                    "parallel=True currently supports only registry-discovered methods; "
-                    "instance-local extra methods are not serializable across process seam."
+                    "parallel execution requires tracker configuration or a serializable tracker "
+                    "factory; explicit tracker instances remain sequential-only"
                 )
             pool_backend = ProcessPoolExecutionAdapter(max_workers=max_workers)
             payloads = [
@@ -200,13 +381,129 @@ class ExperimentalPlatform:
                     case=c,
                     settings_data=run_settings.model_dump(),
                     dataset_overrides=self._extra_datasets,
+                    method_overrides=self._extra_methods,
+                    model_overrides=self._extra_models,
+                    metric_overrides=self._extra_metrics,
+                    tracker_config=run_settings.tracker.model_dump(),
+                    resource_plan=effective_plan.model_dump(mode="json"),
+                    artifact_root=str(artifact_root),
+                    resume_policy=resolved_resume_policy.model_dump(mode="json"),
+                    layer_fingerprints=(layer_fingerprints or {}).get(c.effective_run_id),
+                    layer_executor=layer_executor,
                 )
                 for c in cases
             ]
-            backend_results = pool_backend.run(payloads, run_case, progress=progress)
+            backend_results = pool_backend.run(
+                payloads,
+                run_case,
+                progress=progress,
+                fail_fast=fail_fast,
+                on_start=record_case_running,
+            )
         else:
+            run_tracker = tracker or create_tracker_from_config(run_settings.tracker)
+            executor = ExperimentCaseExecutor(
+                settings=run_settings,
+                tracker=run_tracker,
+                extra_methods=self._extra_methods,
+                extra_datasets=self._extra_datasets,
+                extra_models=self._extra_models,
+                extra_metrics=self._extra_metrics,
+                resource_plan=effective_plan,
+                artifact_root=str(artifact_root),
+                resume_policy=resolved_resume_policy,
+                layer_fingerprints=layer_fingerprints,
+                layer_executor=layer_executor,
+                tracker_failure_policy=run_settings.tracker.failure_policy,
+            )
             seq_backend = SequentialExecutionAdapter()
-            backend_results = seq_backend.run(cases, executor.execute, progress=progress)
+            backend_results = seq_backend.run(
+                cases,
+                executor.execute,
+                progress=progress,
+                fail_fast=fail_fast,
+                on_start=record_case_running,
+            )
+
+        if journal is not None:
+            for result in backend_results:
+                run_id = (
+                    result.run_id
+                    or f"run_{result.dataset}_{result.method}_{result.model}_{result.seed}"
+                )
+                state = RunState(result.state or ("failed" if result.error else "succeeded"))
+                resume_value = (result.execution_plan or {}).get("resume")
+                completed_plan = (
+                    ResumePlan.model_validate(resume_value)
+                    if isinstance(resume_value, dict)
+                    else None
+                )
+                if completed_plan is not None:
+                    for decision in completed_plan.decisions:
+                        stage_state = decision.state or RunState.SUCCEEDED
+                        journal.record(
+                            run_id=run_id,
+                            case_id=run_id,
+                            event_type="stage_terminal",
+                            state=stage_state,
+                            stage=decision.layer.value,
+                            layer=decision.layer,
+                            disposition=decision.disposition,
+                            manifest_ref=decision.manifest_ref,
+                            fingerprint=decision.expected_fingerprint,
+                            attempt=result.attempt,
+                            failure=(
+                                FailureRecord.model_validate(result.failure)
+                                if stage_state is RunState.FAILED and result.failure is not None
+                                else None
+                            ),
+                        )
+                terminal_ref = (
+                    next(
+                        (
+                            decision.manifest_ref
+                            for decision in reversed(completed_plan.decisions)
+                            if decision.manifest_ref is not None
+                        ),
+                        None,
+                    )
+                    if completed_plan is not None
+                    else None
+                )
+                terminal_fingerprint = (
+                    result.platinum_fingerprint
+                    or result.gold_fingerprint
+                    or result.silver_fingerprint
+                    or result.case_fingerprint
+                    or (
+                        next(
+                            (
+                                decision.expected_fingerprint
+                                for decision in reversed(completed_plan.decisions)
+                                if decision.state is RunState.SUCCEEDED
+                            ),
+                            None,
+                        )
+                        if completed_plan is not None
+                        else None
+                    )
+                )
+                journal.record(
+                    run_id=run_id,
+                    case_id=run_id,
+                    event_type="case_terminal",
+                    state=state,
+                    stage="case",
+                    failure=(
+                        FailureRecord.model_validate(result.failure)
+                        if result.failure is not None
+                        else None
+                    ),
+                    manifest_ref=terminal_ref,
+                    fingerprint=terminal_fingerprint,
+                    attempt=result.attempt,
+                    details={"resource_plan": result.resource_plan},
+                )
 
         return [result.__dict__ for result in backend_results]
 

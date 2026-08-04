@@ -235,7 +235,7 @@ class TestSandboxContract:
 class TestAgentMemoryContract:
     def test_has_record_methods(self, tmp_path):
         mem = AgentMemory("test", str(tmp_path / "m.json"))
-        for method in ("record_procedure", "record_feedback", "record_conceptual", "save"):
+        for method in ("record_procedure", "record_feedback", "save"):
             assert hasattr(mem, method)
 
     def test_generate_prompt_section_returns_str(self, tmp_path):

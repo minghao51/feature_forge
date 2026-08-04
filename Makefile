@@ -1,21 +1,14 @@
-.PHONY: notebooks notebooks-staged docs docs-serve
+.PHONY: docs docs-check docs-generated docs-serve
 
-notebooks:
-	uv run quarto render notebooks/
-	uv run python scripts/extract_shared_notebook_assets.py
+docs-generated:
+	uv run --extra pipeline python scripts/generate_medallion_docs.py --write
 
-notebooks-staged:
-	@changed=$$(git diff --cached --name-only -- 'notebooks/*.qmd'); \
-	if [ -n "$$changed" ]; then \
-		for f in $$changed; do uv run quarto render "$$f"; done; \
-		uv run python scripts/extract_shared_notebook_assets.py; \
-		git add notebooks/_freeze/ docs/notebooks/html/; \
-	fi
+docs-check:
+	uv run --extra pipeline python scripts/generate_medallion_docs.py --check
+	uv run python scripts/build_docs_offline.py
 
-docs: notebooks
-	uv run python scripts/generate_notebook_docs.py
-	uv run mkdocs build
+docs: docs-generated
+	uv run python scripts/build_docs_offline.py
 
-docs-serve: notebooks
-	uv run python scripts/generate_notebook_docs.py
+docs-serve: docs-generated
 	uv run mkdocs serve

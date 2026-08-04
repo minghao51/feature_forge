@@ -1,0 +1,58 @@
+{
+  "additionalProperties": false,
+  "description": "Paired fold delta summary.",
+  "properties": {
+    "confidence_level": {
+      "title": "Confidence Level",
+      "type": "number"
+    },
+    "lower_bound": {
+      "title": "Lower Bound",
+      "type": "number"
+    },
+    "mean_directional_gain": {
+      "title": "Mean Directional Gain",
+      "type": "number"
+    },
+    "method": {
+      "const": "paired_t",
+      "title": "Method",
+      "type": "string"
+    },
+    "pair_count": {
+      "minimum": 2,
+      "title": "Pair Count",
+      "type": "integer"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "standard_deviation": {
+      "title": "Standard Deviation",
+      "type": "number"
+    },
+    "standard_error": {
+      "title": "Standard Error",
+      "type": "number"
+    },
+    "upper_bound": {
+      "title": "Upper Bound",
+      "type": "number"
+    }
+  },
+  "required": [
+    "method",
+    "confidence_level",
+    "pair_count",
+    "mean_directional_gain",
+    "standard_deviation",
+    "standard_error",
+    "lower_bound",
+    "upper_bound"
+  ],
+  "title": "UncertaintySummary",
+  "type": "object"
+}

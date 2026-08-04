@@ -229,7 +229,7 @@ class TestRecordFeatureInMemory:
             agent_name="unary",
         )
         IterativePipeline._record_feature_in_memory(
-            memory, spec, gain=0.05, round_idx=0, metric="auc"
+            memory, spec, gain=0.05, round_idx=0, metric="auc", maximize=True
         )
         memory.record_procedure.assert_called_once_with(
             base_columns=["x"],
@@ -260,14 +260,15 @@ class TestRecordFeatureInMemory:
             base_columns=["y"],
             agent_name="unary",
         )
+        # RMSE (minimize): a *positive* raw gain is worse, so effective=False.
         IterativePipeline._record_feature_in_memory(
-            memory, spec, gain=-0.03, round_idx=1, metric="rmse"
+            memory, spec, gain=0.03, round_idx=1, metric="rmse", maximize=False
         )
         memory.record_procedure.assert_called_once()
         memory.record_feedback.assert_called_once_with(
             feature_name="feat_b",
             metric="rmse",
-            value=-0.03,
+            value=0.03,
             effective=False,
             round_idx=1,
             base=["y"],
@@ -286,7 +287,7 @@ class TestRecordFeatureInMemory:
         memory = MagicMock()
         spec = FeatureSpec(name="zero_feat", base_columns=["a"])
         IterativePipeline._record_feature_in_memory(
-            memory, spec, gain=0.0, round_idx=0, metric="auc"
+            memory, spec, gain=0.0, round_idx=0, metric="auc", maximize=True
         )
         memory.record_feedback.assert_called_once_with(
             feature_name="zero_feat",
@@ -298,3 +299,22 @@ class TestRecordFeatureInMemory:
             ty="numerical",
         )
         memory.record_unused_procedure.assert_called_once()
+
+    def test_minimize_metric_negative_raw_gain_is_effective(self):
+        # Direction-aware: for a minimize metric (RMSE), a negative raw gain
+        # is an improvement, so effective=True and no unused-procedure record.
+        memory = MagicMock()
+        spec = FeatureSpec(name="feat_c", base_columns=["z"])
+        IterativePipeline._record_feature_in_memory(
+            memory, spec, gain=-0.04, round_idx=2, metric="rmse", maximize=False
+        )
+        memory.record_feedback.assert_called_once_with(
+            feature_name="feat_c",
+            metric="rmse",
+            value=-0.04,
+            effective=True,
+            round_idx=2,
+            base=["z"],
+            ty="numerical",
+        )
+        memory.record_unused_procedure.assert_not_called()

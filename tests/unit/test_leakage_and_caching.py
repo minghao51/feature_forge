@@ -40,7 +40,11 @@ def generate_features(df):
     evaluator = MagicMock()
     evaluator.config = get_settings()
     evaluator.evaluate_baseline.return_value = 0.5
-    evaluator.evaluate_features_batch.return_value = {"feat_good": 0.1, "feat_bad": 0.0}
+    # `_evaluate_and_select` now calls the directional batch method.
+    evaluator.evaluate_features_batch_directional.return_value = {
+        "feat_good": 0.1,
+        "feat_bad": 0.0,
+    }
 
     method = LLMFEMethod(
         llm_client=llm,
@@ -81,7 +85,10 @@ def generate_features(df):
     evaluator = MagicMock()
     evaluator.config = get_settings()
     evaluator.evaluate_baseline.return_value = 0.5
-    evaluator.evaluate_features_batch.return_value = {"feat_good": 0.1, "feat_bad": 0.0}
+    evaluator.evaluate_features_batch_directional.return_value = {
+        "feat_good": 0.1,
+        "feat_bad": 0.0,
+    }
 
     method = CAAFEMethod(
         llm_client=llm,
@@ -126,7 +133,10 @@ def test_malmus_leakage_filtering_and_caching() -> None:
     evaluator = MagicMock()
     evaluator.config = get_settings()
     evaluator.evaluate_baseline.return_value = 0.5
-    evaluator.evaluate_features_batch.return_value = {"feat_good": 0.1, "feat_bad": 0.0}
+    evaluator.evaluate_features_batch_directional.return_value = {
+        "feat_good": 0.1,
+        "feat_bad": 0.0,
+    }
 
     method = MalmusMethod(
         llm_client=llm,

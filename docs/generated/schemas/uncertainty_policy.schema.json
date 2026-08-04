@@ -1,0 +1,27 @@
+{
+  "additionalProperties": false,
+  "description": "Paired fold uncertainty policy.",
+  "properties": {
+    "confidence_level": {
+      "default": 0.95,
+      "exclusiveMaximum": 1,
+      "exclusiveMinimum": 0,
+      "title": "Confidence Level",
+      "type": "number"
+    },
+    "method": {
+      "const": "paired_t",
+      "default": "paired_t",
+      "title": "Method",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "title": "UncertaintyPolicy",
+  "type": "object"
+}

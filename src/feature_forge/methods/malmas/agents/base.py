@@ -162,12 +162,6 @@ class BaseFeatureAgent(Agent):
     _fingerprint_cache: ClassVar[dict[tuple[int, int, int], str]] = {}
     _column_stats_cache: ClassVar[dict[tuple[str, str, int, int], dict[str, Any]]] = {}
 
-    @classmethod
-    def _clear_cache(cls) -> None:
-        cls._column_desc_cache.clear()
-        cls._fingerprint_cache.clear()
-        cls._column_stats_cache.clear()
-
     @staticmethod
     def _column_fingerprint(X: pd.DataFrame) -> str:
         if X.empty:

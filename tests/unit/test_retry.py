@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from feature_forge.config import RetryConfig
-from feature_forge.exceptions import LLMError
+from feature_forge.exceptions import LLMError, TransientLLMError
 from feature_forge.llm.base import LLMClient, LLMResponse
 
 
@@ -30,7 +30,7 @@ class FlakyProvider(LLMClient):
     ) -> LLMResponse:
         self.attempts += 1
         if self.attempts <= self.fail_count:
-            raise LLMError(f"Transient failure (attempt {self.attempts})")
+            raise TransientLLMError(f"Transient failure (attempt {self.attempts})")
         return LLMResponse(
             content="success",
             model=self.model,
@@ -48,7 +48,7 @@ class FlakyProvider(LLMClient):
     ) -> dict:
         self.attempts += 1
         if self.attempts <= self.fail_count:
-            raise LLMError(f"Transient failure (attempt {self.attempts})")
+            raise TransientLLMError(f"Transient failure (attempt {self.attempts})")
         return {"status": "ok"}
 
 

@@ -1,0 +1,326 @@
+{
+  "$defs": {
+    "EvaluationPolicy": {
+      "additionalProperties": false,
+      "description": "Deterministic fold evaluation and alignment policy.",
+      "properties": {
+        "aggregation": {
+          "const": "unweighted_mean_of_fold_metrics",
+          "default": "unweighted_mean_of_fold_metrics",
+          "title": "Aggregation",
+          "type": "string"
+        },
+        "alignment": {
+          "default": "normalize_by_row_id",
+          "enum": [
+            "normalize_by_row_id",
+            "strict_order"
+          ],
+          "title": "Alignment",
+          "type": "string"
+        },
+        "blas_threads": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Blas Threads",
+          "type": "integer"
+        },
+        "estimator_threads": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Estimator Threads",
+          "type": "integer"
+        },
+        "minimum_successful_folds": {
+          "default": 2,
+          "minimum": 2,
+          "title": "Minimum Successful Folds",
+          "type": "integer"
+        },
+        "preprocessing": {
+          "const": "fit_on_training_fold",
+          "default": "fit_on_training_fold",
+          "title": "Preprocessing",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "selection_partition": {
+          "default": "discovery",
+          "enum": [
+            "discovery",
+            "evaluation",
+            "all"
+          ],
+          "title": "Selection Partition",
+          "type": "string"
+        }
+      },
+      "title": "EvaluationPolicy",
+      "type": "object"
+    },
+    "Layer": {
+      "description": "Durable maturity layer for an experiment artifact.",
+      "enum": [
+        "bronze",
+        "silver",
+        "gold",
+        "platinum"
+      ],
+      "title": "Layer",
+      "type": "string"
+    },
+    "ManifestRef": {
+      "additionalProperties": false,
+      "description": "Reference to a committed layer manifest.",
+      "properties": {
+        "layer": {
+          "$ref": "#/$defs/Layer"
+        },
+        "relative_path": {
+          "const": "manifest.json",
+          "default": "manifest.json",
+          "title": "Relative Path",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "layer",
+        "run_id",
+        "sha256"
+      ],
+      "title": "ManifestRef",
+      "type": "object"
+    },
+    "MetricDirection": {
+      "description": "Whether a larger or smaller metric value represents improvement.",
+      "enum": [
+        "maximize",
+        "minimize"
+      ],
+      "title": "MetricDirection",
+      "type": "string"
+    },
+    "ModelSpecification": {
+      "additionalProperties": false,
+      "description": "Resolved estimator identity used for every fold.",
+      "properties": {
+        "distribution": {
+          "minLength": 1,
+          "title": "Distribution",
+          "type": "string"
+        },
+        "distribution_version": {
+          "minLength": 1,
+          "title": "Distribution Version",
+          "type": "string"
+        },
+        "estimator_class": {
+          "minLength": 1,
+          "title": "Estimator Class",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "resolved_params": {
+          "additionalProperties": true,
+          "title": "Resolved Params",
+          "type": "object"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "seed": {
+          "title": "Seed",
+          "type": "integer"
+        },
+        "task": {
+          "enum": [
+            "classification",
+            "regression"
+          ],
+          "title": "Task",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "estimator_class",
+        "distribution",
+        "distribution_version",
+        "task",
+        "seed"
+      ],
+      "title": "ModelSpecification",
+      "type": "object"
+    },
+    "SelectionPolicy": {
+      "additionalProperties": false,
+      "description": "Final evidence-based feature selection policy.",
+      "properties": {
+        "max_selected_features": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Selected Features"
+        },
+        "minimum_practical_gain": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Minimum Practical Gain",
+          "type": "number"
+        },
+        "profile": {
+          "default": "compatibility",
+          "enum": [
+            "compatibility",
+            "recommended"
+          ],
+          "title": "Profile",
+          "type": "string"
+        },
+        "require_positive_lower_bound": {
+          "default": false,
+          "title": "Require Positive Lower Bound",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "title": "SelectionPolicy",
+      "type": "object"
+    },
+    "UncertaintyPolicy": {
+      "additionalProperties": false,
+      "description": "Paired fold uncertainty policy.",
+      "properties": {
+        "confidence_level": {
+          "default": 0.95,
+          "exclusiveMaximum": 1,
+          "exclusiveMinimum": 0,
+          "title": "Confidence Level",
+          "type": "number"
+        },
+        "method": {
+          "const": "paired_t",
+          "default": "paired_t",
+          "title": "Method",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "title": "UncertaintyPolicy",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "All inputs capable of changing Platinum evidence.",
+  "properties": {
+    "case_fingerprint": {
+      "minLength": 1,
+      "title": "Case Fingerprint",
+      "type": "string"
+    },
+    "evaluation_policy": {
+      "$ref": "#/$defs/EvaluationPolicy"
+    },
+    "fold_fingerprint": {
+      "minLength": 1,
+      "title": "Fold Fingerprint",
+      "type": "string"
+    },
+    "gold_fingerprint": {
+      "minLength": 1,
+      "title": "Gold Fingerprint",
+      "type": "string"
+    },
+    "gold_manifest": {
+      "$ref": "#/$defs/ManifestRef"
+    },
+    "metric": {
+      "minLength": 1,
+      "title": "Metric",
+      "type": "string"
+    },
+    "metric_direction": {
+      "$ref": "#/$defs/MetricDirection"
+    },
+    "model": {
+      "$ref": "#/$defs/ModelSpecification"
+    },
+    "platinum_input_fingerprint": {
+      "minLength": 1,
+      "title": "Platinum Input Fingerprint",
+      "type": "string"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "selection_policy": {
+      "$ref": "#/$defs/SelectionPolicy"
+    },
+    "silver_manifest": {
+      "$ref": "#/$defs/ManifestRef"
+    },
+    "uncertainty_policy": {
+      "$ref": "#/$defs/UncertaintyPolicy"
+    }
+  },
+  "required": [
+    "run_id",
+    "case_fingerprint",
+    "silver_manifest",
+    "gold_manifest",
+    "gold_fingerprint",
+    "fold_fingerprint",
+    "platinum_input_fingerprint",
+    "model",
+    "metric",
+    "metric_direction"
+  ],
+  "title": "PlatinumRequest",
+  "type": "object"
+}

@@ -1,0 +1,80 @@
+{
+  "$defs": {
+    "CheckSeverity": {
+      "description": "Severity used to distinguish advisory and required checks.",
+      "enum": [
+        "info",
+        "warning",
+        "error"
+      ],
+      "title": "CheckSeverity",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Result of one required or advisory validation check.",
+  "properties": {
+    "affected_artifacts": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Affected Artifacts",
+      "type": "array"
+    },
+    "check_id": {
+      "minLength": 1,
+      "title": "Check Id",
+      "type": "string"
+    },
+    "details": {
+      "additionalProperties": true,
+      "title": "Details",
+      "type": "object"
+    },
+    "expected": {
+      "anyOf": [
+        {},
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expected"
+    },
+    "message": {
+      "minLength": 1,
+      "title": "Message",
+      "type": "string"
+    },
+    "observed": {
+      "anyOf": [
+        {},
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Observed"
+    },
+    "passed": {
+      "title": "Passed",
+      "type": "boolean"
+    },
+    "required": {
+      "default": true,
+      "title": "Required",
+      "type": "boolean"
+    },
+    "severity": {
+      "$ref": "#/$defs/CheckSeverity",
+      "default": "error"
+    }
+  },
+  "required": [
+    "check_id",
+    "passed",
+    "message"
+  ],
+  "title": "CheckResult",
+  "type": "object"
+}

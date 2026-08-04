@@ -133,3 +133,24 @@ class TestDataFrameStorage:
         assert isinstance(result, LazyDataFrameRef)
         loaded = result.load()
         pd.testing.assert_frame_equal(loaded, sample_df)
+
+    def test_run_id_scopes_disk_artifacts(self, sample_df, tmp_dir):
+        cfg = ArtifactConfig(storage_mode="disk", storage_dir=tmp_dir, run_id="run-42")
+        storage = DataFrameStorage(cfg)
+        result = storage.store("features", sample_df)
+
+        assert isinstance(result, LazyDataFrameRef)
+        assert result.path.endswith(os.path.join("runs", "run-42", "features.parquet"))
+
+    def test_run_id_cannot_escape_storage_directory(self, tmp_dir):
+        with pytest.raises(ValueError, match="unsupported path characters"):
+            ArtifactConfig(storage_mode="disk", storage_dir=tmp_dir, run_id="../outside")
+        with pytest.raises(ValueError, match="unsupported path characters"):
+            ArtifactConfig(storage_mode="disk", storage_dir=tmp_dir, run_id="CON")
+
+    def test_backslashes_in_artifact_keys_are_filename_safe(self, sample_df, tmp_dir):
+        cfg = ArtifactConfig(storage_mode="disk", storage_dir=tmp_dir, run_id="run-42")
+        result = DataFrameStorage(cfg).store(r"nested\features", sample_df)
+
+        assert isinstance(result, LazyDataFrameRef)
+        assert result.path.endswith(os.path.join("runs", "run-42", "nested_features.parquet"))

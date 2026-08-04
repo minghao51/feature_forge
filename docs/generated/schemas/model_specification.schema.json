@@ -1,0 +1,59 @@
+{
+  "additionalProperties": false,
+  "description": "Resolved estimator identity used for every fold.",
+  "properties": {
+    "distribution": {
+      "minLength": 1,
+      "title": "Distribution",
+      "type": "string"
+    },
+    "distribution_version": {
+      "minLength": 1,
+      "title": "Distribution Version",
+      "type": "string"
+    },
+    "estimator_class": {
+      "minLength": 1,
+      "title": "Estimator Class",
+      "type": "string"
+    },
+    "name": {
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "resolved_params": {
+      "additionalProperties": true,
+      "title": "Resolved Params",
+      "type": "object"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "seed": {
+      "title": "Seed",
+      "type": "integer"
+    },
+    "task": {
+      "enum": [
+        "classification",
+        "regression"
+      ],
+      "title": "Task",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "estimator_class",
+    "distribution",
+    "distribution_version",
+    "task",
+    "seed"
+  ],
+  "title": "ModelSpecification",
+  "type": "object"
+}

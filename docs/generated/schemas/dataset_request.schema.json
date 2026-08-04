@@ -1,0 +1,86 @@
+{
+  "additionalProperties": false,
+  "description": "Resolved dataset inputs for one Silver materialization.",
+  "properties": {
+    "canonicalization_config": {
+      "additionalProperties": true,
+      "title": "Canonicalization Config",
+      "type": "object"
+    },
+    "case_fingerprint": {
+      "minLength": 1,
+      "title": "Case Fingerprint",
+      "type": "string"
+    },
+    "cv_folds": {
+      "minimum": 2,
+      "title": "Cv Folds",
+      "type": "integer"
+    },
+    "evaluation_holdout_fraction": {
+      "default": 0.25,
+      "exclusiveMaximum": 0.5,
+      "minimum": 0.0,
+      "title": "Evaluation Holdout Fraction",
+      "type": "number"
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    },
+    "name": {
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "source_policy": {
+      "default": "reference",
+      "enum": [
+        "reference",
+        "snapshot"
+      ],
+      "title": "Source Policy",
+      "type": "string"
+    },
+    "split_seed": {
+      "title": "Split Seed",
+      "type": "integer"
+    },
+    "target": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Target"
+    },
+    "task": {
+      "enum": [
+        "classification",
+        "regression"
+      ],
+      "title": "Task",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "task",
+    "run_id",
+    "case_fingerprint",
+    "split_seed",
+    "cv_folds"
+  ],
+  "title": "DatasetRequest",
+  "type": "object"
+}

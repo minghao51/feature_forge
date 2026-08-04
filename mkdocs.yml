@@ -64,8 +64,45 @@ nav:
   - API Key Setup: API_KEY_SETUP.md
   - Methods: methods.md
   - API Reference: api_reference.md
-  - Migration Guide: migration_guide.md
+  - Pipeline:
+      - Overview: pipeline/index.md
+      - Architecture: pipeline/architecture.md
+      - Layers and Identity: pipeline/layers.md
+      - Contracts and Evidence: pipeline/contracts.md
+      - Method Authors: pipeline/method-authors.md
+      - Silver Dataflow: silver_dataflow.md
+      - Gold Offline Replay: gold_dataflow.md
+      - Platinum Evidence: platinum_evidence.md
+  - Operations:
+      - Runbook: operations/index.md
+      - Installation and Profiles: operations/profiles.md
+      - Run and Recovery Workflows: operations/workflows.md
+      - Verification and Catalog: operations/verification-catalog.md
+      - Recovery and Security: operations/recovery-security.md
+      - Catalog Detail: catalog_verification.md
+  - Generated Reference:
+      - Overview: generated/index.md
+      - Pipeline DAGs: generated/dags.md
+      - Contracts: generated/contracts.md
+      - Validation Checks: generated/check-registry.md
+      - Catalog Schema: generated/catalog-schema.md
+      - CLI: generated/cli-reference.md
+      - Hamilton Nodes: generated/node-inventory.md
+      - Package Layouts: generated/package-layouts.md
+  - Migration:
+      - General Migration: migration_guide.md
+      - Medallion Runtime: migration/medallion.md
   - MALMAS Technical Roadmap: MALMAS_Technical_Roadmap.md
+  - Architecture Decisions:
+      - Overview: adr/index.md
+      - 0001 Hamilton Boundary: adr/0001-hamilton-boundary.md
+      - 0002 Medallion Lite: adr/0002-medallion-lite.md
+      - 0003 Artifact Commit: adr/0003-artifact-commit.md
+      - 0004 Documentation System: adr/0004-documentation-system.md
+  - PR 8 Readiness:
+      - Decision Ledger: decisions/pr8-browser-catalog-decision.md
+      - Scale Evidence: decisions/pr8-scale-evidence.md
+      - Snapshot Schema Proposal: decisions/pr8-snapshot-schema-v1.md
   - Implementation Plan:
       - Overview: plan/00_index.md
       - 01 Architecture: plan/01_architecture.md
@@ -85,6 +122,11 @@ nav:
       - 15 Notebook Updates: plan/15_notebook_updates_handoff.md
       - 16 Prompt Colocation: plan/16_prompt_colocation_pydantic.md
       - 17 Code Simplification: plan/17_code_simplification.md
+  - Historical Plans:
+      - Notebook Consolidation: plan/01_consolidate_notebooks.md
+      - LLM Code Parsing Research: plan/02_llm_code_parsing_research.md
+      - SAGE Memory Evolution: plan/18_sage_inspired_memory_evolution.md
+      - UX Improvements: plan/19_ux_improvements.md
   - Notebooks:
       - Overview: notebooks/index.md
       - 01 Getting Started: notebooks/01_getting_started.ipynb
