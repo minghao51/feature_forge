@@ -233,7 +233,7 @@ class ExperimentalPlatform:
         if artifact_policy != "legacy":
             expected_layers = {layer.value for layer in Layer}
             for case in cases:
-                run_id = case.run_id or f"run_{case.dataset}_{case.method}_{case.model}_{case.seed}"
+                run_id = case.effective_run_id
                 case_fingerprints = (layer_fingerprints or {}).get(run_id)
                 actual_layers = set(case_fingerprints or {})
                 if actual_layers != expected_layers:
@@ -346,7 +346,7 @@ class ExperimentalPlatform:
         )
         if journal is not None:
             for case in cases:
-                run_id = case.run_id or f"run_{case.dataset}_{case.method}_{case.model}_{case.seed}"
+                run_id = case.effective_run_id
                 journal.record(
                     run_id=run_id,
                     case_id=run_id,
@@ -360,7 +360,7 @@ class ExperimentalPlatform:
             if journal is None:
                 return
             case = value.case if isinstance(value, CaseComputationInput) else value
-            run_id = case.run_id or f"run_{case.dataset}_{case.method}_{case.model}_{case.seed}"
+            run_id = case.effective_run_id
             journal.record(
                 run_id=run_id,
                 case_id=run_id,
@@ -388,9 +388,7 @@ class ExperimentalPlatform:
                     resource_plan=effective_plan.model_dump(mode="json"),
                     artifact_root=str(artifact_root),
                     resume_policy=resolved_resume_policy.model_dump(mode="json"),
-                    layer_fingerprints=(layer_fingerprints or {}).get(
-                        c.run_id or f"run_{c.dataset}_{c.method}_{c.model}_{c.seed}"
-                    ),
+                    layer_fingerprints=(layer_fingerprints or {}).get(c.effective_run_id),
                     layer_executor=layer_executor,
                 )
                 for c in cases

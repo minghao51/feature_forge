@@ -204,6 +204,13 @@ class EvaluationConfig(BaseModel):
         sandbox_timeout_seconds: Max seconds for sandbox worker execution.
         sandbox_max_memory_mb: Max memory (MB) for sandbox worker process.
         max_candidate_features: Cap on candidate features sent to CV scoring.
+        evaluation_holdout_fraction: Fraction of training rows reserved as an
+            evaluation-only partition. Feature selection / generation sees the
+            complementary discovery rows; the reported CV score is computed on
+            the evaluation rows only, so selection bias does not leak into the
+            headline gain. ``0.0`` disables the holdout (legacy behavior).
+        evaluation_holdout_stratified: Stratify the discovery/evaluation split
+            on the target for classification tasks. Ignored for regression.
     """
 
     cv_folds: int = 5
@@ -215,6 +222,8 @@ class EvaluationConfig(BaseModel):
     max_candidate_features: int = 50
     max_cv_workers: int | None = None
     feature_eval_backend: Literal["threading", "loky"] = "threading"
+    evaluation_holdout_fraction: float = 0.25
+    evaluation_holdout_stratified: bool = True
 
     @field_validator("cv_folds")
     @classmethod
@@ -249,6 +258,13 @@ class EvaluationConfig(BaseModel):
     def _validate_max_cv_workers(cls, v: int | None) -> int | None:
         if v is not None and v < 1:
             raise ValueError(f"worker limit must be >= 1 when set, got {v}")
+        return v
+
+    @field_validator("evaluation_holdout_fraction")
+    @classmethod
+    def _validate_holdout_fraction(cls, v: float) -> float:
+        if not 0.0 <= v < 0.5:
+            raise ValueError(f"evaluation_holdout_fraction must be in [0.0, 0.5), got {v}")
         return v
 
 

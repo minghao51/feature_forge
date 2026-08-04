@@ -197,12 +197,6 @@ class TestRouterAgent:
         router.update_performance("unary", 0.03)
         assert router.agent_performance["unary"] == [0.05, 0.03]
 
-    def test_get_summary(self, router):
-        router.update_performance("unary", 0.1)
-        summary = router.get_summary()
-        assert summary["average_performance"]["unary"] == 0.1
-        assert summary["strategy"] == "hybrid"
-
 
 class TestAllAgentsInstantiate:
     """Smoke test that all agents can be instantiated."""

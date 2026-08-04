@@ -28,6 +28,7 @@ Generated from live Pydantic models.
 | `GoldPackage` | `feature_forge.contracts.gold` | Runtime-only Python types |
 | `GoldRequest` | `feature_forge.contracts.gold` | [`gold_request.schema.json`](schemas/gold_request.schema.json) |
 | `ManifestRef` | `feature_forge.contracts.artifacts` | [`manifest_ref.schema.json`](schemas/manifest_ref.schema.json) |
+| `Materialization` | `feature_forge.contracts.materialization` | [`materialization.schema.json`](schemas/materialization.schema.json) |
 | `ModelSpecification` | `feature_forge.contracts.platinum` | [`model_specification.schema.json`](schemas/model_specification.schema.json) |
 | `PlatinumExecutionResult` | `feature_forge.contracts.platinum` | Runtime-only Python types |
 | `PlatinumMaterialization` | `feature_forge.contracts.platinum` | [`platinum_materialization.schema.json`](schemas/platinum_materialization.schema.json) |

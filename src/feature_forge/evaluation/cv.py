@@ -127,29 +127,6 @@ class CVEvaluator:
         )
         return gain
 
-    def evaluate_feature_directional(
-        self,
-        X_base: pd.DataFrame,
-        y: pd.Series,
-        feature_df: pd.DataFrame,
-        baseline_score: float | None = None,
-        model_name: str | None = None,
-    ) -> float:
-        """Directional improvement: positive means better regardless of metric.
-
-        Equivalent to ``_directional(evaluate_feature(...))``. Use this in
-        feature selectors so minimize-metrics (RMSE/MAE/NRMSE) keep
-        improvements instead of discarding them.
-        """
-        raw_gain = self.evaluate_feature(
-            X_base,
-            y,
-            feature_df,
-            baseline_score=baseline_score,
-            model_name=model_name,
-        )
-        return self._directional(raw_gain)
-
     def _cv_score(
         self,
         X: pd.DataFrame,

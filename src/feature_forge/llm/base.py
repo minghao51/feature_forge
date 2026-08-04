@@ -80,7 +80,7 @@ class LLMClient(ABC):
         thinking_enabled: bool = False,
         reasoning_effort: str = "medium",
         cache: DiskCache | None = None,
-        tracing_enabled: bool = True,
+        tracing_enabled: bool = False,
     ) -> None:
         self.model = model
         self._api_key_secret: SecretStr | None = None
@@ -97,10 +97,6 @@ class LLMClient(ABC):
 
     def get_api_key(self) -> str | None:
         return self._api_key_secret.get_secret_value() if self._api_key_secret else None
-
-    @property
-    def api_key_secret(self) -> SecretStr | None:
-        return self._api_key_secret
 
     def set_retry_config(self, config: RetryConfig) -> None:
         """Attach retry configuration to this client."""

@@ -8,7 +8,6 @@ import shutil
 import socket
 import tempfile
 import uuid
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -80,21 +79,6 @@ def write_success_marker(directory: Path, manifest_sha256: str) -> Path:
         os.fsync(handle.fileno())
     fsync_directory(directory)
     return marker
-
-
-def write_with_temp_path(path: Path, writer: Callable[[Path], None]) -> None:
-    """Write a file through a sibling temporary path and atomically replace it."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    os.close(fd)
-    temporary_path = Path(temporary_name)
-    try:
-        writer(temporary_path)
-        os.replace(temporary_path, path)
-        fsync_directory(path.parent)
-    except BaseException:
-        temporary_path.unlink(missing_ok=True)
-        raise
 
 
 def fsync_directory(path: Path) -> None:

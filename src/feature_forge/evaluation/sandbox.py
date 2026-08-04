@@ -608,34 +608,6 @@ def _sandbox_worker_main(
         _respond(("error", f"Feature generation execution failed: {exc}"))
 
 
-def _apply_resource_limits(max_memory_mb: int) -> None:
-    """Apply RLIMIT_AS for the calling process.
-
-    Kept for backwards compatibility with tests that exercise the limit
-    arithmetic directly. The sandbox worker itself uses
-    :func:`_memory_limit_ctx` so the limit is scoped to user-code execution
-    rather than the entire spawn worker bootstrap (see comment in
-    :func:`_sandbox_worker_main`).
-    """
-    try:
-        import resource
-    except ImportError:  # pragma: no cover - non-Unix platforms
-        return
-
-    if max_memory_mb > 0:
-        max_bytes = max_memory_mb * 1024 * 1024
-        current_soft, current_hard = resource.getrlimit(resource.RLIMIT_AS)
-        if current_hard > 0:
-            max_bytes = min(max_bytes, current_hard)
-        if current_soft > 0 and max_bytes > current_soft:
-            max_bytes = current_soft
-        try:
-            resource.setrlimit(resource.RLIMIT_AS, (max_bytes, max_bytes))
-        except (OSError, ValueError):  # pragma: no cover - platform-specific
-            # Best effort only; timeout still protects runaway execution.
-            return
-
-
 def _current_vmsize_bytes() -> int:
     """Best-effort current virtual address space of this process in bytes.
 

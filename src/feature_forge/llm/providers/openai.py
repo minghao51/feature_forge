@@ -14,12 +14,9 @@ from openai import AsyncOpenAI
 
 from feature_forge.exceptions import LLMError
 from feature_forge.llm.base import LLMClient
-from feature_forge.observability.structlog_config import get_logger
 
 if TYPE_CHECKING:
     from feature_forge.llm.cache import DiskCache
-
-logger = get_logger(__name__)
 
 
 class OpenAIProvider(LLMClient):

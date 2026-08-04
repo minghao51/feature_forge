@@ -331,7 +331,14 @@ class TestExperimentalPlatform:
 
         ContextRecordingMethod.contexts = []
         ContextRecordingMethod.constructions = 0
-        platform = ExperimentalPlatform(config={"task": "classification", "metric": "auc"})
+        platform = ExperimentalPlatform(
+            config={
+                "task": "classification",
+                "metric": "auc",
+                # 8-row fixtures cannot host a discovery holdout.
+                "evaluation": {"evaluation_holdout_fraction": 0.0},
+            }
+        )
         platform.register_method("context-recording", ContextRecordingMethod)
         platform.register_dataset(
             "classification-case",

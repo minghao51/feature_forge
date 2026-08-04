@@ -104,7 +104,9 @@ def test_case_executor_success_and_tracker_side_effects(monkeypatch):
     )
     tracker = SpyTracker()
     executor = ExperimentCaseExecutor(
-        settings=Settings(evaluation={"cv_folds": 2}),
+        # The fixture's 6-row frame is too small to host a discovery holdout;
+        # this test targets tracker side-effects, not leakage-safe eval.
+        settings=Settings(evaluation={"cv_folds": 2, "evaluation_holdout_fraction": 0.0}),
         tracker=tracker,
         extra_methods={"dummy": DummyMethod},
     )

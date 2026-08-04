@@ -265,19 +265,6 @@ class TestCVEvaluator:
         raw_gain = evaluator.evaluate_feature(X, y, feat, baseline_score=baseline)
         assert raw_gain == pytest.approx(-0.2)
 
-    def test_evaluate_feature_directional_flips_sign_for_minimize_metric(self, monkeypatch):
-        # Same scenario as above, but the directional variant must return +0.2
-        # so that "directional > 0" means "improvement" for minimize metrics.
-        evaluator = CVEvaluator(config=Settings(task="regression", metric="rmse"))
-        scores = iter([0.5, 0.3])
-        monkeypatch.setattr(evaluator, "_cv_score", lambda *a, **k: next(scores))
-        X = pd.DataFrame({"a": [0.0, 1.0, 2.0, 3.0]})
-        y = pd.Series([0.0, 1.0, 2.0, 3.0])
-        feat = pd.DataFrame({"b": [0.0, 1.0, 2.0, 3.0]})
-        baseline = evaluator.evaluate_baseline(X, y)
-        directional = evaluator.evaluate_feature_directional(X, y, feat, baseline_score=baseline)
-        assert directional == pytest.approx(0.2)
-
     def test_directional_is_identity_for_maximize_metric(self, monkeypatch):
         # For a maximize metric, raw and directional gains must be equal.
         evaluator = CVEvaluator(config=Settings(task="classification", metric="auc"))

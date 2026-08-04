@@ -73,31 +73,9 @@ class TestReporter:
         best = reporter.get_best(metric="score", group_by="dataset")
         assert len(best) == 2
 
-    def test_summary_stats(self):
-        results = [
-            {"dataset": "a", "score": 0.8},
-            {"dataset": "a", "score": 0.9, "error": "fail"},
-        ]
-        reporter = Reporter(results)
-        stats = reporter.summary_stats()
-        assert stats["total_runs"] == 2
-        assert stats["successful_runs"] == 1
-        assert stats["failed_runs"] == 1
-
     def test_empty_results(self):
         reporter = Reporter([])
         assert "No results" in reporter.to_markdown()
-
-    def test_to_html(self):
-        results = [{"dataset": "a", "score": 0.8}]
-        reporter = Reporter(results)
-        html = reporter.to_html()
-        assert "<table" in html or "No results" in html
-
-    def test_to_html_empty(self):
-        reporter = Reporter([])
-        html = reporter.to_html()
-        assert "No results" in html
 
     def test_get_best_invalid_metric(self):
         results = [{"dataset": "a", "score": 0.8}]
@@ -109,17 +87,6 @@ class TestReporter:
         reporter = Reporter([])
         best = reporter.get_best(metric="score", group_by="dataset")
         assert len(best) == 0
-
-    def test_summary_stats_empty(self):
-        reporter = Reporter([])
-        stats = reporter.summary_stats()
-        assert stats["total_runs"] == 0
-
-    def test_summary_stats_treats_missing_error_as_success(self):
-        reporter = Reporter([{"dataset": "a", "score": 0.8}])
-        stats = reporter.summary_stats()
-        assert stats["successful_runs"] == 1
-        assert stats["failed_runs"] == 0
 
     def test_get_best_can_minimize_metric(self):
         reporter = Reporter(
@@ -147,3 +114,45 @@ class TestReporter:
             ]
         )
         assert "cv_score" in reporter.to_markdown()
+
+    def test_get_best_default_metric_is_cv_score(self):
+        # The default metric matches ExperimentalPlatform.report_best and the
+        # ExperimentResult.cv_score column produced by the platform path.
+        reporter = Reporter(
+            [
+                {"dataset": "a", "method": "m1", "model": "rf", "cv_score": 0.8},
+                {"dataset": "a", "method": "m2", "model": "rf", "cv_score": 0.9},
+            ]
+        )
+        best = reporter.get_best(group_by="dataset")
+        assert len(best) == 1
+        assert best.iloc[0]["method"] == "m2"  # maximize by default
+
+    def test_get_best_minimizes_when_metric_column_names_rmse(self):
+        # With a single minimize metric in the `metric` column and the default
+        # cv_score metric, the reporter must pick the LOWEST score, not highest.
+        reporter = Reporter(
+            [
+                {"dataset": "a", "metric": "rmse", "cv_score": 2.0},
+                {"dataset": "a", "metric": "rmse", "cv_score": 1.0},
+            ]
+        )
+        best = reporter.get_best(group_by="dataset")
+        assert len(best) == 1
+        assert best.iloc[0]["cv_score"] == 1.0
+
+
+def test_experiment_case_effective_run_id_uses_explicit_when_set():
+    from feature_forge.experiment.execution import ExperimentCase
+
+    explicit = ExperimentCase(
+        dataset="titanic", method="m", model="rf", seed=1, run_id="custom-run"
+    )
+    assert explicit.effective_run_id == "custom-run"
+
+
+def test_experiment_case_effective_run_id_falls_back_deterministically():
+    from feature_forge.experiment.execution import ExperimentCase
+
+    case = ExperimentCase(dataset="titanic", method="openfe", model="xgboost", seed=42)
+    assert case.effective_run_id == "run_titanic_openfe_xgboost_42"

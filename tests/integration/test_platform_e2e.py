@@ -56,11 +56,18 @@ def _fake_run_case(payload):
     return _deterministic_result(case.dataset, case.method, case.model, case.seed)
 
 
+# These tests exercise platform plumbing against deliberately tiny synthetic
+# frames; the discovery holdout is disabled because the fixtures cannot host a
+# stratified holdout partition. Leakage-safe evaluation is covered separately
+# in tests/unit/test_discovery_holdout.py.
+_TINY_DATA_CONFIG: dict[str, Any] = {"evaluation": {"evaluation_holdout_fraction": 0.0}}
+
+
 class TestPlatformE2E:
     """Run a real experiment end-to-end with mock data."""
 
     def test_run_with_synthetic_data(self, tmp_path):
-        platform = ExperimentalPlatform()
+        platform = ExperimentalPlatform(config=_TINY_DATA_CONFIG)
         platform.register_method("dummy", DummyBaseline)
 
         # Create a minimal synthetic CSV dataset
@@ -196,7 +203,7 @@ class TestPlatformE2E:
         assert "cv_score" in df.columns
 
     def test_run_with_no_progress(self, tmp_path):
-        platform = ExperimentalPlatform()
+        platform = ExperimentalPlatform(config=_TINY_DATA_CONFIG)
         platform.register_method("dummy", DummyBaseline)
 
         train_df = pd.DataFrame(
@@ -232,7 +239,7 @@ class TestPlatformE2E:
         assert results[0]["error"] is None
 
     def test_report_best_integration(self, tmp_path):
-        platform = ExperimentalPlatform()
+        platform = ExperimentalPlatform(config=_TINY_DATA_CONFIG)
         platform.register_method("dummy", DummyBaseline)
 
         train_df = pd.DataFrame(
@@ -369,7 +376,7 @@ class TestPlatformE2E:
         assert seq_sorted == par_sorted
 
     def test_parallel_supports_portable_instance_local_registered_method(self, tmp_path):
-        platform = ExperimentalPlatform()
+        platform = ExperimentalPlatform(config=_TINY_DATA_CONFIG)
         platform.register_method("dummy", DummyBaseline)
         sample_dir = tmp_path / "portable"
         sample_dir.mkdir()

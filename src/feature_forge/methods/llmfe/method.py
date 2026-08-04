@@ -55,6 +55,7 @@ class LLMFEMethod(BaseMethod):
         artifact_config: ArtifactConfig | None = None,
     ) -> None:
         super().__init__("llmfe", artifact_config=artifact_config)
+        self._singleton_fallback_name = "single_shot"
         if llm_client is not None:
             self.llm_client = llm_client
         else:
@@ -175,20 +176,6 @@ class LLMFEMethod(BaseMethod):
     @property
     def generated_scripts(self) -> list[str]:
         return list(self._iteration_codes)
-
-    @property
-    def feature_metadata(self) -> list[dict[str, Any]]:
-        meta = self._iterative_feature_metadata("llmfe")
-        if meta:
-            return meta
-        code = self._artifacts.get("generated_code", "")
-        if code:
-            return [{"name": "single_shot", "method": "llmfe", "code": code}]
-        return []
-
-    @property
-    def provenance_records(self) -> list[dict[str, Any]]:
-        return self._iterative_provenance_records("llmfe")
 
     async def _call_llm(self, prompt: str) -> str:
         response = await self.llm_client.complete(

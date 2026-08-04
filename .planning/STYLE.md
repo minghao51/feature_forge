@@ -27,7 +27,7 @@ src/feature_forge/              # Main package
         result.py               # PipelineResult dataclass
         iterative.py            # BaseIterativePipeline → IterativePipeline
         ablations.py            # NoMemoryPipeline, SingleAgentPipeline, etc.
-      memory/                   # 3-tier memory (procedural, feedback, conceptual)
+      memory/                   # 2-tier memory (procedural, feedback)
       prompts/                  # YAML prompt templates (one per agent)
       types.py                  # AgentName NewType
     caafe/                      # CAAFE method (unified + fidelity variants)

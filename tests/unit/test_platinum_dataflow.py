@@ -180,9 +180,15 @@ def _silver(store: LocalArtifactStore) -> Any:
     return store.commit(staging)
 
 
-def _gold(store: LocalArtifactStore, silver_ref: Any) -> Any:
+def _gold(
+    store: LocalArtifactStore,
+    silver_ref: Any,
+    *,
+    silver_fingerprint: str = "silver-fingerprint",
+    run_id: str = "gold-platinum",
+) -> Any:
     identity = gold_input_fingerprint(
-        silver_fingerprint_value="silver-fingerprint",
+        silver_fingerprint_value=silver_fingerprint,
         method_name="deterministic",
         method_version="1",
         method_config={},
@@ -193,10 +199,10 @@ def _gold(store: LocalArtifactStore, silver_ref: Any) -> Any:
     result = execute_gold(
         store=store,
         request=GoldRequest(
-            run_id="gold-platinum",
+            run_id=run_id,
             case_fingerprint="case-fingerprint",
             silver_manifest=silver_ref,
-            silver_fingerprint="silver-fingerprint",
+            silver_fingerprint=silver_fingerprint,
             gold_input_fingerprint=identity,
             method_name="deterministic",
             method_version="1",
@@ -228,6 +234,117 @@ def _execute(tmp_path: Path, *, selection_policy: SelectionPolicy | None = None)
         case_fingerprint="case-fingerprint",
         environment_snapshot=_environment(),
         selection_policy=selection_policy,
+        execution_profile=ExecutionProfile.DEVELOPMENT,
+    )
+    return store, result
+
+
+def _silver_partitioned(store: LocalArtifactStore) -> Any:
+    """Silver package with a discovery/evaluation partition and per-partition folds.
+
+    16 balanced rows: discovery gets r0..r11 (folds 0,1,2), evaluation gets
+    r12..r15 (folds 0,1). Candidate selection therefore runs on discovery
+    rows only and the reported aggregate on the held-out evaluation rows.
+    """
+    n = 16
+    features = pd.DataFrame(
+        {
+            "a": [i % 2 for i in range(n)],
+            "b": [(i // 2) % 2 for i in range(n)],
+        }
+    )
+    target_values = [i % 2 for i in range(n)]
+    row_ids = pd.DataFrame({"row_id": [f"r{i}" for i in range(n)]})
+    partition = ["discovery"] * 12 + ["evaluation"] * 4
+    fold = [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 0, 0, 1, 1]
+    folds = pd.DataFrame({"row_id": row_ids["row_id"], "fold": fold, "partition": partition})
+    bronze = BronzeRecord(
+        source="fixture",
+        source_checksum="source-part",
+        target="target",
+        task="classification",
+        snapshot_mode="snapshot",
+        row_count=n,
+        column_count=3,
+    )
+    bronze_manifest = RunManifest(
+        layer=Layer.BRONZE,
+        package_kind="bronze",
+        layer_fingerprint="bronze-fingerprint-part",
+        run_id="bronze-platinum-part",
+        case_fingerprint="case-fingerprint",
+        state=RunState.SUCCEEDED,
+        request=RunRequest(
+            dataset="fixture",
+            method="bronze",
+            model="none",
+            seed=42,
+            options={"source": {"source_checksum": "source-part"}},
+        ),
+        environment=_environment(),
+        created_at=datetime.now(UTC),
+        completed_at=datetime.now(UTC),
+    )
+    staging = store.begin(ArtifactNamespace(layer=Layer.BRONZE, run_id="bronze-platinum-part"))
+    staging.write_json("bronze.json", bronze.model_dump(mode="json"))
+    staging.write_dataframe("train.parquet", features.assign(target=target_values))
+    staging.set_manifest(bronze_manifest)
+    bronze_ref = store.commit(staging)
+    checks = [CheckResult(check_id="SILVER.OK", passed=True, message="ok")]
+    silver_manifest = RunManifest(
+        layer=Layer.SILVER,
+        package_kind="silver",
+        layer_fingerprint="silver-fingerprint-part",
+        run_id="silver-platinum-part",
+        case_fingerprint="case-fingerprint",
+        state=RunState.SUCCEEDED,
+        request=RunRequest(
+            dataset="fixture",
+            method="silver",
+            model="none",
+            seed=42,
+            options={"dataset_fingerprint": "silver-fingerprint-part"},
+        ),
+        environment=_environment(),
+        upstream_manifests=[bronze_ref],
+        created_at=datetime.now(UTC),
+        completed_at=datetime.now(UTC),
+    )
+    staging = store.begin(ArtifactNamespace(layer=Layer.SILVER, run_id="silver-platinum-part"))
+    staging.write_dataframe("canonical_features.parquet", features)
+    staging.write_dataframe(
+        "canonical_target.parquet",
+        pd.DataFrame({"row_id": row_ids["row_id"], "target": target_values}),
+    )
+    staging.write_dataframe("row_ids.parquet", row_ids)
+    staging.write_dataframe("fold_assignments.parquet", folds)
+    staging.write_json("profile.json", {"dataset_fingerprint": "silver-fingerprint-part"})
+    staging.write_json("checks.json", [item.model_dump(mode="json") for item in checks])
+    staging.set_manifest(silver_manifest)
+    return store.commit(staging)
+
+
+def _execute_partitioned(tmp_path: Path) -> Any:
+    store = LocalArtifactStore(tmp_path / "lake-part")
+    silver_ref = _silver_partitioned(store)
+    gold_ref = _gold(
+        store,
+        silver_ref,
+        silver_fingerprint="silver-fingerprint-part",
+        run_id="gold-platinum-part",
+    )
+    evaluator = CVEvaluator(
+        Settings(task="classification", metric="auc", evaluation={"cv_folds": 2})
+    )
+    result = execute_platinum(
+        artifact_store=store,
+        silver_ref=silver_ref,
+        gold_ref=gold_ref,
+        evaluator=evaluator,
+        model_name="random_forest",
+        run_id="platinum-run-part",
+        case_fingerprint="case-fingerprint",
+        environment_snapshot=_environment(),
         execution_profile=ExecutionProfile.DEVELOPMENT,
     )
     return store, result
@@ -443,3 +560,65 @@ def test_hamilton_entrypoint_uses_driver_config_names() -> None:
     assert "execution_profile" in parameters
     assert "store" not in parameters
     assert "profile" not in parameters
+
+
+# --------------------------------------------------------------------------- #
+# Leakage-safe evaluation: discovery/evaluation partition on the Platinum path.
+# --------------------------------------------------------------------------- #
+
+
+def test_partitioned_platinum_scores_candidates_on_discovery_and_reports_on_evaluation(
+    tmp_path: Path,
+) -> None:
+    store, result = _execute_partitioned(tmp_path)
+    package = result.package
+    metrics = package.fold_metrics
+    arms = set(metrics["arm"].unique())
+    # Two baseline arms: discovery (paired with candidates) + evaluation
+    # (paired with the reported enhanced).
+    assert "baseline:discovery" in arms
+    assert "baseline" in arms
+    assert "enhanced" in arms
+    assert arms.intersection({f"candidate:{name}" for name in ("signal",)})
+
+    silver = load_silver_package(store, package.request.silver_manifest)
+    folds = silver.fold_assignments
+    discovery_ids = set(folds.loc[folds["partition"] == "discovery", "row_id"])
+    evaluation_ids = set(folds.loc[folds["partition"] == "evaluation", "row_id"])
+
+    predictions = package.predictions
+    # Candidate + discovery-baseline rows come from the discovery partition.
+    for arm in ("baseline:discovery", *[a for a in arms if a.startswith("candidate:")]):
+        arm_rows = set(predictions.loc[predictions["arm"] == arm, "row_id"])
+        assert arm_rows == discovery_ids, f"{arm} not on discovery rows"
+    # Reported baseline + enhanced come from the evaluation partition.
+    for arm in ("baseline", "enhanced"):
+        arm_rows = set(predictions.loc[predictions["arm"] == arm, "row_id"])
+        assert arm_rows == evaluation_ids, f"{arm} not on evaluation rows"
+
+
+def test_partitioned_platinum_loader_verifies_and_reports_counts(tmp_path: Path) -> None:
+    store, result = _execute_partitioned(tmp_path)
+    assert result.materialization.manifest_ref is not None
+    # The durable package must replay through the adversarial loader.
+    reloaded = load_platinum_package(store, result.materialization.manifest_ref)
+    assert reloaded.aggregate == result.package.aggregate
+    pd.testing.assert_frame_equal(reloaded.fold_metrics, result.package.fold_metrics)
+
+    # Reported counts surface the discovery/evaluation split.
+    exp = result.experiment_result
+    assert exp["n_discovery_rows"] == 12
+    assert exp["n_evaluation_rows"] == 4
+
+
+def test_partitioned_platinum_fingerprint_binds_selection_partition(tmp_path: Path) -> None:
+    store, result = _execute_partitioned(tmp_path)
+    package = result.package
+    # The selection_partition policy is part of the persisted evaluation policy.
+    assert package.request.evaluation_policy.selection_partition == "discovery"
+    # The persisted request round-trips and the fingerprint is stable on reload.
+    reloaded = load_platinum_package(store, result.materialization.manifest_ref)
+    assert (
+        reloaded.request.evaluation_policy.selection_partition
+        == package.request.evaluation_policy.selection_partition
+    )

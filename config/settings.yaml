@@ -41,3 +41,5 @@ memory:
 evaluation:
   cv_folds: 5
   feature_eval_backend: "threading"
+  evaluation_holdout_fraction: 0.25
+  evaluation_holdout_stratified: true

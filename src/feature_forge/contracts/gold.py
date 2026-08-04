@@ -6,14 +6,16 @@ from enum import StrEnum
 from typing import Any, Literal, Self
 
 import pandas as pd
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 from feature_forge.contracts.artifacts import (
     ManifestRef,
-    validate_identifier,
-    validate_relative_path,
+    RelativePath,
+    RunId,
+    Sha256,
 )
 from feature_forge.contracts.base import ContractModel
+from feature_forge.contracts.materialization import Materialization
 from feature_forge.contracts.runs import RunManifest
 from feature_forge.contracts.stages import CheckResult
 
@@ -26,39 +28,28 @@ class FeatureDecisionState(StrEnum):
 
 class FeatureCandidate(ContractModel):
     schema_version: Literal["1"] = "1"
-    candidate_id: str = Field(min_length=1)
+    candidate_id: RunId
     name: str = Field(min_length=1)
     batch_index: int = Field(ge=0)
-    code_path: str = Field(min_length=1)
+    code_path: RelativePath
     specification: dict[str, Any] = Field(default_factory=dict)
-
-    @field_validator("candidate_id")
-    @classmethod
-    def _valid_candidate_id(cls, value: str) -> str:
-        return validate_identifier(value)
-
-    @field_validator("code_path")
-    @classmethod
-    def _valid_code_path(cls, value: str) -> str:
-        return validate_relative_path(value)
 
 
 class FeatureProvenance(ContractModel):
     schema_version: Literal["1"] = "1"
-    candidate_id: str = Field(min_length=1)
+    candidate_id: RunId
     method: str = Field(min_length=1)
     method_version: str = Field(min_length=1)
-    agent: str | None = None
     round_index: int | None = Field(default=None, ge=0)
     prompt_bundle_fingerprint: str = Field(min_length=1)
-    code_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    code_sha256: Sha256
     dependencies: list[str] = Field(default_factory=list)
     source_columns: list[str] = Field(default_factory=list)
 
 
 class FeatureDecision(ContractModel):
     schema_version: Literal["1"] = "1"
-    candidate_id: str = Field(min_length=1)
+    candidate_id: RunId
     state: FeatureDecisionState
     reason_code: str = Field(min_length=1)
     reason: str = Field(min_length=1)
@@ -66,7 +57,7 @@ class FeatureDecision(ContractModel):
 
 class GoldRequest(ContractModel):
     schema_version: Literal["1"] = "1"
-    run_id: str = Field(min_length=1)
+    run_id: RunId
     case_fingerprint: str = Field(min_length=1)
     silver_manifest: ManifestRef
     silver_fingerprint: str = Field(min_length=1)
@@ -80,11 +71,6 @@ class GoldRequest(ContractModel):
     persist_candidates: bool = True
     value_rtol: float = Field(default=1e-9, ge=0)
     value_atol: float = Field(default=1e-12, ge=0)
-
-    @field_validator("run_id")
-    @classmethod
-    def _valid_run_id(cls, value: str) -> str:
-        return validate_identifier(value)
 
     @model_validator(mode="after")
     def _valid_input_fingerprint(self) -> Self:
@@ -113,11 +99,7 @@ class GoldFeatureCounts(ContractModel):
     failure_counts: dict[str, int] = Field(default_factory=dict)
 
 
-class GoldMaterialization(ContractModel):
-    manifest: RunManifest
-    manifest_ref: ManifestRef | None = None
-    persisted: bool
-    artifact_paths: list[str] = Field(default_factory=list)
+class GoldMaterialization(Materialization):
     counts: GoldFeatureCounts
 
 

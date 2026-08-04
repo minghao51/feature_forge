@@ -162,6 +162,17 @@ class ModelRegistry:
         """Return list of available model names."""
         return list(cls.get_all().keys())
 
+    @classmethod
+    def reset(cls) -> None:
+        """Reset programmatically registered models and clear discovered cache.
+
+        Mirrors ``MetricRegistry.reset`` for test isolation: ``_builtin`` is
+        cleared so the next access rebuilds it from the factory functions, and
+        the entry-point discovery cache is dropped.
+        """
+        cls._builtin = {}
+        cls._discovered = None
+
 
 class ModelFactory:
     """Factory for creating ML models by name and task."""

@@ -137,7 +137,6 @@ class ResumePlan(ContractModel):
     """Side-effect-free contiguous resume plan."""
 
     schema_version: Literal["1"] = "1"
-    run_id: str = Field(min_length=1)
     dry_run: bool = False
     decisions: list[ResumeStageDecision]
     next_layer: Layer | None = None

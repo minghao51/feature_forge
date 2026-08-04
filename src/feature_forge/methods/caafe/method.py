@@ -53,6 +53,7 @@ class CAAFEMethod(BaseMethod):
         artifact_config: ArtifactConfig | None = None,
     ) -> None:
         super().__init__("caafe", artifact_config=artifact_config)
+        self._singleton_fallback_name = "fidelity"
         self.llm_client = llm_client
         self.llm_model = llm_model
         self.iterations = iterations
@@ -219,20 +220,6 @@ class CAAFEMethod(BaseMethod):
     @property
     def generated_scripts(self) -> list[str]:
         return list(self._iteration_codes)
-
-    @property
-    def feature_metadata(self) -> list[dict[str, Any]]:
-        meta = self._iterative_feature_metadata("caafe")
-        if meta:
-            return meta
-        code = self._artifacts.get("generated_code", "")
-        if code:
-            return [{"name": "fidelity", "method": "caafe", "code": code}]
-        return []
-
-    @property
-    def provenance_records(self) -> list[dict[str, Any]]:
-        return self._iterative_provenance_records("caafe")
 
     @staticmethod
     def _build_dataset_description(X: pd.DataFrame) -> str:

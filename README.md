@@ -11,7 +11,7 @@ Feature Forge is a production-ready refactoring of the MALMAS (Memory-Augmented 
 ## Key Features
 
 - **6 Specialized Agents**: Unary, Cross-Compositional, Aggregation, Temporal, Local Transform, Local Pattern
-- **3-Tier Memory**: Procedural, Feedback, and Conceptual memory with LLM summarization
+- **2-Tier Memory**: Procedural and Feedback memory with persistence and relevance-based retrieval
 - **Dynamic Router**: Data-driven, performance-driven, hybrid, and LLM-based agent selection
 - **Enforced LLM Caching**: DiskCache with SHA-256 keys prevents accidental API costs
 - **Sandboxed Execution**: AST-validated code execution for LLM-generated features

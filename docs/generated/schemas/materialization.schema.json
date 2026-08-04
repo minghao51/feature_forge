@@ -226,52 +226,6 @@
       "title": "FailureClass",
       "type": "string"
     },
-    "GoldFeatureCounts": {
-      "additionalProperties": false,
-      "properties": {
-        "accepted_output_columns": {
-          "minimum": 0,
-          "title": "Accepted Output Columns",
-          "type": "integer"
-        },
-        "candidates_accepted": {
-          "minimum": 0,
-          "title": "Candidates Accepted",
-          "type": "integer"
-        },
-        "candidates_executed": {
-          "minimum": 0,
-          "title": "Candidates Executed",
-          "type": "integer"
-        },
-        "candidates_proposed": {
-          "minimum": 0,
-          "title": "Candidates Proposed",
-          "type": "integer"
-        },
-        "failure_counts": {
-          "additionalProperties": {
-            "type": "integer"
-          },
-          "title": "Failure Counts",
-          "type": "object"
-        },
-        "schema_version": {
-          "const": "1",
-          "default": "1",
-          "title": "Schema Version",
-          "type": "string"
-        }
-      },
-      "required": [
-        "candidates_proposed",
-        "candidates_executed",
-        "candidates_accepted",
-        "accepted_output_columns"
-      ],
-      "title": "GoldFeatureCounts",
-      "type": "object"
-    },
     "Layer": {
       "description": "Durable maturity layer for an experiment artifact.",
       "enum": [
@@ -606,6 +560,7 @@
     }
   },
   "additionalProperties": false,
+  "description": "Common shape of a per-layer materialization result.\n\nBronze/Silver/Platinum use this directly. ``GoldMaterialization``\n(in ``contracts.gold``) subclasses it to add the required ``counts`` field.\n``extra=\"forbid\"`` is inherited from ``ContractModel``.",
   "properties": {
     "artifact_paths": {
       "items": {
@@ -613,9 +568,6 @@
       },
       "title": "Artifact Paths",
       "type": "array"
-    },
-    "counts": {
-      "$ref": "#/$defs/GoldFeatureCounts"
     },
     "manifest": {
       "$ref": "#/$defs/RunManifest"
@@ -638,9 +590,8 @@
   },
   "required": [
     "manifest",
-    "persisted",
-    "counts"
+    "persisted"
   ],
-  "title": "GoldMaterialization",
+  "title": "Materialization",
   "type": "object"
 }

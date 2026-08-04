@@ -141,7 +141,7 @@ def resolve_case_context(
         model_factory=model_factory,
     )
     llm_client = _build_llm_client(settings)
-    run_id = case.run_id or f"run_{case.dataset}_{case.method}_{case.model}_{case.seed}"
+    run_id = case.effective_run_id
     case_identity = fingerprint(
         {
             "kind": "case",

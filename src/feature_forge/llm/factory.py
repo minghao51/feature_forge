@@ -43,7 +43,7 @@ def create_llm_client(
     config: LLMConfig,
     retry_config: RetryConfig | None = None,
     cache: DiskCache | None = None,
-    tracing_enabled: bool = True,
+    tracing_enabled: bool = False,
 ) -> LLMClient:
     """Create an LLM client from configuration.
 

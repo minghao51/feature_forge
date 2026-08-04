@@ -11,7 +11,6 @@ import pytest
 
 from feature_forge.evaluation.sandbox import (
     SandboxedExecutor,
-    _apply_resource_limits,
     _current_vmsize_bytes,
     _get_worker_context,
     _memory_limit_ctx,
@@ -250,106 +249,6 @@ class TestMemoryLimitCtx:
         result = _current_vmsize_bytes()
         assert isinstance(result, int)
         assert result >= 0
-
-
-class TestApplyResourceLimits:
-    """Cover _apply_resource_limits edge cases (lines 317-334)."""
-
-    def _inject_mock_resource(self):
-        import sys
-
-        mock_resource = MagicMock()
-        mock_resource.RLIMIT_AS = 0
-        mock_resource.getrlimit.return_value = (1024 * 1024 * 1024, 1024 * 1024 * 1024)
-
-        def _wrapper_fn(max_memory_mb):
-            old = sys.modules.get("resource")
-            sys.modules["resource"] = mock_resource
-            import importlib
-
-            importlib.reload(sys.modules["feature_forge.evaluation.sandbox"])
-            from feature_forge.evaluation.sandbox import _apply_resource_limits as fn
-
-            if old is not None:
-                sys.modules["resource"] = old
-            return fn(max_memory_mb), mock_resource
-
-        return _wrapper_fn
-
-    def test_sets_rlimit(self):
-        mock_resource = MagicMock()
-        mock_resource.RLIMIT_AS = 0
-        mock_resource.getrlimit.return_value = (1024 * 1024 * 1024, 1024 * 1024 * 1024)
-
-        import sys
-
-        old = sys.modules.get("resource")
-        sys.modules["resource"] = mock_resource
-        try:
-            _apply_resource_limits(max_memory_mb=128)
-        finally:
-            if old is not None:
-                sys.modules["resource"] = old
-            else:
-                del sys.modules["resource"]
-
-        mock_resource.setrlimit.assert_called_once()
-
-    def test_capped_by_hard_limit(self):
-        import sys
-
-        mock_resource = MagicMock()
-        mock_resource.RLIMIT_AS = 0
-        mock_resource.getrlimit.return_value = (1024 * 1024 * 1024, 64 * 1024 * 1024)
-        old = sys.modules.get("resource")
-        sys.modules["resource"] = mock_resource
-        try:
-            _apply_resource_limits(max_memory_mb=512)
-        finally:
-            if old is not None:
-                sys.modules["resource"] = old
-            else:
-                del sys.modules["resource"]
-        args = mock_resource.setrlimit.call_args[0]
-        assert args[1][0] == 64 * 1024 * 1024
-
-    def test_capped_by_soft_limit(self):
-        import sys
-
-        mock_resource = MagicMock()
-        mock_resource.RLIMIT_AS = 0
-        mock_resource.getrlimit.return_value = (32 * 1024 * 1024, 1024 * 1024 * 1024)
-        old = sys.modules.get("resource")
-        sys.modules["resource"] = mock_resource
-        try:
-            _apply_resource_limits(max_memory_mb=512)
-        finally:
-            if old is not None:
-                sys.modules["resource"] = old
-            else:
-                del sys.modules["resource"]
-        args = mock_resource.setrlimit.call_args[0]
-        assert args[1][0] == 32 * 1024 * 1024
-
-    def test_zero_memory_skips(self):
-        import sys
-
-        mock_resource = MagicMock()
-        mock_resource.RLIMIT_AS = 0
-        old = sys.modules.get("resource")
-        sys.modules["resource"] = mock_resource
-        try:
-            _apply_resource_limits(max_memory_mb=0)
-        finally:
-            if old is not None:
-                sys.modules["resource"] = old
-            else:
-                del sys.modules["resource"]
-        mock_resource.setrlimit.assert_not_called()
-
-    def test_import_fallback_no_error(self):
-        result = _apply_resource_limits(max_memory_mb=128)
-        assert result is None
 
 
 class TestSandboxExecutorEdgeCases:

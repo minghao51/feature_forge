@@ -8,14 +8,12 @@ The catalog is a rebuildable derived index; verified manifests remain authoritat
 
 - `artifacts`
 - `catalog_metadata`
-- `datasets`
 - `feature_decisions`
 - `features`
 - `fold_metrics`
 - `lineage_edges`
 - `manifests`
 - `run_events`
-- `runs`
 - `stages`
 - `validation_checks`
 
@@ -32,15 +30,6 @@ CREATE TABLE IF NOT EXISTS manifests (
   layer_fingerprint VARCHAR NOT NULL, state VARCHAR NOT NULL, dataset VARCHAR NOT NULL,
   method VARCHAR NOT NULL, model VARCHAR NOT NULL, seed BIGINT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL, completed_at TIMESTAMPTZ
-);
-CREATE TABLE IF NOT EXISTS runs (
-  manifest_sha256 VARCHAR PRIMARY KEY, run_id VARCHAR NOT NULL, case_fingerprint VARCHAR NOT NULL,
-  layer VARCHAR NOT NULL, state VARCHAR NOT NULL, created_at TIMESTAMPTZ NOT NULL,
-  completed_at TIMESTAMPTZ
-);
-CREATE TABLE IF NOT EXISTS datasets (
-  manifest_sha256 VARCHAR PRIMARY KEY, dataset VARCHAR NOT NULL,
-  dataset_fingerprint VARCHAR, source_identity_json VARCHAR NOT NULL
 );
 CREATE TABLE IF NOT EXISTS stages (
   manifest_sha256 VARCHAR NOT NULL, ordinal INTEGER NOT NULL, stage VARCHAR NOT NULL,

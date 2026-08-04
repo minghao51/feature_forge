@@ -463,6 +463,18 @@ class LocalArtifactStore:
             raise ValueError(f"artifact failed integrity verification: {ref.relative_path}")
         return path
 
+    def read_json_artifact(self, ref: ManifestRef, relative_path: str) -> Any:
+        """Resolve and parse one JSON artifact from a verified layer package.
+
+        The layer is taken from ``ref.layer`` so callers need not hard-code it.
+        Used by the Gold/Platinum loaders to read ``request.json``,
+        ``candidates.json``, ``decisions.json``, etc.
+        """
+        resolved = self.resolve(
+            ArtifactRef(layer=ref.layer, run_id=ref.run_id, relative_path=relative_path)
+        )
+        return json.loads(resolved.read_text(encoding="utf-8"))
+
     def get_manifest_ref(self, namespace: ArtifactNamespace) -> ManifestRef | None:
         """Return a verified reference for an existing committed namespace."""
         package = self._namespace_path(namespace)

@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import Field, field_validator
 
-from feature_forge.contracts.artifacts import ArtifactDescriptor, ManifestRef, validate_identifier
+from feature_forge.contracts.artifacts import ArtifactDescriptor, ManifestRef, RunId
 from feature_forge.contracts.base import ContractModel
 from feature_forge.contracts.stages import Layer, RunState, StageResult
 
@@ -33,14 +33,7 @@ class EnvironmentSnapshot(ContractModel):
     operating_system: str
     architecture: str
     feature_forge_version: str
-    git_commit: str | None = None
-    dirty_worktree: bool | None = None
-    lockfile_fingerprint: str | None = None
-    provider: str | None = None
-    model: str | None = None
-    hamilton_version: str | None = None
     artifact_schema_versions: dict[str, str] = Field(default_factory=dict)
-    plugin_versions: dict[str, str] = Field(default_factory=dict)
     random_seeds: dict[str, int] = Field(default_factory=dict)
 
 
@@ -51,9 +44,8 @@ class RunManifest(ContractModel):
     layer: Layer
     package_kind: Literal["bronze", "silver", "gold", "platinum"]
     layer_fingerprint: str = Field(min_length=1)
-    run_id: str = Field(min_length=1)
+    run_id: RunId
     case_fingerprint: str = Field(min_length=1)
-    parent_run_id: str | None = None
     state: RunState
     request: RunRequest
     environment: EnvironmentSnapshot
@@ -70,8 +62,3 @@ class RunManifest(ContractModel):
         if layer is not None and value != layer.value:
             raise ValueError("package_kind must match manifest layer")
         return value
-
-    @field_validator("run_id", "parent_run_id")
-    @classmethod
-    def _valid_run_id(cls, value: str | None) -> str | None:
-        return None if value is None else validate_identifier(value)

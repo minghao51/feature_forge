@@ -17,6 +17,13 @@
       "title": "Cv Folds",
       "type": "integer"
     },
+    "evaluation_holdout_fraction": {
+      "default": 0.25,
+      "exclusiveMaximum": 0.5,
+      "minimum": 0.0,
+      "title": "Evaluation Holdout Fraction",
+      "type": "number"
+    },
     "metadata": {
       "additionalProperties": true,
       "title": "Metadata",

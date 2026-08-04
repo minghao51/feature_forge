@@ -185,92 +185,13 @@
           "title": "Artifact Schema Versions",
           "type": "object"
         },
-        "dirty_worktree": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Dirty Worktree"
-        },
         "feature_forge_version": {
           "title": "Feature Forge Version",
           "type": "string"
         },
-        "git_commit": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Git Commit"
-        },
-        "hamilton_version": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Hamilton Version"
-        },
-        "lockfile_fingerprint": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Lockfile Fingerprint"
-        },
-        "model": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Model"
-        },
         "operating_system": {
           "title": "Operating System",
           "type": "string"
-        },
-        "plugin_versions": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "Plugin Versions",
-          "type": "object"
-        },
-        "provider": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Provider"
         },
         "python_version": {
           "title": "Python Version",
@@ -401,18 +322,6 @@
           ],
           "title": "Package Kind",
           "type": "string"
-        },
-        "parent_run_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Run Id"
         },
         "request": {
           "$ref": "#/$defs/RunRequest"

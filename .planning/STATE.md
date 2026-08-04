@@ -1,6 +1,6 @@
 # Feature Forge — Current State
 
-Last updated: 2026-07-20
+Last updated: 2026-07-24
 
 ## Current Working Tree
 
@@ -123,7 +123,7 @@ resume decisions used by execution.
 | sklearn-compatible API (`FeatureForge.fit/transform`) | Full | N/A |
 | Multi-agent MALMAS pipeline (6 agents + router + memory) | Full | N/A |
 | Agent router (data_driven, performance_driven, hybrid, llm) | Full | N/A |
-| 3-tier agent memory (procedural, feedback, conceptual) | Full | N/A |
+| 2-tier agent memory (procedural, feedback) | Full | N/A |
 | Iterative N-round pipeline with feature accumulation | Full | N/A |
 | Ablation pipelines (NoMemory, NoRouter, SingleAgent, NoMemoryStaticRouter) | Full | N/A |
 | Baseline methods: CAAFE (unified + fidelity) | Full | N/A |
@@ -173,6 +173,7 @@ None currently open.
 | R19 | `CaseComputation._method_kwargs` built method adapters via `inspect.signature` reflection, which silently dropped `llm_client` (CAAFE unified raised through the platform had `llm_client=None` → `EvaluationError("llm_client required...")`) and dropped `mode` for MALMAS (its `__init__(config, **kwargs)` didn't declare it) | Each built-in method now exposes an explicit `from_run_context(cls, ctx)` classmethod that receives a single `CaseExecutionContext`; `CaseComputation._construct_method` dispatches through it, falling back to `_method_kwargs` only for third-party plugins. `CaseExecutionContext` gained `llm_client`, `sandbox`, and `eval_kit` fields built once in `resolve_case_context` (best-effort client — None without an API key). `MALMASMethod.__init__` now declares `mode` and `llm_client` explicitly so they reach `FeatureForge`. LLMFE/Malmus/CAAFE reuse the context-owned client instead of self-building (`src/feature_forge/{experiment/{context,case_executor}.py,methods/{caafe,llmfe,malmus,openfe,malmas}/method.py}`) |
 | R20 | The R18 direction-aware-selection work added `CVEvaluator.metric_direction` and `CorePipeline._evaluate_and_select` reads `self.evaluator.metric_direction`, but the `_FastEvaluator` test stub in `tests/benchmarks/test_performance_smoke.py` was not updated — `test_candidate_eval_backend_smoke_budget[threading\|loky]` raised `AttributeError: '_FastEvaluator' object has no attribute 'metric_direction'` and would have failed CI | `_FastEvaluator` now exposes `metric_direction = MetricDirection.MAXIMIZE` matching the `CVEvaluator` surface read by the pipeline (`tests/benchmarks/test_performance_smoke.py`) |
 | R21 | `CaseComputation` (legacy case path) called `method.fit(X, y)` followed by `method.transform(X)`, re-executing every generated code block on the training frame even though `fit` had already produced an enhanced frame. `MALMASMethod.fit_transform` had the same shape — `fit` then `transform` — so it never reused `FeatureForge`'s cached `X_train_enhanced` | `CaseComputation` now calls `method.fit_transform(X, y)` (the canonical path documented by R2). `MALMASMethod.fit_transform` delegates to `self._forge.fit_transform`, which returns the cached enhanced frame. The legacy executor no longer pays for a second sandbox pass over the training data (`src/feature_forge/{experiment/case_executor.py,methods/malmas/method.py}`, `tests/unit/test_malmas_method.py`) |
+| R22 | P0 selection bias: feature selection and the reported CV score ran on the same rows in **both** evaluation paths. Legacy `CaseComputation` did `fit_transform(X,y)` + `evaluate_feature(X,y,...)` on the full frame; the Platinum `_evaluate` scored candidates and the final enhanced aggregate on the same `silver.fold_assignments`. Reported gains were optimistically biased. | Discovery holdout is now the default (`EvaluationConfig.evaluation_holdout_fraction = 0.25`, `0.0` disables). Legacy path (`experiment/case_executor.py`): rows split into discovery (seen by `fit_transform`) + evaluation (used only for `evaluate_baseline`/`evaluate_feature`); `ExperimentResult` gains `n_discovery_rows`/`n_evaluation_rows`. Medallion path: Silver `fold_assignments` gains an additive `partition` column with folds generated *within each partition* (`dataflows/silver.py`); Platinum scores candidates on discovery folds (`baseline:discovery` arm) and the reported aggregate on evaluation folds (`baseline`+`enhanced` arms); the adversarial loader verifies per-partition arm-key consistency. `DatasetRequest.evaluation_holdout_fraction` and `EvaluationPolicy.selection_partition` are bound into `dataset_fingerprint`/`platinum_input_fingerprint`. `src/feature_forge/evaluation/holdout.py` is the shared partition helper. **Default-on holdout changes all reported comparison numbers** (intended); pinned-score tests opt out via `evaluation_holdout_fraction=0.0`. (`tests/unit/test_discovery_holdout.py`, `tests/unit/test_silver_dataflow.py::TestSilverDiscoveryPartition`, `tests/unit/test_platinum_dataflow.py::test_partitioned_*`) |
 
 ## Fixed Issues
 

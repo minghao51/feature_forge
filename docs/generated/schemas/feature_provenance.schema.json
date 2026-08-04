@@ -1,25 +1,12 @@
 {
   "additionalProperties": false,
   "properties": {
-    "agent": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Agent"
-    },
     "candidate_id": {
       "minLength": 1,
       "title": "Candidate Id",
       "type": "string"
     },
     "code_sha256": {
-      "pattern": "^[0-9a-f]{64}$",
       "title": "Code Sha256",
       "type": "string"
     },

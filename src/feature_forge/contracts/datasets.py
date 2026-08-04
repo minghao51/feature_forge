@@ -5,10 +5,11 @@ from __future__ import annotations
 from typing import Any, Literal
 
 import pandas as pd
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import ConfigDict, Field
 
-from feature_forge.contracts.artifacts import ManifestRef, validate_identifier
+from feature_forge.contracts.artifacts import RunId
 from feature_forge.contracts.base import ContractModel
+from feature_forge.contracts.materialization import Materialization
 from feature_forge.contracts.runs import RunManifest
 from feature_forge.contracts.stages import CheckResult
 
@@ -19,18 +20,17 @@ class DatasetRequest(ContractModel):
     name: str = Field(min_length=1)
     target: str | None = None
     task: Literal["classification", "regression"]
-    run_id: str = Field(min_length=1)
+    run_id: RunId
     case_fingerprint: str = Field(min_length=1)
     split_seed: int
     cv_folds: int = Field(ge=2)
+    # Fraction of rows reserved as an evaluation-only partition. Feature
+    # selection sees the complementary discovery rows; the reported Platinum
+    # score uses the evaluation rows only. 0.0 disables the partition.
+    evaluation_holdout_fraction: float = Field(default=0.25, ge=0.0, lt=0.5)
     source_policy: Literal["reference", "snapshot"] = "reference"
     canonicalization_config: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
-
-    @field_validator("run_id")
-    @classmethod
-    def _valid_run_id(cls, value: str) -> str:
-        return validate_identifier(value)
 
 
 class BronzeRecord(ContractModel):
@@ -47,22 +47,12 @@ class BronzeRecord(ContractModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class SilverMaterialization(ContractModel):
+class SilverMaterialization(Materialization):
     """Result of a Silver boundary, including dry-run outcomes."""
 
-    manifest: RunManifest
-    manifest_ref: ManifestRef | None = None
-    persisted: bool
-    artifact_paths: list[str] = Field(default_factory=list)
 
-
-class BronzeMaterialization(ContractModel):
+class BronzeMaterialization(Materialization):
     """Result of the Bronze reference/snapshot boundary."""
-
-    manifest: RunManifest
-    manifest_ref: ManifestRef | None = None
-    persisted: bool
-    artifact_paths: list[str] = Field(default_factory=list)
 
 
 class SilverPackage(ContractModel):

@@ -314,15 +314,3 @@ class RouterAgent:
             gain=round(gain, 6),
             avg_gain=round(avg_gain, 6),
         )
-
-    def get_summary(self) -> dict[str, Any]:
-        """Return router summary statistics."""
-        return {
-            "selection_counts": self.agent_selection_count.copy(),
-            "average_performance": {
-                name: (sum(gains) / len(gains) if gains else 0.0)
-                for name, gains in self.agent_performance.items()
-            },
-            "strategy": self.strategy,
-            "dataset_characteristics": self.dataset_characteristics,
-        }

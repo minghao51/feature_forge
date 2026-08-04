@@ -147,7 +147,6 @@ def build_resume_plan(
         )
 
     return ResumePlan(
-        run_id=run_id,
         dry_run=dry_run,
         decisions=decisions,
         next_layer=next_layer,

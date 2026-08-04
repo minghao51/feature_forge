@@ -13,7 +13,8 @@ from feature_forge.contracts.artifacts import ManifestRef
 from feature_forge.contracts.orchestration import EffectiveResourcePlan, ResumePolicy
 from feature_forge.contracts.stages import FailureClass, Layer, RunState
 from feature_forge.data import DatasetRegistry
-from feature_forge.evaluation.metrics import MetricRegistry
+from feature_forge.evaluation.holdout import resolve_partition
+from feature_forge.evaluation.metrics import MetricRegistry, get_metric_direction
 from feature_forge.evaluation.model_factory import ModelRegistry
 from feature_forge.exceptions import EvaluationError
 from feature_forge.experiment.context import CaseExecutionContext, resolve_case_context
@@ -125,13 +126,53 @@ class CaseComputation:
             method = self._construct_method(method_cls, context)
             method.name = case.method
 
-            # fit_transform() is the canonical path: it reuses the cached
-            # enhanced training frame when available (BaseMethod and
-            # MALMASMethod) instead of re-executing generated code on the
-            # training data via a separate transform() call.
-            X_transformed = method.fit_transform(X, y)
+            # Leakage-safe evaluation: carve a discovery subset (seen by
+            # feature generation + selection) disjoint from an evaluation
+            # subset (used only for the reported CV score). When the holdout
+            # is disabled or the data is too small, the whole frame is used
+            # for both — preserving the legacy behavior exactly.
+            partition = resolve_partition(
+                len(X),
+                fraction=context.evaluation.evaluation_holdout_fraction,
+                cv_folds=context.cv_folds,
+                stratified=(
+                    context.evaluation.evaluation_holdout_stratified
+                    and context.task == "classification"
+                ),
+                seed=context.seed,
+                y_for_stratify=y if context.task == "classification" else None,
+            )
+            if partition.holdout_active:
+                X_discovery = X.iloc[partition.discovery_idx].reset_index(drop=True)
+                y_discovery = y.iloc[partition.discovery_idx].reset_index(drop=True)
+                X_eval = X.iloc[partition.evaluation_idx].reset_index(drop=True)
+                y_eval = y.iloc[partition.evaluation_idx].reset_index(drop=True)
+                n_discovery = len(X_discovery)
+                n_evaluation = len(X_eval)
+            else:
+                if context.evaluation.evaluation_holdout_fraction > 0.0:
+                    logger.warning(
+                        "discovery_holdout_skipped",
+                        dataset=case.dataset,
+                        n_rows=len(X),
+                        cv_folds=context.cv_folds,
+                        fraction=context.evaluation.evaluation_holdout_fraction,
+                    )
+                X_discovery = X
+                y_discovery = y
+                X_eval = X
+                y_eval = y
+                n_discovery = len(X)
+                n_evaluation = None
+
+            # fit_transform() runs feature generation + supervised selection on
+            # the discovery rows only; transform() then applies the discovered
+            # code to the held-out evaluation rows for the reported score.
+            X_discovery_transformed = method.fit_transform(X_discovery, y_discovery)
             accepted_output_columns = [
-                str(column) for column in X_transformed.columns if column not in X.columns
+                str(column)
+                for column in X_discovery_transformed.columns
+                if column not in X_discovery.columns
             ]
             metadata_names = {
                 str(item["name"])
@@ -140,11 +181,19 @@ class CaseComputation:
             }
             num_candidates = max(len(metadata_names), len(accepted_output_columns))
             not_materialized = max(num_candidates - len(accepted_output_columns), 0)
-            baseline_score = context.evaluator.evaluate_baseline(X, y, model_name=case.model)
+
+            X_eval_transformed = (
+                method.transform(X_eval)
+                if accepted_output_columns and partition.holdout_active
+                else X_discovery_transformed
+            )
+            baseline_score = context.evaluator.evaluate_baseline(
+                X_eval, y_eval, model_name=case.model
+            )
             gain = context.evaluator.evaluate_feature(
-                X,
-                y,
-                X_transformed,
+                X_eval,
+                y_eval,
+                X_eval_transformed,
                 baseline_score=baseline_score,
                 model_name=case.model,
             )
@@ -169,6 +218,10 @@ class CaseComputation:
                 case_fingerprint=context.case_fingerprint,
                 state=RunState.SUCCEEDED.value,
                 resource_plan=plan.model_dump(mode="json") if plan is not None else None,
+                n_discovery_rows=n_discovery,
+                n_evaluation_rows=n_evaluation,
+                metric=context.metric,
+                metric_direction=get_metric_direction(context.metric).value,
             )
         except (EvaluationError, ValueError, KeyError, ImportError) as exc:
             return failed_result(payload, exc)
@@ -202,7 +255,7 @@ class CaseComputation:
         policy = ResumePolicy.model_validate(payload.resume_policy or {"enabled": True})
         plan = build_resume_plan(
             store=store,
-            run_id=case.run_id or f"run_{case.dataset}_{case.method}_{case.model}_{case.seed}",
+            run_id=case.effective_run_id,
             expected_fingerprints=fingerprints,
             policy=policy,
         )
@@ -340,7 +393,7 @@ class ExperimentCaseExecutor:
             MetricRegistry.register(name, fn)
 
     def _payload_for(self, case: ExperimentCase) -> CaseComputationInput:
-        run_id = case.run_id or f"run_{case.dataset}_{case.method}_{case.model}_{case.seed}"
+        run_id = case.effective_run_id
         return CaseComputationInput(
             case=case,
             settings_data=self.settings.model_dump(),
@@ -364,7 +417,7 @@ class ExperimentCaseExecutor:
         )
 
     def execute(self, case: ExperimentCase) -> ExperimentResult:
-        run_name = case.run_id or f"run_{case.dataset}_{case.method}_{case.model}_{case.seed}"
+        run_name = case.effective_run_id
         initialized = False
         tracking_failure = None
         try:
@@ -380,6 +433,9 @@ class ExperimentCaseExecutor:
                     "gain": float(result.gain or 0.0),
                     "baseline_score": float(result.baseline_score or 0.0),
                 }
+                if result.n_evaluation_rows is not None:
+                    metrics["n_evaluation_rows"] = float(result.n_evaluation_rows)
+                    metrics["n_discovery_rows"] = float(result.n_discovery_rows or 0.0)
                 try:
                     self.tracker.log_metrics(metrics)
                     if result.manifest_uri is not None:
@@ -437,10 +493,7 @@ def run_case(payload: CaseComputationInput) -> ExperimentResult:
                 else None
             ),
             layer_fingerprints=(
-                {
-                    payload.case.run_id
-                    or f"run_{payload.case.dataset}_{payload.case.method}_{payload.case.model}_{payload.case.seed}": payload.layer_fingerprints
-                }
+                {payload.case.effective_run_id: payload.layer_fingerprints}
                 if payload.layer_fingerprints is not None
                 else None
             ),

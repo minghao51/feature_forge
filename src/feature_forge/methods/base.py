@@ -66,6 +66,10 @@ class BaseMethod(ArtifactExporter):
     ) -> None:
         super().__init__(artifact_config=artifact_config)
         self.name = name
+        # Feature name emitted by ``feature_metadata`` when a method ran in
+        # single-shot mode (no iteration records). CAAFE sets "fidelity",
+        # LLMFE "single_shot"; methods that always iterate leave this None.
+        self._singleton_fallback_name: str | None = None
         self._storage = DataFrameStorage(artifact_config or ArtifactConfig())
         self._artifacts: dict[str, Any] = {}
         self._kept_features: list[str] | None = None
@@ -94,6 +98,28 @@ class BaseMethod(ArtifactExporter):
         """Return generated code blocks."""
         code = self._artifacts.get("generated_code", "")
         return [code] if code else []
+
+    @property
+    def feature_metadata(self) -> list[dict[str, Any]]:
+        """Per-feature metadata, falling back to a single-shot record.
+
+        Iterative methods emit one record per kept feature via
+        :meth:`_iterative_feature_metadata`; methods that ran single-shot emit
+        one record named after :attr:`_singleton_fallback_name`.
+        """
+        meta = self._iterative_feature_metadata(self.name)
+        if meta:
+            return meta
+        if self._singleton_fallback_name is not None:
+            code = self._artifacts.get("generated_code", "")
+            if code:
+                return [{"name": self._singleton_fallback_name, "method": self.name, "code": code}]
+        return []
+
+    @property
+    def provenance_records(self) -> list[dict[str, Any]]:
+        """Per-feature provenance records (iterative methods only)."""
+        return self._iterative_provenance_records(self.name)
 
     def _iterative_feature_metadata(self, method_name: str) -> list[dict[str, Any]]:
         iterations = self._artifacts.get("iterations")

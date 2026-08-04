@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import re
 from pathlib import PurePosixPath
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field, field_validator
+from pydantic import AfterValidator, BeforeValidator, Field
 
 from feature_forge.contracts.base import ContractModel
 from feature_forge.contracts.stages import Layer
@@ -50,60 +50,42 @@ def validate_identifier(value: str) -> str:
     return value
 
 
+def _validate_sha256(value: str) -> str:
+    if not _SHA256_PATTERN.fullmatch(value):
+        raise ValueError("sha256 must be a lowercase 64-character hexadecimal digest")
+    return value
+
+
+# Shared annotated scalar types. ``RunId``/``RelativePath`` run the identifier
+# / path check before pydantic applies ``min_length``; ``Sha256`` runs its hex
+# check after. Reuse these instead of per-class ``@field_validator`` methods.
+RunId = Annotated[str, BeforeValidator(validate_identifier), Field(min_length=1)]
+RelativePath = Annotated[str, BeforeValidator(validate_relative_path), Field(min_length=1)]
+Sha256 = Annotated[str, AfterValidator(_validate_sha256)]
+
+
 class ArtifactNamespace(ContractModel):
     """Stable location for one run and one durable layer."""
 
     layer: Layer
-    run_id: str = Field(min_length=1)
-
-    @field_validator("run_id")
-    @classmethod
-    def _valid_run_id(cls, value: str) -> str:
-        return validate_identifier(value)
+    run_id: RunId
 
 
 class ArtifactRef(ContractModel):
     """Reference to one artifact within a committed namespace."""
 
     layer: Layer
-    run_id: str = Field(min_length=1)
-    relative_path: str = Field(min_length=1)
-
-    @field_validator("run_id")
-    @classmethod
-    def _valid_run_id(cls, value: str) -> str:
-        return validate_identifier(value)
-
-    @field_validator("relative_path")
-    @classmethod
-    def _valid_path(cls, value: str) -> str:
-        return validate_relative_path(value)
+    run_id: RunId
+    relative_path: RelativePath
 
 
 class ManifestRef(ContractModel):
     """Reference to a committed layer manifest."""
 
     layer: Layer
-    run_id: str = Field(min_length=1)
+    run_id: RunId
     relative_path: Literal["manifest.json"] = "manifest.json"
-    sha256: str
-
-    @field_validator("run_id")
-    @classmethod
-    def _valid_run_id(cls, value: str) -> str:
-        return validate_identifier(value)
-
-    @field_validator("relative_path")
-    @classmethod
-    def _valid_path(cls, value: str) -> str:
-        return validate_relative_path(value)
-
-    @field_validator("sha256")
-    @classmethod
-    def _valid_sha256(cls, value: str) -> str:
-        if not _SHA256_PATTERN.fullmatch(value):
-            raise ValueError("sha256 must be a lowercase 64-character hexadecimal digest")
-        return value
+    sha256: Sha256
 
 
 class ArtifactDescriptor(ContractModel):
@@ -113,22 +95,10 @@ class ArtifactDescriptor(ContractModel):
     name: str = Field(min_length=1)
     layer: Layer
     media_type: str = Field(min_length=1)
-    relative_path: str = Field(min_length=1)
-    sha256: str
+    relative_path: RelativePath
+    sha256: Sha256
     size_bytes: int = Field(ge=0)
     row_count: int | None = Field(default=None, ge=0)
     column_count: int | None = Field(default=None, ge=0)
     schema_fingerprint: str | None = None
     required: bool = True
-
-    @field_validator("relative_path")
-    @classmethod
-    def _valid_path(cls, value: str) -> str:
-        return validate_relative_path(value)
-
-    @field_validator("sha256")
-    @classmethod
-    def _valid_sha256(cls, value: str) -> str:
-        if not _SHA256_PATTERN.fullmatch(value):
-            raise ValueError("sha256 must be a lowercase 64-character hexadecimal digest")
-        return value

@@ -7,8 +7,9 @@ from typing import Any, Literal, Self
 import pandas as pd
 from pydantic import ConfigDict, Field, model_validator
 
-from feature_forge.contracts.artifacts import ManifestRef
+from feature_forge.contracts.artifacts import ManifestRef, RunId
 from feature_forge.contracts.base import ContractModel
+from feature_forge.contracts.materialization import Materialization
 from feature_forge.contracts.runs import RunManifest
 from feature_forge.contracts.stages import CheckResult
 from feature_forge.evaluation.metrics import MetricDirection
@@ -37,6 +38,12 @@ class EvaluationPolicy(ContractModel):
     minimum_successful_folds: int = Field(default=2, ge=2)
     estimator_threads: int = Field(default=1, ge=1)
     blas_threads: int = Field(default=1, ge=1)
+    # Silver partitions rows into ``discovery`` (seen by candidate selection)
+    # and ``evaluation`` (used only for the reported baseline/enhanced
+    # aggregate). When no partition is present on the Silver evidence this
+    # selects which rows drive selection; both still draw from the same folds
+    # in that case.
+    selection_partition: Literal["discovery", "evaluation", "all"] = "discovery"
 
 
 class UncertaintyPolicy(ContractModel):
@@ -71,7 +78,7 @@ class PlatinumRequest(ContractModel):
     """All inputs capable of changing Platinum evidence."""
 
     schema_version: Literal["1"] = "1"
-    run_id: str = Field(min_length=1)
+    run_id: RunId
     case_fingerprint: str = Field(min_length=1)
     silver_manifest: ManifestRef
     gold_manifest: ManifestRef
@@ -150,11 +157,8 @@ class PlatinumSelectionDecision(ContractModel):
     lower_bound: float
 
 
-class PlatinumMaterialization(ContractModel):
-    manifest: RunManifest
-    manifest_ref: ManifestRef | None = None
-    persisted: bool
-    artifact_paths: list[str] = Field(default_factory=list)
+class PlatinumMaterialization(Materialization):
+    pass
 
 
 class PlatinumPackage(ContractModel):

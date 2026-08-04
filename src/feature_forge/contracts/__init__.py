@@ -5,6 +5,9 @@ from feature_forge.contracts.artifacts import (
     ArtifactNamespace,
     ArtifactRef,
     ManifestRef,
+    RelativePath,
+    RunId,
+    Sha256,
 )
 from feature_forge.contracts.catalog import (
     CATALOG_SCHEMA_VERSION,
@@ -40,6 +43,7 @@ from feature_forge.contracts.identity import (
     platinum_input_fingerprint,
     silver_fingerprint,
 )
+from feature_forge.contracts.materialization import Materialization
 from feature_forge.contracts.orchestration import (
     EffectiveResourcePlan,
     FailureRecord,
@@ -63,12 +67,6 @@ from feature_forge.contracts.platinum import (
     UncertaintyPolicy,
     UncertaintySummary,
 )
-from feature_forge.contracts.protocols import (
-    ArtifactStore,
-    CaseScheduler,
-    RunRepository,
-    StagingArea,
-)
 from feature_forge.contracts.runs import (
     EnvironmentSnapshot,
     RunManifest,
@@ -91,11 +89,9 @@ __all__ = [
     "ArtifactDescriptor",
     "ArtifactNamespace",
     "ArtifactRef",
-    "ArtifactStore",
     "BronzeMaterialization",
     "BronzeRecord",
     "CLIExitCode",
-    "CaseScheduler",
     "CatalogIssue",
     "CatalogReport",
     "CheckResult",
@@ -117,22 +113,26 @@ __all__ = [
     "GoldRequest",
     "Layer",
     "ManifestRef",
+    "Materialization",
     "ModelSpecification",
     "PlatinumExecutionResult",
     "PlatinumMaterialization",
     "PlatinumPackage",
     "PlatinumRequest",
     "PlatinumSelectionDecision",
+    "RelativePath",
     "ResourceConfig",
     "ResumePlan",
     "ResumePolicy",
     "ResumeStageDecision",
     "RunEvent",
+    "RunId",
     "RunManifest",
     "RunRepository",
     "RunRequest",
     "RunState",
     "SelectionPolicy",
+    "Sha256",
     "SilverMaterialization",
     "SilverPackage",
     "StageDisposition",

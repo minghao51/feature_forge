@@ -38,15 +38,6 @@ CREATE TABLE IF NOT EXISTS manifests (
   method VARCHAR NOT NULL, model VARCHAR NOT NULL, seed BIGINT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL, completed_at TIMESTAMPTZ
 );
-CREATE TABLE IF NOT EXISTS runs (
-  manifest_sha256 VARCHAR PRIMARY KEY, run_id VARCHAR NOT NULL, case_fingerprint VARCHAR NOT NULL,
-  layer VARCHAR NOT NULL, state VARCHAR NOT NULL, created_at TIMESTAMPTZ NOT NULL,
-  completed_at TIMESTAMPTZ
-);
-CREATE TABLE IF NOT EXISTS datasets (
-  manifest_sha256 VARCHAR PRIMARY KEY, dataset VARCHAR NOT NULL,
-  dataset_fingerprint VARCHAR, source_identity_json VARCHAR NOT NULL
-);
 CREATE TABLE IF NOT EXISTS stages (
   manifest_sha256 VARCHAR NOT NULL, ordinal INTEGER NOT NULL, stage VARCHAR NOT NULL,
   state VARCHAR NOT NULL, started_at TIMESTAMPTZ NOT NULL, finished_at TIMESTAMPTZ,
@@ -97,8 +88,6 @@ CREATE TABLE IF NOT EXISTS run_events (
 """
 
 _DEPENDENT_TABLES = (
-    "runs",
-    "datasets",
     "stages",
     "artifacts",
     "validation_checks",
@@ -400,37 +389,6 @@ def _insert_normalized(connection: Any, data: dict[str, Any]) -> None:
             manifest.request.seed,
             manifest.created_at,
             manifest.completed_at,
-        ],
-    )
-    connection.execute(
-        "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?)",
-        [
-            digest,
-            manifest.run_id,
-            manifest.case_fingerprint,
-            manifest.layer.value,
-            manifest.state.value,
-            manifest.created_at,
-            manifest.completed_at,
-        ],
-    )
-    source_value = manifest.request.options.get("source", {})
-    source = (
-        {
-            key: source_value[key]
-            for key in ("source_checksum", "source_contract_version")
-            if key in source_value
-        }
-        if isinstance(source_value, dict)
-        else {}
-    )
-    connection.execute(
-        "INSERT INTO datasets VALUES (?, ?, ?, ?)",
-        [
-            digest,
-            manifest.request.dataset,
-            manifest.request.options.get("dataset_fingerprint"),
-            json.dumps(source, sort_keys=True),
         ],
     )
     for index, stage in enumerate(manifest.stages):

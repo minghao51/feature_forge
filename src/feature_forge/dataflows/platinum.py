@@ -36,6 +36,8 @@ from feature_forge.contracts import (
     UncertaintySummary,
     platinum_input_fingerprint,
 )
+from feature_forge.dataflows._io import package_load_guard
+from feature_forge.dataflows._selection import apply_selection_policy
 from feature_forge.dataflows.hamilton_compat import tag
 from feature_forge.dataflows.profile import ExecutionProfile, get_profile_policy
 from feature_forge.evaluation.cv import CVEvaluator, FoldEvaluation
@@ -183,6 +185,44 @@ def _with_arm(evidence: FoldEvaluation, arm: str) -> FoldEvaluation:
     return FoldEvaluation(metrics, predictions)
 
 
+def _partition_view(
+    silver: SilverPackage,
+    gold: GoldPackage,
+    partition: str | None,
+) -> tuple[pd.Series, pd.DataFrame, pd.DataFrame, pd.Series, pd.DataFrame]:
+    """Return the (row_ids, folds, base, target, accepted) subset for a partition.
+
+    When ``partition`` is None (no ``partition`` column on Silver evidence, or
+    ``selection_partition == "all"``) every row is returned unchanged. Folds are
+    returned aligned to the subset's row_ids so each partition is scored on its
+    own validation folds only.
+    """
+    row_ids = silver.row_ids["row_id"].astype(str).reset_index(drop=True)
+    target = silver.canonical_target[silver.bronze.target].reset_index(drop=True)
+    base = silver.canonical_features.reset_index(drop=True)
+    accepted = gold.accepted_features.set_index("row_id").loc[row_ids.tolist()].reset_index()
+    folds = silver.fold_assignments.reset_index(drop=True)
+    partition_col = folds.get("partition") if isinstance(folds, pd.DataFrame) else None
+    if partition is None or not isinstance(partition_col, pd.Series):
+        return (
+            row_ids,
+            folds.drop(columns=["partition"]) if "partition" in folds.columns else folds,
+            base,
+            target,
+            accepted,
+        )
+    mask = (partition_col == partition).to_numpy()
+    if not mask.any():
+        raise DatasetError(f"Silver partition '{partition}' has no rows")
+    return (
+        row_ids[mask].reset_index(drop=True),
+        folds.loc[mask, ["row_id", "fold"]].reset_index(drop=True),
+        base.loc[mask, :].reset_index(drop=True),
+        target[mask].reset_index(drop=True),
+        accepted.loc[mask, :].reset_index(drop=True),
+    )
+
+
 def _evaluate(
     request: PlatinumRequest,
     silver: SilverPackage,
@@ -192,19 +232,40 @@ def _evaluate(
     pd.DataFrame, pd.DataFrame, AggregateMetric, UncertaintySummary, list[PlatinumSelectionDecision]
 ]:
     row_ids = silver.row_ids["row_id"].astype(str).reset_index(drop=True)
-    target = silver.canonical_target[silver.bronze.target].reset_index(drop=True)
-    base = silver.canonical_features.reset_index(drop=True)
     gold_row_ids = gold.accepted_features["row_id"].astype(str).tolist()
     if request.evaluation_policy.alignment == "strict_order" and gold_row_ids != row_ids.tolist():
         raise DatasetError("Gold row order differs from authoritative Silver order")
-    accepted = gold.accepted_features.set_index("row_id").loc[row_ids.tolist()].reset_index()
+
+    has_partition = isinstance(silver.fold_assignments.get("partition"), pd.Series)
+    selection_partition = request.evaluation_policy.selection_partition
+    # Candidate selection draws evidence from the discovery partition when one
+    # exists (selection_partition != "all"); the reported baseline/enhanced
+    # aggregate always uses the evaluation partition when present so the
+    # headline gain cannot reflect selection bias.
+    selection_partition_name = (
+        selection_partition if (has_partition and selection_partition != "all") else None
+    )
+    report_partition_name = "evaluation" if has_partition else None
+
+    disc_row_ids, disc_folds, disc_base, disc_target, disc_accepted = _partition_view(
+        silver, gold, selection_partition_name
+    )
+    eval_row_ids, eval_folds, eval_base, eval_target, eval_accepted = _partition_view(
+        silver, gold, report_partition_name
+    )
     context = {"run": request.run_id, "stage": "platinum", "case": request.case_fingerprint}
-    baseline = evaluator.evaluate_on_folds(
-        base,
-        target,
-        row_ids,
-        silver.fold_assignments,
-        arm="baseline",
+
+    # Candidate evidence is computed on the selection partition. Its baseline
+    # is named ``baseline:discovery`` when a partition exists so it can be
+    # paired with candidate arms without colliding with the evaluation
+    # partition's ``baseline`` arm.
+    disc_baseline_arm = "baseline:discovery" if has_partition else "baseline"
+    disc_baseline = evaluator.evaluate_on_folds(
+        disc_base,
+        disc_target,
+        disc_row_ids,
+        disc_folds,
+        arm=disc_baseline_arm,
         model_name=request.model.name,
         error_context=context,
         estimator_threads=request.evaluation_policy.estimator_threads,
@@ -212,105 +273,116 @@ def _evaluate(
     )
     candidates_by_name = {item.name: item for item in gold.candidates}
     candidate_evidence: dict[str, FoldEvaluation] = {}
-    decisions: list[PlatinumSelectionDecision] = []
-    for name in accepted.columns[1:]:
-        enhanced_frame = pd.concat([base, accepted[[name]].reset_index(drop=True)], axis=1)
+    candidate_summaries: dict[str, tuple[AggregateMetric, UncertaintySummary]] = {}
+    for name in disc_accepted.columns[1:]:
+        enhanced_frame = pd.concat(
+            [disc_base, disc_accepted[[name]].reset_index(drop=True)], axis=1
+        )
         evidence = evaluator.evaluate_on_folds(
             enhanced_frame,
-            target,
-            row_ids,
-            silver.fold_assignments,
+            disc_target,
+            disc_row_ids,
+            disc_folds,
             arm=f"candidate:{name}",
             model_name=request.model.name,
             error_context={**context, "feature": name},
             estimator_threads=request.evaluation_policy.estimator_threads,
             blas_threads=request.evaluation_policy.blas_threads,
         )
-        aggregate, uncertainty = _paired_summary(
-            baseline.fold_metrics, evidence.fold_metrics, request
-        )
         candidate_evidence[name] = evidence
-        if request.selection_policy.profile == "compatibility":
-            selected_candidate = aggregate.legacy_gain > 0
-            reason_code = (
-                "legacy_gain_positive" if selected_candidate else "legacy_gain_not_positive"
-            )
-        else:
-            practical = (
-                aggregate.directional_gain >= request.selection_policy.minimum_practical_gain
-            )
-            lower_ok = (
-                not request.selection_policy.require_positive_lower_bound
-                or uncertainty.lower_bound > 0
-            )
-            selected_candidate = practical and lower_ok
-            reason_code = (
-                "recommended_evidence_passed"
-                if selected_candidate
-                else "practical_gain_below_threshold"
-                if not practical
-                else "lower_bound_not_positive"
-            )
-        candidate = candidates_by_name[name]
-        decisions.append(
-            PlatinumSelectionDecision(
-                candidate_id=candidate.candidate_id,
-                feature_name=name,
-                selected=selected_candidate,
-                reason_code=reason_code,
-                reason=f"Selection profile {request.selection_policy.profile}: {reason_code}",
-                legacy_gain=aggregate.legacy_gain,
-                directional_gain=aggregate.directional_gain,
-                lower_bound=uncertainty.lower_bound,
-            )
+        candidate_summaries[name] = _paired_summary(
+            disc_baseline.fold_metrics, evidence.fold_metrics, request
         )
-    selected = [item for item in decisions if item.selected]
-    cap = request.selection_policy.max_selected_features
-    if cap is not None and len(selected) > cap:
-        ranked = sorted(selected, key=lambda item: item.directional_gain, reverse=True)
-        keep = {item.candidate_id for item in ranked[:cap]}
-        decisions = [
-            item
-            if not item.selected or item.candidate_id in keep
-            else item.model_copy(
-                update={
-                    "selected": False,
-                    "reason_code": "max_selected_features",
-                    "reason": "Excluded by max_selected_features after evidence ranking",
-                }
-            )
-            for item in decisions
-        ]
+    final_selected, reason_codes = apply_selection_policy(
+        candidate_summaries, request.selection_policy
+    )
+    decisions = [
+        PlatinumSelectionDecision(
+            candidate_id=candidates_by_name[name].candidate_id,
+            feature_name=name,
+            selected=name in final_selected,
+            reason_code=reason_codes[name][0],
+            reason=reason_codes[name][1],
+            legacy_gain=aggregate.legacy_gain,
+            directional_gain=aggregate.directional_gain,
+            lower_bound=uncertainty.lower_bound,
+        )
+        for name, (aggregate, uncertainty) in candidate_summaries.items()
+    ]
+
     selected_names = [item.feature_name for item in decisions if item.selected]
-    if not selected_names:
-        enhanced = _with_arm(baseline, "enhanced")
-    elif len(selected_names) == 1:
-        enhanced = _with_arm(candidate_evidence[selected_names[0]], "enhanced")
+
+    # The reported baseline + enhanced aggregate use the evaluation partition
+    # (held-out rows) when a partition exists; otherwise the same folds as
+    # candidate selection (legacy behavior). When there is no partition the
+    # discovery baseline already covers every row, so it is reused.
+    if has_partition:
+        eval_baseline = evaluator.evaluate_on_folds(
+            eval_base,
+            eval_target,
+            eval_row_ids,
+            eval_folds,
+            arm="baseline",
+            model_name=request.model.name,
+            error_context=context,
+            estimator_threads=request.evaluation_policy.estimator_threads,
+            blas_threads=request.evaluation_policy.blas_threads,
+        )
     else:
-        final_frame = pd.concat([base, accepted[selected_names].reset_index(drop=True)], axis=1)
+        eval_baseline = _with_arm(disc_baseline, "baseline")
+    if not selected_names:
+        enhanced = _with_arm(eval_baseline, "enhanced")
+    elif len(selected_names) == 1:
+        single_frame = pd.concat(
+            [eval_base, eval_accepted[[selected_names[0]]].reset_index(drop=True)], axis=1
+        )
+        enhanced = _with_arm(
+            evaluator.evaluate_on_folds(
+                single_frame,
+                eval_target,
+                eval_row_ids,
+                eval_folds,
+                arm="enhanced",
+                model_name=request.model.name,
+                error_context=context,
+                estimator_threads=request.evaluation_policy.estimator_threads,
+                blas_threads=request.evaluation_policy.blas_threads,
+            ),
+            "enhanced",
+        )
+    else:
+        final_frame = pd.concat(
+            [eval_base, eval_accepted[selected_names].reset_index(drop=True)], axis=1
+        )
         enhanced = evaluator.evaluate_on_folds(
             final_frame,
-            target,
-            row_ids,
-            silver.fold_assignments,
+            eval_target,
+            eval_row_ids,
+            eval_folds,
             arm="enhanced",
             model_name=request.model.name,
             error_context=context,
             estimator_threads=request.evaluation_policy.estimator_threads,
             blas_threads=request.evaluation_policy.blas_threads,
         )
-    aggregate, uncertainty = _paired_summary(baseline.fold_metrics, enhanced.fold_metrics, request)
+    aggregate, uncertainty = _paired_summary(
+        eval_baseline.fold_metrics, enhanced.fold_metrics, request
+    )
+    discovery_metrics = [disc_baseline.fold_metrics] if has_partition else []
     all_metrics = pd.concat(
         [
-            baseline.fold_metrics,
+            *discovery_metrics,
+            eval_baseline.fold_metrics,
             *(item.fold_metrics for item in candidate_evidence.values()),
             enhanced.fold_metrics,
         ],
         ignore_index=True,
     )
+    discovery_predictions = [disc_baseline.predictions] if has_partition else []
     all_predictions = pd.concat(
         [
-            baseline.predictions,
+            *discovery_predictions,
+            eval_baseline.predictions,
             *(item.predictions for item in candidate_evidence.values()),
             enhanced.predictions,
         ],
@@ -338,8 +410,13 @@ def _checks(
     values = [
         ("PLATINUM.FOLDS.IDENTICAL", baseline["fold"].tolist() == enhanced["fold"].tolist()),
         (
+            # Baseline and enhanced must be joinable on the same row set. When
+            # a discovery/evaluation partition is active, the reported baseline
+            # and enhanced cover only the evaluation rows; they must still agree
+            # with each other (and remain a subset of the authoritative rows).
             "PLATINUM.PREDICTIONS.JOINABLE",
-            set(pred_base["row_id"]) == expected_ids == set(pred_enhanced["row_id"]),
+            set(pred_base["row_id"]) == set(pred_enhanced["row_id"])
+            and set(pred_base["row_id"]).issubset(expected_ids),
         ),
         ("PLATINUM.METRICS.RECONSTRUCTABLE", reconstructed),
         (
@@ -408,18 +485,11 @@ def _manifest(
     )
 
 
-def _json_artifact(store: LocalArtifactStore, ref: ManifestRef, path: str) -> Any:
-    resolved = store.resolve(
-        ArtifactRef(layer=Layer.PLATINUM, run_id=ref.run_id, relative_path=path)
-    )
-    return json.loads(resolved.read_text(encoding="utf-8"))
-
-
 def load_platinum_package(store: LocalArtifactStore, ref: ManifestRef) -> PlatinumPackage:
     """Load and semantically verify a complete Platinum package."""
     if ref.layer is not Layer.PLATINUM:
         raise DatasetError("Platinum loading requires a Platinum manifest reference")
-    try:
+    with package_load_guard("Platinum"):
         manifest = store.load_manifest(ref)
         by_path = {item.relative_path: item for item in manifest.artifacts}
         if set(by_path) != set(PLATINUM_REQUIRED_ARTIFACTS):
@@ -432,7 +502,7 @@ def load_platinum_package(store: LocalArtifactStore, ref: ManifestRef) -> Platin
                 or item.layer is not Layer.PLATINUM
             ):
                 raise ValueError(f"invalid required Platinum artifact: {path}")
-        request = PlatinumRequest.model_validate(_json_artifact(store, ref, "request.json"))
+        request = PlatinumRequest.model_validate(store.read_json_artifact(ref, "request.json"))
         from feature_forge.dataflows.gold import load_gold_package
         from feature_forge.dataflows.silver import load_silver_package
 
@@ -464,22 +534,19 @@ def load_platinum_package(store: LocalArtifactStore, ref: ManifestRef) -> Platin
             )
         )
         aggregate = AggregateMetric.model_validate(
-            _json_artifact(store, ref, "aggregate_metrics.json")
+            store.read_json_artifact(ref, "aggregate_metrics.json")
         )
         uncertainty = UncertaintySummary.model_validate(
-            _json_artifact(store, ref, "uncertainty.json")
+            store.read_json_artifact(ref, "uncertainty.json")
         )
         decisions = [
             PlatinumSelectionDecision.model_validate(item)
-            for item in _json_artifact(store, ref, "selection_decisions.json")
+            for item in store.read_json_artifact(ref, "selection_decisions.json")
         ]
         checks = [
-            CheckResult.model_validate(item) for item in _json_artifact(store, ref, "checks.json")
+            CheckResult.model_validate(item)
+            for item in store.read_json_artifact(ref, "checks.json")
         ]
-    except Exception as exc:
-        if isinstance(exc, DatasetError):
-            raise
-        raise DatasetError(f"Unable to load verified Platinum package: {exc}") from exc
     baseline = metrics[metrics["arm"] == "baseline"].sort_values("fold")
     enhanced = metrics[metrics["arm"] == "enhanced"].sort_values("fold")
     expected_aggregate, expected_uncertainty = _paired_summary(baseline, enhanced, request)
@@ -540,13 +607,21 @@ def load_platinum_package(store: LocalArtifactStore, ref: ManifestRef) -> Platin
 
     expected_candidate_names = gold.accepted_features.columns[1:].tolist()
     expected_candidate_arms = {f"candidate:{name}" for name in expected_candidate_names}
-    expected_arms = {"baseline", "enhanced", *expected_candidate_arms}
     actual_metric_arms = {str(arm) for arm in metrics["arm"].unique()}
     actual_prediction_arms = {str(arm) for arm in predictions["arm"].unique()}
     actual_candidate_arms = {
         str(arm) for arm in metrics["arm"].unique() if str(arm).startswith("candidate:")
     }
     decision_names = [item.feature_name for item in decisions]
+    # When Silver partitions rows, candidate selection draws evidence from the
+    # discovery partition and the reported aggregate from the evaluation
+    # partition. A separate ``baseline:discovery`` arm pairs with the
+    # candidate arms (discovery folds) while ``baseline`` pairs with
+    # ``enhanced`` (evaluation folds). Without a partition only ``baseline``
+    # exists and every arm shares one fold/row set.
+    has_partition = "baseline:discovery" in actual_metric_arms
+    expected_baseline_arms = {"baseline", "baseline:discovery"} if has_partition else {"baseline"}
+    expected_arms = {*expected_baseline_arms, "enhanced", *expected_candidate_arms}
     if (
         actual_candidate_arms != expected_candidate_arms
         or actual_metric_arms != expected_arms
@@ -556,12 +631,43 @@ def load_platinum_package(store: LocalArtifactStore, ref: ManifestRef) -> Platin
     ):
         raise DatasetError("Platinum candidate evidence does not match verified Gold candidates")
 
-    for arm in expected_arms:
-        arm_keys = (
-            predictions[predictions["arm"] == arm][keys].sort_values(keys).reset_index(drop=True)
+    # Arms must agree on fold/row keys *within their partition*: the discovery
+    # arms (baseline:discovery + candidates) share one key set, the evaluation
+    # arms (baseline + enhanced) share another. Without a partition every arm
+    # shares the single key set (the baseline arm).
+    if has_partition:
+        discovery_arms = {"baseline:discovery", *expected_candidate_arms}
+        evaluation_arms = {"baseline", "enhanced"}
+        reference_discovery = (
+            predictions[predictions["arm"] == "baseline:discovery"][keys]
+            .sort_values(keys)
+            .reset_index(drop=True)
         )
-        if not arm_keys.equals(base_keys):
-            raise DatasetError("Platinum arms do not share identical fold/row prediction keys")
+        for arm in discovery_arms:
+            arm_keys = (
+                predictions[predictions["arm"] == arm][keys]
+                .sort_values(keys)
+                .reset_index(drop=True)
+            )
+            if not arm_keys.equals(reference_discovery):
+                raise DatasetError("Platinum discovery arms do not share identical fold/row keys")
+        for arm in evaluation_arms:
+            arm_keys = (
+                predictions[predictions["arm"] == arm][keys]
+                .sort_values(keys)
+                .reset_index(drop=True)
+            )
+            if not arm_keys.equals(base_keys):
+                raise DatasetError("Platinum evaluation arms do not share identical fold/row keys")
+    else:
+        for arm in expected_arms:
+            arm_keys = (
+                predictions[predictions["arm"] == arm][keys]
+                .sort_values(keys)
+                .reset_index(drop=True)
+            )
+            if not arm_keys.equals(base_keys):
+                raise DatasetError("Platinum arms do not share identical fold/row keys")
 
     metric_fn = get_metric(request.metric)
     for metric_row in metrics.itertuples(index=False):
@@ -591,10 +697,17 @@ def load_platinum_package(store: LocalArtifactStore, ref: ManifestRef) -> Platin
 
     decision_by_name = {item.feature_name: item for item in decisions}
     candidate_summaries: dict[str, tuple[AggregateMetric, UncertaintySummary]] = {}
+    # Candidate selection evidence is paired against the discovery baseline
+    # when a partition is active; otherwise against the single baseline.
+    selection_baseline = (
+        metrics[metrics["arm"] == "baseline:discovery"].sort_values("fold")
+        if has_partition
+        else baseline
+    )
     for name in expected_candidate_names:
         candidate_metrics = metrics[metrics["arm"] == f"candidate:{name}"].sort_values("fold")
         candidate_aggregate, candidate_uncertainty = _paired_summary(
-            baseline, candidate_metrics, request
+            selection_baseline, candidate_metrics, request
         )
         candidate_summaries[name] = (candidate_aggregate, candidate_uncertainty)
         decision = decision_by_name[name]
@@ -609,58 +722,14 @@ def load_platinum_package(store: LocalArtifactStore, ref: ManifestRef) -> Platin
         ):
             raise DatasetError("Platinum selection decision does not match candidate evidence")
 
-    policy_selected = {
-        name
-        for name, (candidate_aggregate, candidate_uncertainty) in candidate_summaries.items()
-        if (
-            candidate_aggregate.legacy_gain > 0
-            if request.selection_policy.profile == "compatibility"
-            else candidate_aggregate.directional_gain
-            >= request.selection_policy.minimum_practical_gain
-            and (
-                not request.selection_policy.require_positive_lower_bound
-                or candidate_uncertainty.lower_bound > 0
-            )
-        )
-    }
-    final_selected = set(policy_selected)
-    cap = request.selection_policy.max_selected_features
-    if cap is not None and len(final_selected) > cap:
-        final_selected = set(
-            sorted(
-                final_selected,
-                key=lambda name: candidate_summaries[name][0].directional_gain,
-                reverse=True,
-            )[:cap]
-        )
-    if {item.feature_name for item in decisions if item.selected} != final_selected:
+    expected_selected, expected_reason_codes = apply_selection_policy(
+        candidate_summaries, request.selection_policy
+    )
+    if {item.feature_name for item in decisions if item.selected} != expected_selected:
         raise DatasetError("Platinum selection outcomes do not match the declared policy")
     gold_candidates = {item.name: item for item in gold.candidates}
     for decision in decisions:
-        if decision.feature_name in policy_selected and decision.feature_name not in final_selected:
-            expected_code = "max_selected_features"
-            expected_reason = "Excluded by max_selected_features after evidence ranking"
-        elif request.selection_policy.profile == "compatibility":
-            expected_code = (
-                "legacy_gain_positive"
-                if decision.feature_name in policy_selected
-                else "legacy_gain_not_positive"
-            )
-            expected_reason = f"Selection profile compatibility: {expected_code}"
-        else:
-            candidate_aggregate, candidate_uncertainty = candidate_summaries[decision.feature_name]
-            practical = (
-                candidate_aggregate.directional_gain
-                >= request.selection_policy.minimum_practical_gain
-            )
-            expected_code = (
-                "recommended_evidence_passed"
-                if decision.feature_name in policy_selected
-                else "practical_gain_below_threshold"
-                if not practical
-                else "lower_bound_not_positive"
-            )
-            expected_reason = f"Selection profile recommended: {expected_code}"
+        expected_code, expected_reason = expected_reason_codes[decision.feature_name]
         if (
             decision.candidate_id != gold_candidates[decision.feature_name].candidate_id
             or decision.reason_code != expected_code
@@ -689,7 +758,9 @@ def load_platinum_package(store: LocalArtifactStore, ref: ManifestRef) -> Platin
         or uncertainty != expected_uncertainty
         or not base_keys.equals(enhanced_keys)
         or folds["row_id"].duplicated().any()
-        or set(base_keys["row_id"]) != set(folds["row_id"].astype(str))
+        # Baseline (evaluation partition when active) must be a subset of the
+        # authoritative Silver rows; it need not cover every row.
+        or not set(base_keys["row_id"]).issubset(set(folds["row_id"].astype(str)))
         or any(item.required and not item.passed for item in checks)
     ):
         raise DatasetError("Verified Platinum package contains inconsistent semantic evidence")
@@ -717,6 +788,14 @@ def experiment_result_from_package(
     aggregate = package.aggregate
     uncertainty = package.uncertainty
     selected_count = sum(item.selected for item in package.decisions)
+    partition_col = silver.fold_assignments.get("partition")
+    if isinstance(partition_col, pd.Series):
+        partition_counts = partition_col.value_counts().to_dict()
+        n_discovery = int(partition_counts.get("discovery", 0))
+        n_evaluation = int(partition_counts.get("evaluation", 0)) or None
+    else:
+        n_discovery = len(silver.fold_assignments)
+        n_evaluation = None
     return asdict(
         ExperimentResult(
             dataset=silver.manifest.request.dataset,
@@ -752,6 +831,8 @@ def experiment_result_from_package(
             selection_profile=package.request.selection_policy.profile,
             metric=package.request.metric,
             metric_direction=package.request.metric_direction.value,
+            n_discovery_rows=n_discovery,
+            n_evaluation_rows=n_evaluation,
         )
     )
 

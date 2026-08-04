@@ -8,7 +8,7 @@
   "freshness_files": [
     {
       "path": "catalog-schema.md",
-      "sha256": "69ad9dcfdd8b7e22e756400a8dbd035584eb7cdecfcde1dfb84263d2b10f4317"
+      "sha256": "1978023b29e0df86ebb366626a404b241e21f33127dc48cee229546331a418fe"
     },
     {
       "path": "check-registry.md",
@@ -20,7 +20,7 @@
     },
     {
       "path": "contracts.md",
-      "sha256": "9e500ebb918bc71cd48530f7ef1591108810190e63bdeb7a5a1e7a02729cd3ea"
+      "sha256": "51f5296e368abdb584232c27026aa6ce60a7e420b599cceb1989a7d66c1fc6cf"
     },
     {
       "path": "dags.md",
@@ -72,7 +72,7 @@
     },
     {
       "path": "schemas/bronze_materialization.schema.json",
-      "sha256": "d441d169d33d67c52ec7ac58d9ef8ef540a46ae36b6cd23257bef8929f82e62a"
+      "sha256": "fe9a2ebe8c4d08369378cbb023fa2b4f2ba034edd13c7ac70b6b52f43772aeba"
     },
     {
       "path": "schemas/bronze_record.schema.json",
@@ -96,7 +96,7 @@
     },
     {
       "path": "schemas/dataset_request.schema.json",
-      "sha256": "7c93c90c655d3840c04881820a2be0a9204c592cae894d47bb8782c12746214e"
+      "sha256": "0f374f3d59c10142065c2894ba4597b825a860a8bce0b07161485a9a78390cab"
     },
     {
       "path": "schemas/effective_resource_plan.schema.json",
@@ -104,11 +104,11 @@
     },
     {
       "path": "schemas/environment_snapshot.schema.json",
-      "sha256": "9d242677b345f5e67eb86a06f26e307eb1513614171eb56dffe558afe0b788f0"
+      "sha256": "79a7a3b772ba219a60d1194cc3a55f2ea12bafd5424f5403d368dfe44057d5e3"
     },
     {
       "path": "schemas/evaluation_policy.schema.json",
-      "sha256": "48dac936e316ff474f66d4de0fb05e7c61dec77fd2654e6d45c2dae4e93480a8"
+      "sha256": "9d93f6ec39feca1929bb9f55d101130035cf5e6d1bd62317f61c401261db85bb"
     },
     {
       "path": "schemas/failure_record.schema.json",
@@ -124,7 +124,7 @@
     },
     {
       "path": "schemas/feature_provenance.schema.json",
-      "sha256": "572dd4c147d01579fe048ccf0d257da41bd063296737efa61d23c6a2c5045a70"
+      "sha256": "71ce0eee39df56e1a534b410815fd36b77f00c642c201a02b0a20a6bda095c57"
     },
     {
       "path": "schemas/gold_feature_counts.schema.json",
@@ -132,7 +132,7 @@
     },
     {
       "path": "schemas/gold_materialization.schema.json",
-      "sha256": "63da7294d0555d2c9b99ccbe0532a3e05b911f549148604438cfdff3759e15ea"
+      "sha256": "2ea5980fef05cd9cc935c9b4e6bf07c38fd8d30cbfd8cd6ee5dbbbe54ebbd9c2"
     },
     {
       "path": "schemas/gold_request.schema.json",
@@ -143,16 +143,20 @@
       "sha256": "bb0ef418017ea59d722ba9d441a9e789f0e917ddd5ad13001d64d3cf8463098e"
     },
     {
+      "path": "schemas/materialization.schema.json",
+      "sha256": "bae905425386d43ba201ccee938f901b118450123866d5473a3a9b6eaf91d2cb"
+    },
+    {
       "path": "schemas/model_specification.schema.json",
       "sha256": "19c37389ca5d75ffa8b6780caf598eb854c22d6b93333b19c6be2a65eddd6635"
     },
     {
       "path": "schemas/platinum_materialization.schema.json",
-      "sha256": "8b6663d13e51ef8db9b0c6a410d94662b140dd4eddeb813c15ddc8c599ebd41c"
+      "sha256": "171f7083b5595dd1fab89d002709c74d4c49800f5fbc46d1930acfa53a6b9620"
     },
     {
       "path": "schemas/platinum_request.schema.json",
-      "sha256": "345263458ad284339bc77110ff06f135ca38003d1f723c2887dd9bb226f99cae"
+      "sha256": "50fd3b3203effe3bed393033a265cfa86853db066c058b3696f0cc50f52ad8bd"
     },
     {
       "path": "schemas/platinum_selection_decision.schema.json",
@@ -164,7 +168,7 @@
     },
     {
       "path": "schemas/resume_plan.schema.json",
-      "sha256": "ff536806e92e34013b1cec97031528c461bd3ce704931125f39530ea960cfb0c"
+      "sha256": "d818f029f75785f88934c0e5e58dc1b679a5d5512b3f4c64d8a11a08c6976f9b"
     },
     {
       "path": "schemas/resume_policy.schema.json",
@@ -180,7 +184,7 @@
     },
     {
       "path": "schemas/run_manifest.schema.json",
-      "sha256": "3b9125d2cfad2002805476c222da8b36e164436476e90dd3696500a16e154f24"
+      "sha256": "4f70207e9b4507cb7165de58be937223d1bad3a944ea14b8eb57e869b6b01900"
     },
     {
       "path": "schemas/run_request.schema.json",
@@ -192,7 +196,7 @@
     },
     {
       "path": "schemas/silver_materialization.schema.json",
-      "sha256": "6b507c301c7dbeff87cf595ede7fd7aaf869bcc63354384121b4ed81508a5ab0"
+      "sha256": "100b94bd79725c37bd0bf3d7902109a8fc7c0c0dee6c17bc26b453d5fb34e90c"
     },
     {
       "path": "schemas/stage_result.schema.json",

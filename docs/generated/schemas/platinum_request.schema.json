@@ -48,6 +48,16 @@
           "default": "1",
           "title": "Schema Version",
           "type": "string"
+        },
+        "selection_partition": {
+          "default": "discovery",
+          "enum": [
+            "discovery",
+            "evaluation",
+            "all"
+          ],
+          "title": "Selection Partition",
+          "type": "string"
         }
       },
       "title": "EvaluationPolicy",

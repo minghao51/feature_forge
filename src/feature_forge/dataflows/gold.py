@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -32,6 +31,7 @@ from feature_forge.contracts import (
     StageResult,
     gold_materialization_fingerprint,
 )
+from feature_forge.dataflows._io import package_load_guard
 from feature_forge.dataflows.hamilton_compat import tag
 from feature_forge.dataflows.profile import ExecutionProfile, get_profile_policy
 from feature_forge.evaluation.sandbox import SandboxedExecutor
@@ -267,15 +267,10 @@ def gold_materialization(
     )
 
 
-def _json_artifact(store: LocalArtifactStore, ref: ManifestRef, path: str) -> Any:
-    resolved = store.resolve(ArtifactRef(layer=Layer.GOLD, run_id=ref.run_id, relative_path=path))
-    return json.loads(resolved.read_text(encoding="utf-8"))
-
-
 def load_gold_package(store: LocalArtifactStore, ref: ManifestRef) -> GoldPackage:
     if ref.layer is not Layer.GOLD:
         raise DatasetError("Gold loading requires a Gold manifest reference")
-    try:
+    with package_load_guard("Gold"):
         manifest = store.load_manifest(ref)
         if manifest.layer is not Layer.GOLD or manifest.package_kind != "gold":
             raise ValueError("manifest is not a Gold package")
@@ -290,7 +285,7 @@ def load_gold_package(store: LocalArtifactStore, ref: ManifestRef) -> GoldPackag
                 or item.layer is not Layer.GOLD
             ):
                 raise ValueError(f"invalid required Gold artifact: {path}")
-        request = GoldRequest.model_validate(_json_artifact(store, ref, "request.json"))
+        request = GoldRequest.model_validate(store.read_json_artifact(ref, "request.json"))
         expected = set(GOLD_REQUIRED_ARTIFACTS)
         if request.persist_candidates:
             expected.add("candidate_features.parquet")
@@ -298,7 +293,7 @@ def load_gold_package(store: LocalArtifactStore, ref: ManifestRef) -> GoldPackag
             candidate.code_path
             for candidate in [
                 FeatureCandidate.model_validate(x)
-                for x in _json_artifact(store, ref, "candidates.json")
+                for x in store.read_json_artifact(ref, "candidates.json")
             ]
         }
         expected.update(code_paths)
@@ -321,16 +316,19 @@ def load_gold_package(store: LocalArtifactStore, ref: ManifestRef) -> GoldPackag
             raise ValueError("invalid generated code descriptor")
         candidates = [
             FeatureCandidate.model_validate(x)
-            for x in _json_artifact(store, ref, "candidates.json")
+            for x in store.read_json_artifact(ref, "candidates.json")
         ]
         provenance = [
             FeatureProvenance.model_validate(x)
-            for x in _json_artifact(store, ref, "provenance.json")
+            for x in store.read_json_artifact(ref, "provenance.json")
         ]
         decisions = [
-            FeatureDecision.model_validate(x) for x in _json_artifact(store, ref, "decisions.json")
+            FeatureDecision.model_validate(x)
+            for x in store.read_json_artifact(ref, "decisions.json")
         ]
-        checks = [CheckResult.model_validate(x) for x in _json_artifact(store, ref, "checks.json")]
+        checks = [
+            CheckResult.model_validate(x) for x in store.read_json_artifact(ref, "checks.json")
+        ]
         accepted = pd.read_parquet(
             store.resolve(
                 ArtifactRef(
@@ -355,11 +353,7 @@ def load_gold_package(store: LocalArtifactStore, ref: ManifestRef) -> GoldPackag
             ).read_text(encoding="utf-8")
             for path in code_paths
         }
-        dependencies = cast(dict[str, Any], _json_artifact(store, ref, "dependencies.json"))
-    except Exception as exc:
-        if isinstance(exc, DatasetError):
-            raise
-        raise DatasetError(f"Unable to load verified Gold package: {exc}") from exc
+        dependencies = cast(dict[str, Any], store.read_json_artifact(ref, "dependencies.json"))
     ids = [item.candidate_id for item in candidates]
     provenance_ids = [item.candidate_id for item in provenance]
     decision_ids = [item.candidate_id for item in decisions]

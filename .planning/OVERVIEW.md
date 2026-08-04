@@ -16,7 +16,7 @@
 ├──────────────┬─────┴─────────────────────────────────────┤
 │  Agent Layer │ 6 agents + router (MALMAS only)          │
 ├──────────────┴───────────────────────────────────────────┤
-│  Memory Layer    │ procedural / feedback / conceptual    │
+│  Memory Layer    │ procedural / feedback                 │
 ├──────────────────────────────────────────────────────────┤
 │  LLM Layer       │ LLMClient → providers → DiskCache    │
 ├──────────────────────────────────────────────────────────┤
@@ -46,7 +46,7 @@ Layered: **Plugin-registry pattern with entry points for methods, agents, metric
 | Methods (plugin registry) | `src/feature_forge/methods/` | `BaseMethod` + `MethodRegistry` (entry-point discovery) — 5 methods |
 | MALMAS agents | `src/feature_forge/methods/malmas/agents/` | 6 specialized agents + `RouterAgent` — entry-point pluggable |
 | MALMAS pipeline | `src/feature_forge/methods/malmas/pipeline/` | `CorePipeline` (single-round) → `IterativePipeline` (multi-round with router/memory) |
-| MALMAS memory | `src/feature_forge/methods/malmas/memory/` | 3-tier: procedural, feedback, conceptual — with persistence |
+| MALMAS memory | `src/feature_forge/methods/malmas/memory/` | 2-tier: procedural, feedback — with persistence |
 | MALMAS prompts | `src/feature_forge/methods/malmas/prompts/` | YAML templates per agent type |
 | LLM abstraction | `src/feature_forge/llm/` | `LLMClient` (ABC) → 4 providers (deepseek, openai, anthropic, litellm) + DiskCache |
 | Evaluation | `src/feature_forge/evaluation/` | `CVEvaluator` (k-fold) + `SandboxedExecutor` (AST validation + subprocess worker) |
@@ -151,6 +151,7 @@ No user authentication. All auth is API-key-based for external services: LLM pro
 | `FF_ROUTER__STRATEGY` | router | `data_driven`, `performance_driven`, `hybrid`, `llm` |
 | `FF_MEMORY__MAX_SIZE` | memory | Max entries per memory type |
 | `FF_EVALUATION__CV_FOLDS` | evaluation | Cross-validation folds |
+| `FF_EVALUATION__EVALUATION_HOLDOUT_FRACTION` | evaluation | Discovery/evaluation split fraction (`0.0` disables; default `0.25`) |
 | `FF_EVALUATION__SANDBOX_TIMEOUT_SECONDS` | evaluation | Sandbox worker timeout |
 | `WANDB_API_KEY` | wandb | WandB authentication |
 | `LANGFUSE_PUBLIC_KEY` | langfuse | Langfuse public key |

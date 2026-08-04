@@ -29,8 +29,10 @@ from feature_forge.contracts import (
     StageResult,
     bronze_fingerprint,
 )
+from feature_forge.dataflows._io import package_load_guard
 from feature_forge.dataflows.hamilton_compat import tag
 from feature_forge.dataflows.profile import ExecutionProfile, get_profile_policy
+from feature_forge.evaluation.holdout import assign_row_partitions
 from feature_forge.exceptions import DatasetError
 from feature_forge.storage.hashing import (
     dataset_fingerprint,
@@ -432,35 +434,68 @@ def fold_assignments(
     row_ids: list[str],
     dataset_request: DatasetRequest,
 ) -> pd.DataFrame:
-    """Generate one exhaustive validation-fold assignment per Silver row."""
+    """Generate exhaustive validation-fold assignments per Silver row.
+
+    Rows are first split into a ``discovery`` partition (seen by feature
+    selection) and an ``evaluation`` partition (used only for the reported CV
+    score) when ``dataset_request.evaluation_holdout_fraction > 0``. Folds are
+    then generated *within each partition*, so each partition independently
+    covers folds ``0..cv_folds-1``. When the data is too small to host the
+    holdout, every row lands in the ``discovery`` partition (and selection runs
+    on all rows, matching the pre-holdout behavior).
+    """
     if len(canonical_features) != len(canonical_target) or len(row_ids) != len(canonical_features):
         raise DatasetError("Silver features, target, and row IDs are misaligned")
     if canonical_target.isna().any():
         raise DatasetError("Silver target contains missing values")
-    if dataset_request.task == "classification":
-        splitter = StratifiedKFold(
-            n_splits=dataset_request.cv_folds,
-            shuffle=True,
-            random_state=dataset_request.split_seed,
-        )
-        split_iterator = splitter.split(canonical_features, canonical_target)
-    else:
-        splitter = KFold(
-            n_splits=dataset_request.cv_folds,
-            shuffle=True,
-            random_state=dataset_request.split_seed,
-        )
-        split_iterator = splitter.split(canonical_features)
 
-    folds = np.full(len(row_ids), -1, dtype=np.int64)
-    try:
-        for fold, (_, validation_indices) in enumerate(split_iterator):
-            folds[validation_indices] = fold
-    except ValueError as exc:
-        raise DatasetError(f"Unable to create {dataset_request.cv_folds} folds: {exc}") from exc
+    n_rows = len(row_ids)
+    partition_labels = assign_row_partitions(
+        n_rows,
+        fraction=dataset_request.evaluation_holdout_fraction,
+        cv_folds=dataset_request.cv_folds,
+        stratified=dataset_request.task == "classification",
+        seed=dataset_request.split_seed,
+        y_for_stratify=canonical_target if dataset_request.task == "classification" else None,
+    )
+
+    row_ids_arr = np.asarray(row_ids, dtype=object)
+    folds = np.full(n_rows, -1, dtype=np.int64)
+    # Generate folds independently within each partition so candidate evidence
+    # (discovery) and the reported aggregate (evaluation) never share a fold.
+    for partition_name in ("discovery", "evaluation"):
+        mask = partition_labels == partition_name
+        if not mask.any():
+            continue
+        partition_idx = np.flatnonzero(mask)
+        if dataset_request.task == "classification":
+            splitter = StratifiedKFold(
+                n_splits=dataset_request.cv_folds,
+                shuffle=True,
+                random_state=dataset_request.split_seed,
+            )
+            split_iterator = splitter.split(
+                canonical_features.iloc[partition_idx],
+                canonical_target.iloc[partition_idx],
+            )
+        else:
+            splitter = KFold(
+                n_splits=dataset_request.cv_folds,
+                shuffle=True,
+                random_state=dataset_request.split_seed,
+            )
+            split_iterator = splitter.split(canonical_features.iloc[partition_idx])
+        try:
+            for fold, (_, validation_indices) in enumerate(split_iterator):
+                folds[partition_idx[validation_indices]] = fold
+        except ValueError as exc:
+            raise DatasetError(
+                f"Unable to create {dataset_request.cv_folds} folds in {partition_name}: {exc}"
+            ) from exc
+
     if (folds < 0).any():
         raise DatasetError("Fold generation did not assign every Silver row")
-    return pd.DataFrame({"row_id": row_ids, "fold": folds})
+    return pd.DataFrame({"row_id": row_ids_arr, "fold": folds, "partition": partition_labels})
 
 
 @tag(layer="silver", cost="cheap", persistence="none", sensitivity="metadata", owner="data")
@@ -478,7 +513,11 @@ def dataset_fingerprint_value(
         schema_version=bronze_snapshot.schema_version,
         target_name=bronze_snapshot.target,
         task=dataset_request.task,
-        split_policy={"strategy": split_strategy, "folds": dataset_request.cv_folds},
+        split_policy={
+            "strategy": split_strategy,
+            "folds": dataset_request.cv_folds,
+            "evaluation_holdout_fraction": dataset_request.evaluation_holdout_fraction,
+        },
         split_seed=dataset_request.split_seed,
     )
 
@@ -544,13 +583,37 @@ def silver_checks(
         and all(isinstance(row_id, str) and bool(row_id) for row_id in row_ids)
     )
     folds_are_valid = (
-        {"row_id", "fold"}.issubset(fold_assignments.columns)
+        {"row_id", "fold", "partition"}.issubset(fold_assignments.columns)
         and len(fold_assignments) == len(row_ids)
         and fold_assignments["row_id"].is_unique
         and fold_assignments["row_id"].tolist() == row_ids
         and fold_assignments["fold"].nunique() == dataset_request.cv_folds
         and not (fold_assignments["fold"] < 0).any()
     )
+    # Discovery/evaluation partition: every row must carry a partition label,
+    # and when the holdout is enabled both partitions must be non-empty and
+    # each must independently cover all cv_folds so candidate selection
+    # (discovery) and the reported aggregate (evaluation) never share a fold.
+    holdout_enabled = dataset_request.evaluation_holdout_fraction > 0.0
+    partition_col = fold_assignments.get("partition")
+    if isinstance(partition_col, pd.Series):
+        partitions_present = set(partition_col.unique().tolist())
+    else:
+        partitions_present = set()
+    partition_is_valid = partitions_present <= {"discovery", "evaluation"} and (
+        partitions_present == {"discovery"}
+        if not holdout_enabled
+        else partitions_present == {"discovery", "evaluation"}
+    )
+    if holdout_enabled and partition_is_valid:
+        per_partition_folds_ok = all(
+            fold_assignments.loc[fold_assignments["partition"] == part, "fold"].nunique()
+            == dataset_request.cv_folds
+            for part in ("discovery", "evaluation")
+        )
+    else:
+        per_partition_folds_ok = fold_assignments["fold"].nunique() == dataset_request.cv_folds
+    folds_are_valid = folds_are_valid and partition_is_valid and per_partition_folds_ok
     string_columns = [str(column) for column in canonical_features.columns]
     schema_is_valid = (
         bool(len(canonical_features.columns))
@@ -732,7 +795,7 @@ def load_silver_package(
     """Load and validate a committed Silver package without dataset or network access."""
     if manifest_ref.layer is not Layer.SILVER:
         raise DatasetError("Silver replay requires a Silver manifest reference")
-    try:
+    with package_load_guard("Silver"):
         manifest = artifact_store.load_manifest(manifest_ref)
         _validate_artifact_contract(
             manifest,
@@ -786,10 +849,6 @@ def load_silver_package(
             json.loads(checks_path.read_text(encoding="utf-8")),
         )
         checks = [CheckResult.model_validate(value) for value in check_values]
-    except Exception as exc:
-        if isinstance(exc, DatasetError):
-            raise
-        raise DatasetError(f"Unable to load verified Silver package: {exc}") from exc
 
     row_id_values = row_ids_frame.get("row_id")
     target_row_ids = canonical_target.get("row_id")

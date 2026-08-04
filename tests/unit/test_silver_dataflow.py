@@ -92,6 +92,9 @@ def _request(
         case_fingerprint=case_fingerprint,
         split_seed=42,
         cv_folds=3,
+        # The 6-row fixture is too small to host a discovery holdout; these
+        # tests exercise the Silver boundary mechanics, not leakage-safe eval.
+        evaluation_holdout_fraction=0.0,
         source_policy=source_policy,
         canonicalization_config=canonicalization_config or {},
     )
@@ -432,3 +435,121 @@ class TestSilverDataflow:
         assert output_path.exists()
         assert output_path.stat().st_size > 0
         assert SILVER_FINAL_VARS == ["silver_materialization"]
+
+
+class _LargeBalancedRegistry:
+    """40-row balanced classification registry large enough to host a holdout."""
+
+    def __init__(self) -> None:
+        n = 40
+        self.train = pd.DataFrame(
+            {
+                "a": list(range(n)),
+                "fare": [float(i) for i in range(n)],
+                "target": [i % 2 for i in range(n)],
+            }
+        )
+
+    def info(self, name: str) -> dict[str, Any]:
+        return {"source": "local", "target": "target", "task": "classification", "name": name}
+
+    def load(self, name: str) -> dict[str, Any]:
+        return {
+            "train": self.train.copy(),
+            "test": pd.DataFrame(),
+            "target": "target",
+            "metadata": self.info(name),
+        }
+
+
+class TestSilverDiscoveryPartition:
+    """Leakage-safe Silver fold partitioning."""
+
+    def test_holdout_emits_both_partitions_with_independent_folds(self, tmp_path: Path) -> None:
+        driver = build_driver(
+            profile=ExecutionProfile.DEVELOPMENT,
+            artifact_store=LocalArtifactStore(tmp_path / "lake"),
+            cache_dir=tmp_path / "hamilton-cache",
+        )
+        request = DatasetRequest(
+            name="large",
+            target="target",
+            task="classification",
+            run_id="partition-run",
+            case_fingerprint="case-fingerprint",
+            split_seed=42,
+            cv_folds=4,
+            evaluation_holdout_fraction=0.25,
+            source_policy="reference",
+        )
+        result = _execute(
+            driver,
+            _LargeBalancedRegistry(),
+            request,
+            "fold_assignments",
+        )["fold_assignments"]
+        folds = result
+        assert "partition" in folds.columns
+        partitions = set(folds["partition"].unique())
+        assert partitions == {"discovery", "evaluation"}
+        # Each partition independently covers all cv_folds.
+        for partition_name in partitions:
+            partition_folds = folds.loc[folds["partition"] == partition_name, "fold"]
+            assert partition_folds.nunique() == 4
+        # 0.25 of 40 == 10 evaluation rows.
+        assert int((folds["partition"] == "evaluation").sum()) == 10
+
+    def test_zero_holdout_keeps_single_partition(self, tmp_path: Path) -> None:
+        driver = build_driver(
+            profile=ExecutionProfile.DEVELOPMENT,
+            artifact_store=LocalArtifactStore(tmp_path / "lake"),
+            cache_dir=tmp_path / "hamilton-cache",
+        )
+        request = DatasetRequest(
+            name="large",
+            target="target",
+            task="classification",
+            run_id="no-holdout-run",
+            case_fingerprint="case-fingerprint",
+            split_seed=42,
+            cv_folds=4,
+            evaluation_holdout_fraction=0.0,
+            source_policy="reference",
+        )
+        result = _execute(
+            driver,
+            _LargeBalancedRegistry(),
+            request,
+            "fold_assignments",
+        )["fold_assignments"]
+        folds = result
+        assert set(folds["partition"].unique()) == {"discovery"}
+
+    def test_holdout_fraction_changes_dataset_fingerprint(self, tmp_path: Path) -> None:
+        store = LocalArtifactStore(tmp_path / "lake")
+
+        def _run(fraction: float) -> str:
+            driver = build_driver(
+                profile=ExecutionProfile.DEVELOPMENT,
+                artifact_store=store,
+                cache_dir=tmp_path / f"cache-{fraction}",
+            )
+            request = DatasetRequest(
+                name="large",
+                target="target",
+                task="classification",
+                run_id=f"fp-run-{fraction}",
+                case_fingerprint="case-fingerprint",
+                split_seed=42,
+                cv_folds=4,
+                evaluation_holdout_fraction=fraction,
+                source_policy="reference",
+            )
+            return _execute(
+                driver,
+                _LargeBalancedRegistry(),
+                request,
+                "dataset_fingerprint_value",
+            )["dataset_fingerprint_value"]
+
+        assert _run(0.0) != _run(0.25)

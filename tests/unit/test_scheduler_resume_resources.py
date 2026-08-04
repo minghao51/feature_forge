@@ -417,7 +417,6 @@ def test_platform_emits_typed_stage_and_terminal_lifecycle_events(
             execution_plan={
                 "resume": {
                     "schema_version": "1",
-                    "run_id": payload.case.run_id,
                     "dry_run": False,
                     "decisions": [
                         {
@@ -464,7 +463,6 @@ def test_platform_emits_partial_stage_events_when_layer_execution_fails(
     bronze_ref = ManifestRef(layer=Layer.BRONZE, run_id="source", sha256="1" * 64)
     silver_ref = ManifestRef(layer=Layer.SILVER, run_id=run_id, sha256="2" * 64)
     partial = ResumePlan(
-        run_id=run_id,
         decisions=[
             ResumeStageDecision(
                 layer=Layer.BRONZE,

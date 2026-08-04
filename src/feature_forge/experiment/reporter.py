@@ -25,35 +25,33 @@ class Reporter:
         """Generate markdown comparison table."""
         if self.df.empty:
             return "No results to report."
-        # Select numeric columns for aggregation
         numeric_cols = self.df.select_dtypes(include="number").columns.tolist()
         group_cols = [c for c in ["dataset", "method", "model"] if c in self.df.columns]
+        if group_cols and numeric_cols:
+            summary = self.df.groupby(group_cols)[numeric_cols].mean().reset_index()
+        else:
+            summary = self.df
         try:
-            if group_cols and numeric_cols:
-                summary = self.df.groupby(group_cols)[numeric_cols].mean().reset_index()
-                return summary.to_markdown(index=False)
-            return self.df.to_markdown(index=False)
+            return summary.to_markdown(index=False)
         except ImportError:
             # tabulate not installed, return simple string representation
-            if group_cols and numeric_cols:
-                summary = self.df.groupby(group_cols)[numeric_cols].mean().reset_index()
-                return str(summary)
-            return str(self.df)
-
-    def to_html(self) -> str:
-        """Generate HTML comparison table."""
-        if self.df.empty:
-            return "<p>No results to report.</p>"
-        return self.df.to_html(index=False)
+            return str(summary)
 
     def get_best(
         self,
-        metric: str = "score",
+        metric: str = "cv_score",
         group_by: str = "dataset",
         *,
         direction: MetricDirection | str | None = None,
     ) -> pd.DataFrame:
-        """Get best result per group."""
+        """Get best result per group.
+
+        ``metric`` defaults to ``"cv_score"`` to match the column produced by
+        ``ExperimentalPlatform.run`` (and ``ExperimentalPlatform.report_best``);
+        a direction is auto-resolved from the ``metric`` column when exactly one
+        metric name is present, so minimize metrics (rmse/mae) select the lowest
+        score rather than silently defaulting to maximize.
+        """
         if group_by not in self.df.columns or metric not in self.df.columns:
             return pd.DataFrame()
         resolved = MetricDirection(direction) if direction is not None else None
@@ -67,31 +65,3 @@ class Reporter:
             else self.df.groupby(group_by)[metric].idxmax()
         )
         return self.df.loc[idx]
-
-    def summary_stats(self) -> dict[str, Any]:
-        """Return summary statistics."""
-        numeric_cols = self.df.select_dtypes(include="number").columns.tolist()
-        errors = (
-            self.df["error"]
-            if "error" in self.df.columns
-            else pd.Series([None] * len(self.df), index=self.df.index, dtype="object")
-        )
-        aggregate_numeric = [
-            col
-            for col in numeric_cols
-            if col
-            not in {
-                "seed",
-                "num_features_generated",
-                "num_candidate_features",
-                "num_executed_features",
-                "num_accepted_features",
-                "num_accepted_output_columns",
-            }
-        ]
-        return {
-            "total_runs": len(self.df),
-            "successful_runs": int(errors.isna().sum()),
-            "failed_runs": int(errors.notna().sum()),
-            "mean_metrics": {col: float(self.df[col].mean()) for col in aggregate_numeric},
-        }

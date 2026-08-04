@@ -1,9 +1,8 @@
-"""Agent memory system with procedural, feedback, and conceptual memory.
+"""Agent memory system with procedural and feedback tiers.
 
-Modeled after MALMAS 3-tier memory architecture:
+Modeled after the MALMAS memory architecture:
 - Procedural: successful transforms attempted
 - Feedback: feature gains/losses with effectiveness flag
-- Conceptual: LLM-summarized actionable rules
 """
 
 from __future__ import annotations
@@ -15,7 +14,7 @@ from feature_forge.methods.malmas.memory.retrieval import retrieve_top_k
 
 
 class AgentMemory:
-    """Per-agent memory with procedural, feedback, and conceptual tiers.
+    """Per-agent memory with procedural and feedback tiers.
 
     Attributes:
         agent_name: Name of the owning agent.
@@ -23,10 +22,7 @@ class AgentMemory:
         procedural: List of successful transform records.
         unused_procedural: List of ineffective transform records.
         feedback: List of evaluation feedback records.
-        conceptual: List of LLM-generated rule strings.
-        global_summary: List of global conceptual summaries.
         stats: Mechanical statistics computed from feedback.
-        conceptual_summary: Latest LLM-generated conceptual summary.
     """
 
     def __init__(self, agent_name: str, memory_path: str, max_size: int = 100) -> None:
@@ -36,10 +32,7 @@ class AgentMemory:
         self.procedural: list[dict[str, Any]] = []
         self.unused_procedural: list[dict[str, Any]] = []
         self.feedback: list[dict[str, Any]] = []
-        self.conceptual: list[str] = []
-        self.global_summary: list[str] = []
         self.stats: dict[str, Any] = {}
-        self.conceptual_summary: str = ""
         self._procedural_names: set[str] = set()
         self._unused_procedural_names: set[str] = set()
         self._feedback_names: set[str] = set()
@@ -52,10 +45,7 @@ class AgentMemory:
             self.procedural = data.get("procedural", [])
             self.unused_procedural = data.get("unused_procedural", [])
             self.feedback = data.get("feedback", [])
-            self.conceptual = data.get("conceptual", [])
-            self.global_summary = data.get("global_summary", [])
             self.stats = data.get("stats", {})
-            self.conceptual_summary = data.get("conceptual_summary", "")
             self._enforce_limits()
             self._rebuild_indices()
 
@@ -74,8 +64,6 @@ class AgentMemory:
         trimmed |= self._trim_sequence(self.procedural)
         trimmed |= self._trim_sequence(self.unused_procedural)
         trimmed |= self._trim_sequence(self.feedback)
-        self._trim_sequence(self.conceptual)
-        self._trim_sequence(self.global_summary)
         if trimmed:
             self._rebuild_indices()
 
@@ -87,10 +75,7 @@ class AgentMemory:
                 "procedural": self.procedural,
                 "unused_procedural": self.unused_procedural,
                 "feedback": self.feedback,
-                "conceptual": self.conceptual,
-                "global_summary": self.global_summary,
                 "stats": self.stats,
-                "conceptual_summary": self.conceptual_summary,
             }
         )
 
@@ -208,19 +193,6 @@ class AgentMemory:
         positive = [fb["feature_name"] for fb in self.feedback if fb.get("effective", False)]
         negative = [item["feature_name"] for item in self.unused_procedural]
         return positive, negative
-
-    # ── Conceptual Memory ───────────────────────────────────────────
-
-    def record_conceptual(self, rule: str) -> None:
-        """Add a conceptual rule if not already present."""
-        if rule not in self.conceptual:
-            self.conceptual.append(rule)
-            self._trim_sequence(self.conceptual)
-
-    def record_global_summary(self, summary: str) -> None:
-        """Add a global summary while respecting the configured limit."""
-        self.global_summary.append(summary)
-        self._trim_sequence(self.global_summary)
 
     # ── Prompt Context Generation ───────────────────────────────────
 

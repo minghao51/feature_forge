@@ -69,6 +69,16 @@ class ExperimentCase:
     execution_profile: ExecutionProfile = ExecutionProfile.DEVELOPMENT
     artifact_policy: str = "legacy"
 
+    @property
+    def effective_run_id(self) -> str:
+        """The explicit ``run_id`` if set, else a deterministic fallback.
+
+        Centralizes the ``run_{dataset}_{method}_{model}_{seed}`` fallback used
+        across the executor, context resolver, and platform so the template
+        cannot drift between call sites.
+        """
+        return self.run_id or f"run_{self.dataset}_{self.method}_{self.model}_{self.seed}"
+
 
 @dataclass
 class ExperimentResult:
@@ -105,6 +115,11 @@ class ExperimentResult:
     attempt: int = 1
     resource_plan: dict[str, Any] | None = None
     execution_plan: dict[str, Any] | None = None
+    # Leakage-safe evaluation: rows used for feature discovery (selection)
+    # vs. the rows used only for the reported CV score. Both are None when
+    # the discovery holdout is disabled (``evaluation_holdout_fraction == 0``).
+    n_discovery_rows: int | None = None
+    n_evaluation_rows: int | None = None
 
 
 InputT = TypeVar("InputT")
@@ -225,7 +240,9 @@ class ProcessPoolExecutionAdapter(ExecutionBackend):
                 error=str(exc),
                 max_workers=self.max_workers,
             )
-            return self._run_sequential(cases, worker, progress=progress, fail_fast=fail_fast, on_start=on_start)
+            return self._run_sequential(
+                cases, worker, progress=progress, fail_fast=fail_fast, on_start=on_start
+            )
         pending: dict[Future[OutputT], int] = {}
         try:
             while next_index < len(cases) and len(pending) < self.max_workers:
