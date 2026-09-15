@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
 import pytest
 
 from feature_forge.config import RetryConfig
@@ -26,7 +29,9 @@ class FlakyProvider(LLMClient):
         messages: list[dict[str, str]],
         temperature: float = 0.2,
         max_tokens: int = 4096,
-        **kwargs,
+        json_mode: bool = False,
+        prompt_meta: Mapping[str, Any] | None = None,
+        **kwargs: Any,
     ) -> LLMResponse:
         self.attempts += 1
         if self.attempts <= self.fail_count:
@@ -45,7 +50,8 @@ class FlakyProvider(LLMClient):
         schema_description: str,
         temperature: float = 0.2,
         max_tokens: int = 4096,
-    ) -> dict:
+        prompt_meta: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
         self.attempts += 1
         if self.attempts <= self.fail_count:
             raise LLMError(f"Transient failure (attempt {self.attempts})")
@@ -53,14 +59,14 @@ class FlakyProvider(LLMClient):
 
 
 class TestRetryConfig:
-    def test_defaults(self):
+    def test_defaults(self) -> None:
         cfg = RetryConfig()
         assert cfg.max_retries == 3
         assert cfg.backoff_base == 1.0
         assert cfg.backoff_max == 30.0
         assert cfg.backoff_exponent == 2.0
 
-    def test_env_override(self):
+    def test_env_override(self) -> None:
         import os
 
         os.environ["FF_RETRY__MAX_RETRIES"] = "5"
@@ -72,14 +78,14 @@ class TestRetryConfig:
         finally:
             del os.environ["FF_RETRY__MAX_RETRIES"]
 
-    def test_invalid_max_retries(self):
+    def test_invalid_max_retries(self) -> None:
         with pytest.raises(ValueError, match="max_retries"):
             RetryConfig(max_retries=-1)
 
 
 class TestRetryOnLLMError:
     @pytest.mark.asyncio
-    async def test_succeeds_after_retries(self):
+    async def test_succeeds_after_retries(self) -> None:
         provider = FlakyProvider(fail_count=2)
         provider.set_retry_config(RetryConfig(max_retries=3, backoff_base=0.01, backoff_max=0.1))
         response = await provider.complete(messages=[{"role": "user", "content": "hi"}])
@@ -87,7 +93,7 @@ class TestRetryOnLLMError:
         assert provider.attempts == 3
 
     @pytest.mark.asyncio
-    async def test_succeeds_on_first_try(self):
+    async def test_succeeds_on_first_try(self) -> None:
         provider = FlakyProvider(fail_count=0)
         provider.set_retry_config(RetryConfig(max_retries=3, backoff_base=0.01, backoff_max=0.1))
         response = await provider.complete(messages=[{"role": "user", "content": "hi"}])
@@ -95,7 +101,7 @@ class TestRetryOnLLMError:
         assert provider.attempts == 1
 
     @pytest.mark.asyncio
-    async def test_exhausts_retries(self):
+    async def test_exhausts_retries(self) -> None:
         provider = FlakyProvider(fail_count=10)
         provider.set_retry_config(RetryConfig(max_retries=2, backoff_base=0.01, backoff_max=0.1))
         with pytest.raises(LLMError, match="Transient failure"):
@@ -103,7 +109,7 @@ class TestRetryOnLLMError:
         assert provider.attempts == 3
 
     @pytest.mark.asyncio
-    async def test_complete_json_retries(self):
+    async def test_complete_json_retries(self) -> None:
         provider = FlakyProvider(fail_count=1)
         provider.set_retry_config(RetryConfig(max_retries=3, backoff_base=0.01, backoff_max=0.1))
         result = await provider.complete_json(
@@ -114,7 +120,7 @@ class TestRetryOnLLMError:
         assert provider.attempts == 2
 
     @pytest.mark.asyncio
-    async def test_no_retry_without_config(self):
+    async def test_no_retry_without_config(self) -> None:
         provider = FlakyProvider(fail_count=1)
         with pytest.raises(LLMError):
             await provider.complete(messages=[{"role": "user", "content": "hi"}])

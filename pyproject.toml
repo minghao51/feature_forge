@@ -41,17 +41,24 @@ dependencies = [
     "rich>=13.0",
     "structlog>=24.0",
     "tenacity>=8.0",
-    "xgboost>=2.0",
     "matplotlib>=3.7",
     "pyarrow>=23.0.1",
     "nest-asyncio>=1.6.0",
     "seaborn>=0.13.2",
-    "openfe>=0.0.12",
+    "jinja2>=3.1.6",
+    "apache-hamilton>=1.90,<2",
 ]
 
+[project.scripts]
+feature-forge = "feature_forge.cli:main"
+
 [project.optional-dependencies]
+# OpenFE and XGBoost are optional (PR 6B): the core install and the default
+# `random_forest` model must work without them. Optional factories raise a
+# precise `feature-forge[...]` install hint when the package is absent.
 caafe = ["caafe>0"]
-openfe = ["openfe>0"]
+openfe = ["openfe>=0.0.12"]
+xgboost = ["xgboost>=2.0"]
 kaggle = ["kaggle"]
 lightgbm = ["lightgbm>=4.0"]
 catboost = ["catboost>=1.2"]
@@ -65,9 +72,14 @@ observability = [
     "diskcache>=5.6.3",
     "pyarrow>=23.0.1",
 ]
+intel = [
+    "scikit-learn-intelex>=2024.0",
+    "threadpoolctl>=3.0",
+]
 all = [
     "caafe>0",
-    "openfe>0",
+    "openfe>=0.0.12",
+    "xgboost>=2.0",
     "kaggle",
     "lightgbm>=4.0",
     "catboost>=1.2",
@@ -78,6 +90,7 @@ all = [
     "langfuse>=2.0",
     "diskcache>=5.6.3",
     "pyarrow>=23.0.1",
+    "scikit-learn-intelex>=2024.0",
 ]
 
 [dependency-groups]
@@ -106,6 +119,7 @@ dev = [
     "mkdocs-jupyter>=0.26.3",
     "types-tqdm>=4.67.3.20260508",
     "types-pyyaml>=6.0.12.20260510",
+    "threadpoolctl>=3.0",
 ]
 
 [project.entry-points."feature_forge.methods"]
@@ -175,6 +189,7 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.mypy]
+plugins = ["pydantic.mypy"]
 python_version = "3.11"
 strict = true
 warn_return_any = true
@@ -193,6 +208,7 @@ module = [
     "langfuse",
     "diskcache",
     "sklearn.*",
+    "sklearnex",
     "lightgbm",
     "catboost",
     "kaggle",

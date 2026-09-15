@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import pathlib
+from collections.abc import Mapping
+from typing import Any, cast
 
 import pytest
 
@@ -20,17 +23,32 @@ class FakeLLM(LLMClient):
     def provider_name(self) -> str:
         return "fake"
 
-    async def _do_complete(self, messages, temperature=0.2, max_tokens=4096, **kwargs):
+    async def _do_complete(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float = 0.2,
+        max_tokens: int = 4096,
+        json_mode: bool = False,
+        prompt_meta: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> LLMResponse:
         return LLMResponse(content=self.response_text, model=self.model)
 
     async def _do_complete_json(
-        self, messages, schema_description, temperature=0.2, max_tokens=4096
-    ):
-        return json.loads(self.response_text or "{}")
+        self,
+        messages: list[dict[str, str]],
+        schema_description: str,
+        temperature: float = 0.2,
+        max_tokens: int = 4096,
+        prompt_meta: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        # json.loads returns Any; this fake is only fed JSON objects
+        # (same cast pattern as llm/base.py `_do_complete_json`).
+        return cast(dict[str, Any], json.loads(self.response_text or "{}"))
 
 
 class TestRetrieval:
-    def test_retrieve_top_k_ranks_by_overlap(self):
+    def test_retrieve_top_k_ranks_by_overlap(self) -> None:
         entries = [
             {"feature_name": "a", "base_columns": ["age", "fare"], "round_idx": 0, "value": 0.05},
             {"feature_name": "b", "base_columns": ["sibsp"], "round_idx": 0, "value": 0.1},
@@ -40,7 +58,7 @@ class TestRetrieval:
         assert result[0]["feature_name"] == "a"
         assert result[1]["feature_name"] == "c"
 
-    def test_retrieve_top_k_respects_top_k(self):
+    def test_retrieve_top_k_respects_top_k(self) -> None:
         entries = [
             {"feature_name": f"f{i}", "base_columns": ["age"], "round_idx": 0, "value": 0.05}
             for i in range(10)
@@ -48,12 +66,12 @@ class TestRetrieval:
         result = retrieve_top_k(entries, current_columns={"age"}, current_round=0, top_k=3)
         assert len(result) == 3
 
-    def test_retrieve_top_k_empty(self):
+    def test_retrieve_top_k_empty(self) -> None:
         assert retrieve_top_k([], current_columns={"age"}, current_round=0) == []
 
 
 class TestMemoryPersistence:
-    def test_roundtrip(self, tmp_path):
+    def test_roundtrip(self, tmp_path: pathlib.Path) -> None:
         path = str(tmp_path / "memory.json")
         pers = MemoryPersistence(path)
         data = {"procedural": [{"feature_name": "f1"}]}
@@ -61,14 +79,14 @@ class TestMemoryPersistence:
         loaded = pers.load()
         assert loaded == data
 
-    def test_load_missing_returns_none(self, tmp_path):
+    def test_load_missing_returns_none(self, tmp_path: pathlib.Path) -> None:
         path = str(tmp_path / "nonexistent.json")
         pers = MemoryPersistence(path)
         assert pers.load() is None
 
 
 class TestAgentMemory:
-    def test_enforces_max_size_across_tiers(self, tmp_path):
+    def test_enforces_max_size_across_tiers(self, tmp_path: pathlib.Path) -> None:
         path = str(tmp_path / "mem.json")
         mem = AgentMemory("unary", path, max_size=2)
 
@@ -85,7 +103,7 @@ class TestAgentMemory:
         assert mem.conceptual == ["rule 2", "rule 3"]
         assert mem.global_summary == ["summary 2", "summary 3"]
 
-    def test_allows_reusing_evicted_feature_names(self, tmp_path):
+    def test_allows_reusing_evicted_feature_names(self, tmp_path: pathlib.Path) -> None:
         path = str(tmp_path / "mem.json")
         mem = AgentMemory("unary", path, max_size=2)
 
@@ -96,28 +114,28 @@ class TestAgentMemory:
 
         assert [item["feature_name"] for item in mem.procedural] == ["f2", "f0"]
 
-    def test_record_procedure(self, tmp_path):
+    def test_record_procedure(self, tmp_path: pathlib.Path) -> None:
         path = str(tmp_path / "mem.json")
         mem = AgentMemory("unary", path)
         mem.record_procedure(["age"], "square", "age_sq", "numerical", "age squared", 0)
         assert len(mem.procedural) == 1
         assert mem.procedural[0]["feature_name"] == "age_sq"
 
-    def test_record_procedure_dedup(self, tmp_path):
+    def test_record_procedure_dedup(self, tmp_path: pathlib.Path) -> None:
         path = str(tmp_path / "mem.json")
         mem = AgentMemory("unary", path)
         mem.record_procedure(["age"], "square", "age_sq", "numerical", "desc", 0)
         mem.record_procedure(["age"], "cube", "age_sq", "numerical", "desc2", 0)
         assert len(mem.procedural) == 1
 
-    def test_record_feedback(self, tmp_path):
+    def test_record_feedback(self, tmp_path: pathlib.Path) -> None:
         path = str(tmp_path / "mem.json")
         mem = AgentMemory("unary", path)
         mem.record_feedback("age_sq", "auc", 0.05, True, 0, ["age"], "numerical")
         assert len(mem.feedback) == 1
         assert mem.feedback[0]["effective"] is True
 
-    def test_summarize_feedback(self, tmp_path):
+    def test_summarize_feedback(self, tmp_path: pathlib.Path) -> None:
         path = str(tmp_path / "mem.json")
         mem = AgentMemory("unary", path)
         mem.record_feedback("f1", "auc", 0.1, True, 0, ["a"], "num")
@@ -127,7 +145,7 @@ class TestAgentMemory:
         assert "f1" in summary
         assert "f3" not in summary
 
-    def test_get_positive_negative(self, tmp_path):
+    def test_get_positive_negative(self, tmp_path: pathlib.Path) -> None:
         path = str(tmp_path / "mem.json")
         mem = AgentMemory("unary", path)
         mem.record_procedure(["a"], "t", "f1", "num", "d", 0)
@@ -137,7 +155,7 @@ class TestAgentMemory:
         assert pos == ["f1"]
         assert neg == ["f2"]
 
-    def test_compute_stats(self, tmp_path):
+    def test_compute_stats(self, tmp_path: pathlib.Path) -> None:
         path = str(tmp_path / "mem.json")
         mem = AgentMemory("unary", path)
         mem.record_procedure(["age"], "log", "age_log", "numerical", "log age", 0)
@@ -145,7 +163,7 @@ class TestAgentMemory:
         stats = mem.compute_stats(min_effective=1)
         assert "log" in stats["effective_transforms"]
 
-    def test_save_and_load(self, tmp_path):
+    def test_save_and_load(self, tmp_path: pathlib.Path) -> None:
         path = str(tmp_path / "mem.json")
         mem = AgentMemory("unary", path)
         mem.record_procedure(["a"], "t", "f1", "num", "d", 0)
@@ -154,7 +172,7 @@ class TestAgentMemory:
         mem2 = AgentMemory("unary", path)
         assert len(mem2.procedural) == 1
 
-    def test_generate_prompt_section(self, tmp_path):
+    def test_generate_prompt_section(self, tmp_path: pathlib.Path) -> None:
         path = str(tmp_path / "mem.json")
         mem = AgentMemory("unary", path)
         mem.record_feedback("f1", "auc", 0.1, True, 0, ["a"], "num")
@@ -162,7 +180,7 @@ class TestAgentMemory:
         assert "History Feedback" in section
         assert "f1" in section
 
-    def test_retrieve_relevant_returns_top_k(self, tmp_path):
+    def test_retrieve_relevant_returns_top_k(self, tmp_path: pathlib.Path) -> None:
         path = str(tmp_path / "mem.json")
         mem = AgentMemory("unary", path)
         for i in range(20):
@@ -172,7 +190,7 @@ class TestAgentMemory:
         assert len(lines) <= 6
         assert "ranked by relevance" in result
 
-    def test_retrieve_relevant_fallback_to_generate(self, tmp_path):
+    def test_retrieve_relevant_fallback_to_generate(self, tmp_path: pathlib.Path) -> None:
         path = str(tmp_path / "mem.json")
         mem = AgentMemory("unary", path)
         result = mem.retrieve_relevant(current_columns={"age"}, current_round=0, top_k=5)
@@ -181,7 +199,7 @@ class TestAgentMemory:
 
 class TestConceptualMemory:
     @pytest.mark.asyncio
-    async def test_summarize_agent_insufficient_data(self, tmp_path):
+    async def test_summarize_agent_insufficient_data(self, tmp_path: pathlib.Path) -> None:
         path = str(tmp_path / "mem.json")
         mem = AgentMemory("unary", path)
         llm = FakeLLM("rule 1")
@@ -190,7 +208,7 @@ class TestConceptualMemory:
         assert "Few valid features" in result
 
     @pytest.mark.asyncio
-    async def test_summarize_agent_with_data(self, tmp_path):
+    async def test_summarize_agent_with_data(self, tmp_path: pathlib.Path) -> None:
         path = str(tmp_path / "mem.json")
         mem = AgentMemory("unary", path)
         mem.record_procedure(["age"], "log", "age_log", "numerical", "log", 0)
@@ -202,7 +220,7 @@ class TestConceptualMemory:
         assert mem.conceptual_summary == result
 
     @pytest.mark.asyncio
-    async def test_summarize_global(self, tmp_path):
+    async def test_summarize_global(self, tmp_path: pathlib.Path) -> None:
         path1 = str(tmp_path / "mem1.json")
         path2 = str(tmp_path / "mem2.json")
         mem1 = AgentMemory("unary", path1)

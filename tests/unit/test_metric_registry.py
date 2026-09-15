@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -13,7 +13,7 @@ from feature_forge.exceptions import EvaluationError
 class TestMetricRegistry:
     """Verify MetricRegistry built-in + entry point discovery."""
 
-    def test_get_builtin_returns_all_metrics(self):
+    def test_get_builtin_returns_all_metrics(self) -> None:
         builtin = MetricRegistry.get_builtin()
         assert "auc" in builtin
         assert "acc" in builtin
@@ -24,31 +24,31 @@ class TestMetricRegistry:
         assert "nrmse" in builtin
         assert len(builtin) >= 7
 
-    def test_get_all_includes_builtin(self):
+    def test_get_all_includes_builtin(self) -> None:
         all_metrics = MetricRegistry.get_all()
         for name in METRIC_REGISTRY:
             assert name in all_metrics
 
-    def test_get_returns_builtin_metric(self):
+    def test_get_returns_builtin_metric(self) -> None:
         fn = MetricRegistry.get("auc")
         assert callable(fn)
 
-    def test_get_raises_on_unknown(self):
+    def test_get_raises_on_unknown(self) -> None:
         with pytest.raises(EvaluationError, match="Unknown metric"):
             MetricRegistry.get("nonexistent_metric")
 
-    def test_register_adds_metric(self):
+    def test_register_adds_metric(self) -> None:
         MetricRegistry.register("test_metric", lambda y, p: 1.0)
         all_metrics = MetricRegistry.get_all()
         assert "test_metric" in all_metrics
 
-    def test_register_and_reset(self):
+    def test_register_and_reset(self) -> None:
         MetricRegistry.register("temp_metric", lambda y, p: 99.0)
         assert "temp_metric" in MetricRegistry.get_all()
         MetricRegistry.reset()
         assert "temp_metric" not in MetricRegistry.get_all()
 
-    def test_clear_cache_and_refresh(self):
+    def test_clear_cache_and_refresh(self) -> None:
         MetricRegistry.get_all()
         first = MetricRegistry._discovered
         MetricRegistry.clear_cache()
@@ -57,11 +57,11 @@ class TestMetricRegistry:
         assert MetricRegistry._discovered is not None
         assert MetricRegistry._discovered is not first
 
-    def test_get_metric_delegates_to_registry(self):
+    def test_get_metric_delegates_to_registry(self) -> None:
         fn = get_metric("auc")
         assert callable(fn)
 
-    def test_metrics_are_callable(self):
+    def test_metrics_are_callable(self) -> None:
         import numpy as np
 
         y_true = np.array([0, 1, 0, 1])
@@ -71,7 +71,7 @@ class TestMetricRegistry:
         assert isinstance(score, float)
 
     @patch("importlib.metadata.entry_points")
-    def test_entry_point_discovery(self, mock_entry_points):
+    def test_entry_point_discovery(self, mock_entry_points: MagicMock) -> None:
         mock_entry_points.return_value.select.return_value = []
 
         discovered = MetricRegistry.discover()

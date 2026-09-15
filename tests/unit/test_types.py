@@ -12,7 +12,7 @@ from feature_forge.types import FeatureSpec
 
 
 class TestFeatureSpecConstruction:
-    def test_all_fields(self):
+    def test_all_fields(self) -> None:
         spec = FeatureSpec(
             name="feat",
             type="categorical",
@@ -28,7 +28,7 @@ class TestFeatureSpecConstruction:
         assert spec.base_columns == ["a", "b"]
         assert spec.agent_name == "agent-1"
 
-    def test_defaults(self):
+    def test_defaults(self) -> None:
         spec = FeatureSpec(name="feat")
         assert spec.type == "numerical"
         assert spec.transform == ""
@@ -36,11 +36,13 @@ class TestFeatureSpecConstruction:
         assert spec.base_columns == []
         assert spec.agent_name == ""
 
-    def test_name_required(self):
+    def test_name_required(self) -> None:
         with pytest.raises(ValidationError, match="name"):
-            FeatureSpec()
+            # Deliberately omit the required field; the pydantic ValidationError
+            # raised at runtime is the behavior under test.
+            FeatureSpec()  # type: ignore[call-arg]  # deliberately missing required field
 
-    def test_base_columns_default_factory(self):
+    def test_base_columns_default_factory(self) -> None:
         spec_a = FeatureSpec(name="a")
         spec_b = FeatureSpec(name="b")
         spec_a.base_columns.append("x")
@@ -48,7 +50,7 @@ class TestFeatureSpecConstruction:
 
 
 class TestFeatureSpecSerialization:
-    def test_model_dump(self):
+    def test_model_dump(self) -> None:
         spec = FeatureSpec(name="feat", type="categorical", base_columns=["a"])
         dumped = spec.model_dump()
         assert isinstance(dumped, dict)
@@ -61,7 +63,7 @@ class TestFeatureSpecSerialization:
             "agent_name": "",
         }
 
-    def test_json_round_trip(self):
+    def test_json_round_trip(self) -> None:
         spec = FeatureSpec(
             name="feat",
             transform="df['feat'] = 1",
@@ -71,7 +73,7 @@ class TestFeatureSpecSerialization:
         restored = FeatureSpec.model_validate_json(json_str)
         assert restored == spec
 
-    def test_json_string_round_trip(self):
+    def test_json_string_round_trip(self) -> None:
         spec = FeatureSpec(name="feat")
         json_str = json.dumps(spec.model_dump())
         restored = FeatureSpec(**json.loads(json_str))
@@ -79,13 +81,15 @@ class TestFeatureSpecSerialization:
 
 
 class TestFeatureSpecExtraFields:
-    def test_extra_fields_allowed(self):
+    def test_extra_fields_allowed(self) -> None:
+        # FeatureSpec tolerates (ignores) extra kwargs at runtime; the static
+        # signature has no way to express that.
         spec = FeatureSpec(name="feat", extra_key="value")
         assert spec.name == "feat"
 
 
 class TestNewTypeAliases:
-    def test_agent_name(self):
+    def test_agent_name(self) -> None:
         name = AgentName("agent-1")
         assert isinstance(name, str)
         assert name == "agent-1"

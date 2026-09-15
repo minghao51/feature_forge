@@ -8,6 +8,7 @@ from __future__ import annotations
 import threading
 import warnings
 from collections.abc import Callable
+from enum import StrEnum
 from typing import Any, ClassVar
 
 import numpy as np
@@ -21,6 +22,13 @@ from sklearn.metrics import (
 )
 
 from feature_forge.exceptions import EvaluationError
+
+
+class MetricDirection(StrEnum):
+    """Whether larger metric values indicate better performance."""
+
+    MAXIMIZE = "maximize"
+    MINIMIZE = "minimize"
 
 
 def auc_score(y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -166,3 +174,10 @@ class MetricRegistry:
 def get_metric(name: str) -> Callable[..., Any]:
     """Get metric function by name (delegates to MetricRegistry)."""
     return MetricRegistry.get(name)
+
+
+def get_metric_direction(name: str) -> MetricDirection:
+    """Return the optimization direction for a registered metric."""
+    if name in {"rmse", "mae", "nrmse"}:
+        return MetricDirection.MINIMIZE
+    return MetricDirection.MAXIMIZE

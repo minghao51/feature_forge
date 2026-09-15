@@ -40,7 +40,7 @@ pytestmark = pytest.mark.differential
 
 
 class TestMetricsDifferential:
-    def test_auc_vs_sklearn(self):
+    def test_auc_vs_sklearn(self) -> None:
         rng = np.random.RandomState(42)
         y_true = rng.randint(0, 2, size=200)
         y_pred = rng.rand(200)
@@ -48,21 +48,21 @@ class TestMetricsDifferential:
         ref = float(roc_auc_score(y_true, y_pred))
         assert ours == pytest.approx(ref, abs=1e-10)
 
-    def test_acc_vs_sklearn_labels(self):
+    def test_acc_vs_sklearn_labels(self) -> None:
         y_true = np.array([0, 1, 0, 1, 0, 1, 0, 1])
         y_pred = np.array([0, 1, 1, 1, 0, 0, 0, 1])
         ours = acc_score(y_true, y_pred)
         ref = float(accuracy_score(y_true, y_pred))
         assert ours == pytest.approx(ref, abs=1e-10)
 
-    def test_f1_vs_sklearn(self):
+    def test_f1_vs_sklearn(self) -> None:
         y_true = np.array([0, 1, 0, 1, 0, 1, 0, 1])
         y_pred = np.array([0, 1, 1, 1, 0, 0, 0, 1])
         ours = f1_score_metric(y_true, y_pred)
         ref = float(f1_score(y_true, y_pred, average="macro"))
         assert ours == pytest.approx(ref, abs=1e-10)
 
-    def test_rmse_vs_sklearn(self):
+    def test_rmse_vs_sklearn(self) -> None:
         rng = np.random.RandomState(42)
         y_true = rng.randn(100)
         y_pred = y_true + rng.randn(100) * 0.1
@@ -70,7 +70,7 @@ class TestMetricsDifferential:
         ref = float(np.sqrt(mean_squared_error(y_true, y_pred)))
         assert ours == pytest.approx(ref, abs=1e-10)
 
-    def test_mae_vs_sklearn(self):
+    def test_mae_vs_sklearn(self) -> None:
         rng = np.random.RandomState(42)
         y_true = rng.randn(100)
         y_pred = y_true + rng.randn(100) * 0.1
@@ -78,7 +78,7 @@ class TestMetricsDifferential:
         ref = float(mean_absolute_error(y_true, y_pred))
         assert ours == pytest.approx(ref, abs=1e-10)
 
-    def test_r2_vs_sklearn(self):
+    def test_r2_vs_sklearn(self) -> None:
         rng = np.random.RandomState(42)
         y_true = rng.randn(100)
         y_pred = y_true + rng.randn(100) * 0.1
@@ -91,7 +91,7 @@ class TestMetricsDifferential:
 
 
 class TestSandboxDifferential:
-    def test_multiply_vs_direct(self):
+    def test_multiply_vs_direct(self) -> None:
         code = """
 def generate_features(df):
     result = pd.DataFrame()
@@ -104,10 +104,10 @@ def generate_features(df):
         direct_result = df.copy()
         direct_result["doubled"] = df["a"] * 2
         np.testing.assert_array_almost_equal(
-            sandbox_result["doubled"].values, direct_result["doubled"].values
+            sandbox_result["doubled"].to_numpy(), direct_result["doubled"].to_numpy()
         )
 
-    def test_add_columns_vs_direct(self):
+    def test_add_columns_vs_direct(self) -> None:
         code = """
 def generate_features(df):
     result = pd.DataFrame()
@@ -118,9 +118,9 @@ def generate_features(df):
         executor = SandboxedExecutor(timeout_seconds=10.0)
         sandbox_result = executor.execute(code, df)
         direct = df["a"] + df["b"]
-        np.testing.assert_array_almost_equal(sandbox_result["sum"].values, direct.values)
+        np.testing.assert_array_almost_equal(sandbox_result["sum"].to_numpy(), direct.to_numpy())
 
-    def test_log_transform_vs_direct(self):
+    def test_log_transform_vs_direct(self) -> None:
         code = """
 import numpy as np
 def generate_features(df):
@@ -132,7 +132,7 @@ def generate_features(df):
         executor = SandboxedExecutor(timeout_seconds=10.0)
         sandbox_result = executor.execute(code, df)
         direct = np.log1p(df["a"].abs())
-        np.testing.assert_array_almost_equal(sandbox_result["log_a"].values, direct.values)
+        np.testing.assert_array_almost_equal(sandbox_result["log_a"].to_numpy(), direct.to_numpy())
 
 
 # ── strip_markdown_fences vs regex differential ────────────────────────
@@ -145,15 +145,15 @@ class TestStripMarkdownFencesDifferential:
 
         return re.sub(r"^```(?:python)?\n?", "", re.sub(r"\n?```$", "", code))
 
-    def test_python_fence_vs_regex(self):
+    def test_python_fence_vs_regex(self) -> None:
         code = "```python\nprint('hello')\n```"
         assert strip_markdown_fences(code) == self._regex_impl(code)
 
-    def test_bare_fence_vs_regex(self):
+    def test_bare_fence_vs_regex(self) -> None:
         code = "```\nprint('hello')\n```"
         assert strip_markdown_fences(code) == self._regex_impl(code)
 
-    def test_no_fence_vs_regex(self):
+    def test_no_fence_vs_regex(self) -> None:
         code = "print('hello')"
         assert strip_markdown_fences(code) == self._regex_impl(code)
 
@@ -162,13 +162,13 @@ class TestStripMarkdownFencesDifferential:
 
 
 class TestCacheKeyDifferential:
-    def test_vs_manual_sha256(self):
+    def test_vs_manual_sha256(self) -> None:
         provider = "openai"
         model = "gpt-4"
         messages = [{"role": "user", "content": "hello"}]
         temperature = 0.7
         max_tokens = 100
-        kwargs = {}
+        kwargs: dict[str, str] = {}
         ours = compute_cache_key(provider, model, messages, temperature, max_tokens, **kwargs)
         payload = {
             "provider": provider,

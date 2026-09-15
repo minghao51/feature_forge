@@ -2,46 +2,68 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
 import pandas as pd
 import pytest
 
+from feature_forge.llm.base import LLMClient, LLMResponse
 from feature_forge.methods import LLMFEMethod, MethodRegistry
 from feature_forge.methods.base import BaseMethod
 
 
-class FakeLLM:
+class FakeLLM(LLMClient):
     def __init__(self, code: str) -> None:
+        super().__init__(model="fake", api_key="fake")
         self.code = code
 
-    async def complete(self, messages, temperature=0.2, max_tokens=4096, **kwargs):
-        from feature_forge.llm.base import LLMResponse
+    @property
+    def provider_name(self) -> str:
+        return "fake"
 
+    async def complete(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float = 0.2,
+        max_tokens: int = 4096,
+        prompt_meta: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> LLMResponse:
         return LLMResponse(content=self.code, model="fake")
 
-    async def _do_complete(self, messages, temperature=0.2, max_tokens=4096, **kwargs):
+    async def _do_complete(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float = 0.2,
+        max_tokens: int = 4096,
+        json_mode: bool = False,
+        prompt_meta: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> LLMResponse:
         return await self.complete(messages, temperature, max_tokens, **kwargs)
 
 
 class TestMethodRegistry:
-    def test_get_builtin_methods(self):
+    def test_get_builtin_methods(self) -> None:
         baselines = MethodRegistry.get_builtin_methods()
         assert "malmas" in baselines
         assert "openfe" in baselines
         assert "caafe" in baselines
         assert "llmfe" in baselines
 
-    def test_get_all_methods(self):
+    def test_get_all_methods(self) -> None:
         baselines = MethodRegistry.get_all_methods()
         assert "llmfe" in baselines
 
 
 class TestLLMFEMethod:
-    def test_init(self):
+    def test_init(self) -> None:
         llm = FakeLLM("def generate_features(df): return df")
         baseline = LLMFEMethod(llm_client=llm)
         assert baseline.name == "llmfe"
 
-    def test_fit_transform(self):
+    def test_fit_transform(self) -> None:
         code = """
 import pandas as pd
 
@@ -57,7 +79,7 @@ def generate_features(df):
         result = baseline.fit_transform(X, y)
         assert "sum_ab" in result.columns
 
-    def test_transform_before_fit_raises(self):
+    def test_transform_before_fit_raises(self) -> None:
         llm = FakeLLM("")
         baseline = LLMFEMethod(llm_client=llm)
         with pytest.raises(RuntimeError):
@@ -65,7 +87,7 @@ def generate_features(df):
 
 
 class TestOpenFENotInstalled:
-    def test_fit_raises_when_not_installed(self):
+    def test_fit_raises_when_not_installed(self) -> None:
         llm = FakeLLM("def generate_features(df): return df")
         _ = LLMFEMethod(llm_client=llm)
         assert issubclass(LLMFEMethod, BaseMethod)

@@ -49,11 +49,24 @@ class DiskCache:
     Attributes:
         cache_dir: Directory for SQLite cache files.
         enabled: Whether cache reads/writes are active.
+        ttl_seconds: Optional per-entry time-to-live; entries older than
+            this are ignored on read and removed by :meth:`maintain`.
+        size_limit_bytes: Optional total-size cap; enforced eagerly by
+            diskcache on writes (least-recently-stored eviction) and by
+            :meth:`maintain` when the cap is tightened after the fact.
     """
 
-    def __init__(self, cache_dir: str = "memory_files/llm_cache", enabled: bool = True) -> None:
+    def __init__(
+        self,
+        cache_dir: str = "memory_files/llm_cache",
+        enabled: bool = True,
+        ttl_seconds: float | None = None,
+        size_limit_bytes: int | None = None,
+    ) -> None:
         self.cache_dir = Path(cache_dir)
         self.enabled = enabled
+        self.ttl_seconds = ttl_seconds
+        self.size_limit_bytes = size_limit_bytes
         self._cache: Cache | None = None
 
     def _get_cache(self) -> Cache:
@@ -64,7 +77,10 @@ class DiskCache:
             except ImportError as exc:
                 raise LLMError("diskcache not installed. Run: uv pip install diskcache") from exc
             self.cache_dir.mkdir(parents=True, exist_ok=True)
-            self._cache = DiskCache(str(self.cache_dir))
+            kwargs: dict[str, Any] = {}
+            if self.size_limit_bytes is not None:
+                kwargs["size_limit"] = int(self.size_limit_bytes)
+            self._cache = DiskCache(str(self.cache_dir), **kwargs)
         return self._cache
 
     def get_key(
@@ -92,10 +108,46 @@ class DiskCache:
         if not self.enabled:
             return
         try:
-            self._get_cache()[key] = value
-            logger.debug("cache_set", key=key[:16])
+            self._get_cache().set(key, value, expire=self.ttl_seconds)
+            logger.debug("cache_set", key=key[:16], ttl_seconds=self.ttl_seconds)
         except Exception as exc:
             raise LLMError(f"Cache write failed for key {key[:16]}...: {exc}") from exc
+
+    def stats(self) -> dict[str, int]:
+        """Return entry count and on-disk volume (bytes) without mutating."""
+        cache = self._get_cache()
+        return {"items": len(cache), "volume_bytes": cache.volume()}
+
+    def maintain(self) -> dict[str, int]:
+        """Garbage-collect: drop expired entries, then cull to the size cap.
+
+        diskcache 5.x's ``expire``/``cull`` return removed-item counts; byte
+        figures are derived from the volume delta. Safe to call repeatedly;
+        a no-op on an empty or healthy cache.
+        """
+        if not self.enabled:
+            return {
+                "expired_removed": 0,
+                "expired_bytes": 0,
+                "culled_removed": 0,
+                "culled_bytes": 0,
+                "items": 0,
+                "volume_bytes": 0,
+            }
+        cache = self._get_cache()
+        volume_before = cache.volume()
+        expired_removed = int(cache.expire())
+        expired_bytes = volume_before - cache.volume()
+        volume_before = cache.volume()
+        culled_removed = int(cache.cull())
+        culled_bytes = volume_before - cache.volume()
+        return {
+            "expired_removed": expired_removed,
+            "expired_bytes": int(expired_bytes),
+            "culled_removed": culled_removed,
+            "culled_bytes": int(culled_bytes),
+            **self.stats(),
+        }
 
     def close(self) -> None:
         """Close the underlying cache connection."""

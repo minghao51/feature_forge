@@ -195,7 +195,7 @@ class SandboxedExecutor:
     def __init__(
         self,
         timeout_seconds: float = 5.0,
-        max_memory_mb: int = 512,
+        max_memory_mb: int = 2048,
     ) -> None:
         self.limits = SandboxLimits(timeout_seconds=timeout_seconds, max_memory_mb=max_memory_mb)
 

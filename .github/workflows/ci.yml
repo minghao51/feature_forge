@@ -21,9 +21,10 @@ jobs:
       - run: uv run ruff check src tests
       - run: uv run mypy src
 
-  quality-debt:
+  mypy-tests:
+    # 2026-09-05: the tests/ suite is mypy-clean (1015 → 0 errors, see
+    # REPORT_LOG); regressions now fail the build instead of being tolerated.
     runs-on: ubuntu-24.04
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -50,6 +51,58 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  package-contract:
+    # PR 6B: core install (no extras) must not provide OpenFE/XGBoost; the
+    # default model must work core-only, and the optional factories must fail
+    # with precise `feature-forge[...]` install hints.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --group dev
+      - run: uv build --wheel
+      - name: Verify a clean standard wheel install
+        run: |
+          uv venv /tmp/feature-forge-core
+          uv pip install --python /tmp/feature-forge-core/bin/python dist/*.whl
+          /tmp/feature-forge-core/bin/python - <<'PY'
+          import importlib.util
+          import pandas as pd
+          from feature_forge.evaluation.model_factory import ModelFactory
+
+          optional = ("caafe", "openfe", "xgboost", "lightgbm", "catboost")
+          present = [p for p in optional if importlib.util.find_spec(p)]
+          assert not present, f"core install must not provide optional packages: {present}"
+          model = ModelFactory().get_model(None, "classification")
+          model.fit(pd.DataFrame({"x": [0, 1, 0, 1]}), [0, 1, 0, 1])
+          assert model.predict(pd.DataFrame({"x": [0]})).shape == (1,)
+          PY
+      - run: uv run pytest tests/unit/test_package_contract.py -q
+
+  hamilton-compat:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        hamilton-spec: ["apache-hamilton==1.90.0", "apache-hamilton<2"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync --group dev
+      - run: uv pip install --upgrade "${{ matrix.hamilton-spec }}"
+      - run: >-
+          uv run pytest
+          tests/unit/test_dataflow_inventory.py
+          tests/unit/test_hamilton_cache.py
+          tests/unit/test_silver_dataflow.py
+          tests/unit/test_gold_dataflow.py
+          tests/unit/test_platinum_dataflow.py
+          -q
+
   security:
     runs-on: ubuntu-24.04
     steps:
@@ -59,6 +112,31 @@ jobs:
           enable-cache: true
       - run: uv sync --group dev
       - run: uv run python scripts/run_pip_audit.py
+
+  secrets:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # scan full history
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  intel:
+    # ADR 0010 follow-up: guard the OpenMP single-runtime invariants whenever
+    # the `intel` extra is installed. No API key needed — synthetic data only.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --group dev --extra intel --extra xgboost --extra lightgbm
+      - run: uv run python scripts/check_openmp_single_runtime.py
+      - run: uv run python scripts/intel_smoke_test.py
+        env:
+          INTEL_SMOKE_TIMEOUT: "300"
 
   hygiene:
     runs-on: ubuntu-24.04

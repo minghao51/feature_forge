@@ -11,12 +11,20 @@ from enum import StrEnum
 from typing import Any, ClassVar
 
 import pandas as pd
+from pydantic import BaseModel
 
 from feature_forge.config import Settings
 from feature_forge.llm.base import LLMClient
 from feature_forge.methods.malmas.prompts import get_registry
 from feature_forge.methods.malmas.types import AgentName
 from feature_forge.observability.structlog_config import get_logger
+
+
+class RouterSelection(BaseModel):
+    """Structured router reply (ADR 0011): agent names for this round."""
+
+    agents: list[str]
+
 
 logger = get_logger(__name__)
 
@@ -85,7 +93,7 @@ class RouterAgent:
         self.llm_client = llm_client
         self.agent_names = list(self.AGENT_CAPABILITIES.keys())
         self.strategy = config.router.strategy
-        self.min_agents = config.router.min_agents if config.router.min_agents is not None else 1
+        self.min_agents = config.router.min_agents
         self.max_agents = (
             config.router.max_agents
             if config.router.max_agents is not None
@@ -99,6 +107,12 @@ class RouterAgent:
         self.dataset_characteristics: dict[str, Any] | None = None
 
         self.router_prompt = get_registry().get("router").system
+
+    def reset_state(self) -> None:
+        """Clear learned routing history for a normal fit."""
+        self.agent_performance = {name: [] for name in self.agent_names}
+        self.agent_selection_count = dict.fromkeys(self.agent_names, 0)
+        self.dataset_characteristics = None
 
     def analyze_dataset(
         self,
@@ -211,27 +225,17 @@ class RouterAgent:
             {"role": "user", "content": context},
         ]
         try:
-            response = await self.llm_client.complete_json(
+            # ADR 0011: typed structured output replaces hand-parsed dicts.
+            selection = await self.llm_client.complete_structured(
                 messages=messages,
-                schema_description='{"agents":["unary","cross_compositional"]}',
+                response_model=RouterSelection,
                 temperature=0.3,
-                max_tokens=256,
+                max_tokens=512,  # hy3 spends reasoning tokens before the answer
             )
-            if isinstance(response, dict):
-                selected = response.get("agents", [])
-            elif isinstance(response, list):
-                selected = response
-            else:
-                selected = []
-            if isinstance(selected, list):
-                valid = [a for a in selected if isinstance(a, str) and a in self.agent_names]
-                if valid:
-                    return valid
-                logger.warning("router_llm_selection_empty_valid", selected=selected)
-            else:
-                logger.warning(
-                    "router_llm_selection_invalid_type", response_type=type(response).__name__
-                )
+            valid = [a for a in selection.agents if a in self.agent_names]
+            if valid:
+                return valid
+            logger.warning("router_llm_selection_empty_valid", selected=selection.agents)
         except Exception as exc:
             logger.warning("router_llm_selection_failed", error=str(exc)[:200])
         return self._hybrid_selection()

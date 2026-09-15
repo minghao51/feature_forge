@@ -1,6 +1,26 @@
 """Model factory for creating sklearn-compatible models.
 
 Supports XGBoost, LightGBM, CatBoost, Random Forest, and MLP.
+
+Dependency note (PR 6B): the default model is ``random_forest`` (core
+scikit-learn, always available). XGBoost, LightGBM, and CatBoost are
+optional extras (``pip install 'feature-forge[xgboost]'`` etc.); their
+factories raise :class:`EvaluationError` with a precise install hint when
+the package is absent.
+
+OpenMP note: when Intel acceleration is enabled (``sklearnex`` -> libiomp5),
+the XGBoost/LightGBM pip wheels still use libgomp. To avoid the resulting
+OpenMP deadlock, boosting estimators are pinned to ``n_jobs=1`` here so the
+libgomp runtime never spawns threads concurrently with libiomp5. See
+``docs/decisions/0010-intel-openmp-bootstrap.md``.
+
+Parallel boosters: ``booster_n_jobs`` (``Settings.evaluation``) opts OpenMP-
+backed estimators into multi-threaded fits when Intel acceleration is NOT
+active. The default of ``1`` is deliberate: 2026-09-06 benchmarks on a busy
+14-core host measured 16-234x REGRESSIONS for nested ``n_jobs>1`` fits
+(OMP spin-wait collapse under co-located workloads). Tune only on a quiet,
+measured host. When Intel acceleration is active, ``n_jobs`` is forced to 1
+regardless of configuration (deadlock safety trumps performance).
 """
 
 from __future__ import annotations
@@ -12,36 +32,72 @@ from typing import Any, ClassVar
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 
 from feature_forge.exceptions import EvaluationError
+from feature_forge.observability.structlog_config import get_logger
+from feature_forge.runtime.intel_bootstrap import is_intel_active
+
+logger = get_logger(__name__)
+
+_OPENMP_BACKED_FACTORIES = {"xgboost", "lightgbm", "random_forest"}
+_pin_warned = False
 
 
-def create_xgboost(task: str, random_state: int = 42) -> Any:
-    """Create an XGBoost model."""
+def _booster_n_jobs(requested: int | None) -> int:
+    """Resolve n_jobs for OpenMP-backed estimators (see module docstring).
+
+    ``None``/``1`` keeps the historical single-threaded pin. Any explicit
+    value is forced back to 1 when Intel acceleration is active, because the
+    libgomp/libiomp5 fork deadlock (ADR 0010) must stay impossible regardless
+    of configuration.
+    """
+    global _pin_warned
+    if requested is None or requested == 1:
+        return 1
+    if is_intel_active():
+        if not _pin_warned:
+            logger.warning(
+                "booster_n_jobs_forced_single_thread",
+                requested=requested,
+                reason="Intel acceleration active: n_jobs>1 can deadlock (ADR 0010)",
+            )
+            _pin_warned = True
+        return 1
+    return requested
+
+
+def create_xgboost(task: str, random_state: int = 42, n_jobs: int | None = None) -> Any:
+    """Create an XGBoost model (requires the ``xgboost`` extra)."""
     try:
         from xgboost import XGBClassifier, XGBRegressor
     except ImportError as exc:
-        raise EvaluationError("xgboost not installed") from exc
+        raise EvaluationError(
+            "xgboost is an optional dependency; install it with: "
+            "pip install 'feature-forge[xgboost]'"
+        ) from exc
     kwargs = {
         "n_estimators": 500,
         "learning_rate": 0.02,
         "max_depth": 6,
         "random_state": random_state,
         "tree_method": "hist",
-        "n_jobs": 1,
+        "n_jobs": _booster_n_jobs(n_jobs),
     }
     return XGBClassifier(**kwargs) if task == "classification" else XGBRegressor(**kwargs)
 
 
-def create_lightgbm(task: str, random_state: int = 42) -> Any:
+def create_lightgbm(task: str, random_state: int = 42, n_jobs: int | None = None) -> Any:
     """Create a LightGBM model."""
     try:
         from lightgbm import LGBMClassifier, LGBMRegressor
     except ImportError as exc:
-        raise EvaluationError("lightgbm not installed") from exc
+        raise EvaluationError(
+            "lightgbm is an optional dependency; install it with: "
+            "pip install 'feature-forge[lightgbm]'"
+        ) from exc
     kwargs: dict[str, Any] = {
         "n_estimators": 500,
         "learning_rate": 0.02,
         "random_state": random_state,
-        "n_jobs": 1,
+        "n_jobs": _booster_n_jobs(n_jobs),
         "verbose": -1,
     }
     return LGBMClassifier(**kwargs) if task == "classification" else LGBMRegressor(**kwargs)
@@ -52,7 +108,10 @@ def create_catboost(task: str, random_state: int = 42) -> Any:
     try:
         from catboost import CatBoostClassifier, CatBoostRegressor
     except ImportError as exc:
-        raise EvaluationError("catboost not installed") from exc
+        raise EvaluationError(
+            "catboost is an optional dependency; install it with: "
+            "pip install 'feature-forge[catboost]'"
+        ) from exc
     kwargs = {
         "iterations": 500,
         "learning_rate": 0.02,
@@ -62,9 +121,9 @@ def create_catboost(task: str, random_state: int = 42) -> Any:
     return CatBoostClassifier(**kwargs) if task == "classification" else CatBoostRegressor(**kwargs)
 
 
-def create_random_forest(task: str, random_state: int = 42) -> Any:
+def create_random_forest(task: str, random_state: int = 42, n_jobs: int | None = None) -> Any:
     """Create a Random Forest model."""
-    kwargs = {"random_state": random_state, "n_jobs": 1}
+    kwargs = {"random_state": random_state, "n_jobs": _booster_n_jobs(n_jobs)}
     return (
         RandomForestClassifier(**kwargs)
         if task == "classification"
@@ -164,19 +223,24 @@ class ModelRegistry:
 class ModelFactory:
     """Factory for creating ML models by name and task."""
 
-    def __init__(self, random_state: int = 42) -> None:
+    def __init__(self, random_state: int = 42, booster_n_jobs: int | None = None) -> None:
         self.random_state = random_state
+        self.booster_n_jobs = booster_n_jobs
 
     def get_model(self, model_name: str | None, task: str) -> Any:
         """Create a model instance.
 
         Args:
             model_name: One of 'xgboost', 'lightgbm', 'catboost', 'random_forest', 'mlp'.
+                ``None`` selects the core default ``'random_forest'``. The
+                boosting models are optional extras (see module docstring).
             task: 'classification' or 'regression'.
 
         Returns:
             sklearn-compatible estimator.
         """
-        name = (model_name or "xgboost").lower()
+        name = (model_name or "random_forest").lower()
         factory = ModelRegistry.get(name)
+        if self.booster_n_jobs is not None and name in _OPENMP_BACKED_FACTORIES:
+            return factory(task, self.random_state, n_jobs=self.booster_n_jobs)
         return factory(task, self.random_state)

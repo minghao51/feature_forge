@@ -1,8 +1,8 @@
 # Feature Forge Implementation Plan
 
 **Version:** 0.1.0
-**Date:** May 2026
-**Status:** Draft
+**Date:** 2026-09-09
+**Status:** Active
 
 ## Overview
 
@@ -13,7 +13,8 @@ This document outlines the comprehensive implementation plan for `feature_forge`
 1. **Reproduce and optimize** the MALMAS paper results on standard tabular datasets
 2. **Enable isolated experimentation** of every component (agents, memory, router, baselines)
 3. **Provide sklearn-compatible APIs** for drop-in adoption
-4. **Track everything** — experiments, LLM costs, feature quality, with WandB and Langfuse
+4. **Track experiments reproducibly** — optional WandB/MLflow backends plus
+   local structured logs and artifacts; external tracking defaults off
 5. **Support dynamic data ingestion** from Kaggle (starting simple, scaling to multi-table)
 
 ## Plan Structure
@@ -39,6 +40,10 @@ This document outlines the comprehensive implementation plan for `feature_forge`
 | `17_code_simplification.md` | Full `src/` code simplification — dedup sandbox init, iterative helpers, parse guards, router conditions, registry discovery |
 | `18_sage_inspired_memory_evolution.md` | SAGE-inspired memory evolution: graph memory, structured retrieval, self-evolution loop, cross-dataset transfer |
 | `19_ux_improvements.md` | UX improvements: CLI tool, config wizard, progress display, dashboard, feature explorer |
+| `20_long_term_roadmap.md` | Evidence-gated living roadmap for later research themes |
+| `21_hamilton_default_execution_handoff.md` | Agent-ready implementation specification for Hamilton-default case execution, medallion evidence, and default-on DAG caching |
+| `22_fail_fast_cancellation_contract.md` | Implemented plan (PRs 1–4) for continue/fail-fast scheduling, cooperative case-boundary cancellation, typed cancelled results, and lifecycle evidence |
+| `23_evaluation_integrity_security_hardening.md` | Proposed remediation plan for independent evaluation, enforceable Platinum selection, uncertainty correctness, sandbox containment, bounded worker lifecycle, and LLM cache identity v2 |
 
 ## Research Basis
 
@@ -57,7 +62,7 @@ This plan is informed by:
 | Dataset source | **Kaggle** | Real-world datasets, clear path to multi-table complexity |
 | Experiment config | **Python-first**, YAML supported | Flexibility for researchers, declarative option for reproducibility |
 | LLM caching | **Enforced default ON** | Prevent accidental API costs; explicit opt-out only |
-| Tracking backend | **WandB default**, MLflow optional | Superior visualization, free academic tier, W&B Weave for LLM |
+| Tracking backend | **None by default**, WandB/MLflow optional | Safe local execution; external tracking is an explicit experiment choice per ADR 0006 |
 | Observability | **Langfuse cloud** | Zero infra overhead, hierarchical tracing, prompt management |
 | Logging | **structlog** | 2x faster than stdlib, JSON in prod, pretty in dev, OTel integration |
 | Baselines | **OpenFE + CAAFE + LLM-FE** | Top 3 non-MALMAS methods per 2026 rankings |
@@ -68,14 +73,48 @@ This plan is informed by:
 
 ## Current Phase
 
-**Platform Refactor (In Progress)** — See `10_experimental_platform_refactor.md`. The `ExperimentalPlatform` facade, plugin hook extensions (MetricRegistry, ModelRegistry, DatasetRegistry entry points, BaselineProtocol), and package formalization are being implemented.
+**Hamilton-default execution is implemented.** PRs 1–6 are complete in the
+working tree: verified stage execution, default-on cache/telemetry operations,
+MALMAS correctness fixes, generated/user documentation, and a core-only package
+contract are present. Technical legacy-removal gates 1–5 have reproducible
+evidence, and the ADR 0016 removal change has landed: Hamilton is the sole
+execution engine, stale legacy configuration fails fast with migration
+guidance, and the parity evidence is preserved under
+`experiments/legacy_removal/2026-09-14/`.
+
+**Plan 22 (fail-fast and cooperative cancellation, ADR 0017) is implemented —
+PRs 1–4 are landed and the final validation sweep is complete.** The typed contracts,
+sequential fail-fast scheduling, bounded process submission, and the operator
+documentation/completion audit are in place; see `docs/operations.md`
+("Execution failure policy and cancellation"). The case-retry gap
+(`ResourceConfig.max_attempts`) remains explicitly dormant.
 
 ## Next Steps
 
-1. ✅ Review `10_experimental_platform_refactor.md`
-2. ✅ Approve Option C (Hybrid) approach
-3. ✅ Phase 1: `ExperimentalPlatform` facade — done
-4. ✅ Phase 2: Plugin hook extensions — done
-5. ✅ Phase 3: Package formalization — done
-6. ⬜ Tests — writing
-7. ⬜ Phase 4: Export CLI — deferred
+1. ✅ PR 1: authoritative ADRs, configuration, and dependency contract.
+2. ✅ PR 2A–2C foundations: contracts, storage, identity, and resume.
+3. ✅ PR 3A–3E: stage DAGs, Platinum decomposition, and cache qualification.
+4. ✅ PR 4: first-party `HamiltonLayerExecutor` and atomic default switch.
+5. ✅ PR 5: operations, telemetry, CLI, and user documentation.
+6. ✅ PR 6: legacy correctness and dependency simplification.
+7. ✅ Collect representative experiment and technical legacy-removal evidence.
+8. ✅ Gate 6 maintainer decision: ADR 0016 accepts legacy-engine removal.
+9. ✅ Remove `engine=legacy` in a dedicated change — landed 2026-09-14 per
+   ADR 0016; Hamilton is the sole engine and stale legacy configuration fails
+   with migration guidance.
+10. ✅ Implement `22_fail_fast_cancellation_contract.md` — PRs 1–4 landed
+    2026-09-14 (ADR 0017 accepted; contracts, sequential fail-fast, bounded
+    process scheduling, docs + completion audit), pending only final
+    validation. The dormant `ResourceConfig.max_attempts` retry fields remain
+    an explicit open gap, not part of this plan.
+11. ✅ Final validation sweep for the plan 22 slice complete (2026-09-14):
+    full suite 1000 passed / 9 expected optional-XGBoost skips on Python 3.11,
+    3.12, and 3.13 under single-thread BLAS/OpenMP limits (both mp contexts
+    exercised in-suite); mypy src+tests, ruff, format, hygiene, docs
+    references, stage-DAG freshness, mkdocs strict, `uv lock --check`, and
+    `git diff --check` all green. Then use
+    `20_long_term_roadmap.md` for later research themes.
+12. Draft and accept ADRs 0018–0020, then implement
+    `23_evaluation_integrity_security_hardening.md` in seven isolated changes.
+    Evaluation correctness precedes new benchmark claims; strict sandbox
+    containment precedes restoring unqualified production-readiness claims.

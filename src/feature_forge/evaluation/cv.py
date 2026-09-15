@@ -14,7 +14,7 @@ import pandas as pd
 from sklearn.model_selection import KFold, StratifiedKFold
 
 from feature_forge.config import Settings
-from feature_forge.evaluation.metrics import get_metric
+from feature_forge.evaluation.metrics import MetricDirection, get_metric, get_metric_direction
 from feature_forge.evaluation.model_factory import ModelFactory
 from feature_forge.exceptions import EvaluationError
 from feature_forge.observability.structlog_config import get_logger
@@ -33,11 +33,24 @@ class CVEvaluator:
         self,
         config: Settings | None = None,
         model_factory: ModelFactory | None = None,
+        default_model_name: str = "random_forest",
     ) -> None:
         self.config = config or Settings()
         self.model_factory = model_factory or ModelFactory()
         self.metric_fn = get_metric(self.config.metric)
+        self.metric_direction = get_metric_direction(self.config.metric)
         self.cv_folds = self.config.evaluation.cv_folds
+        self.default_model_name = default_model_name.lower()
+
+    def is_improvement(self, gain: float) -> bool:
+        """Return whether a raw ``new_score - baseline_score`` gain is better."""
+        if self.metric_direction is MetricDirection.MINIMIZE:
+            return gain < 0
+        return gain > 0
+
+    def improvement_value(self, gain: float) -> float:
+        """Normalize a raw gain so larger positive values are always better."""
+        return -gain if self.metric_direction is MetricDirection.MINIMIZE else gain
 
     def _get_cv_splitter(self, y: pd.Series) -> Any:
         """Return appropriate CV splitter for task type."""
@@ -106,7 +119,7 @@ class CVEvaluator:
     ) -> float:
         """Compute cross-validated metric score."""
         model = self.model_factory.get_model(
-            model_name=model_name,
+            model_name=model_name or self.default_model_name,
             task=self.config.task,
         )
         cv = self._get_cv_splitter(y)

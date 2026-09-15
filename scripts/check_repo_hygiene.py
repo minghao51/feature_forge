@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 REPO_ROOT = Path(__file__).parent.parent
 FORBIDDEN_SUBSTRINGS = (
@@ -15,6 +15,11 @@ FORBIDDEN_SUFFIXES = (
     ".pyc",
     ".pyo",
 )
+FORBIDDEN_BASENAMES = {
+    ".env",
+    ".env.keys",
+    ".env.local",
+}
 
 
 def main() -> int:
@@ -29,7 +34,13 @@ def main() -> int:
 
     violations = []
     for path in tracked:
-        if any(part in path for part in FORBIDDEN_SUBSTRINGS) or path.endswith(FORBIDDEN_SUFFIXES):
+        basename = PurePosixPath(path).name
+        if (
+            basename in FORBIDDEN_BASENAMES
+            or (basename.startswith(".env.") and basename.endswith(".keys"))
+            or any(part in path for part in FORBIDDEN_SUBSTRINGS)
+            or path.endswith(FORBIDDEN_SUFFIXES)
+        ):
             violations.append(path)
 
     if violations:

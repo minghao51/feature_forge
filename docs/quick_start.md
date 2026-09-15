@@ -11,8 +11,12 @@ cd feature-forge
 uv sync --all-extras
 
 # Or with pip
-pip install -e ".[all,dev]"
+pip install -e ".[all]"
 ```
+
+The core install (`uv sync` without extras) ships `random_forest` and the
+first-party LLM methods. OpenFE, CAAFE fidelity, XGBoost, LightGBM, and CatBoost
+are named optional extras included in `--all-extras` above.
 
 ## Basic Usage
 
@@ -26,21 +30,26 @@ fe.fit(X_train, y_train)
 X_test_enhanced = fe.transform(X_test)
 ```
 
-### Experiment Matrix
+### ExperimentalPlatform
 
 ```python
-from feature_forge.experiment import ExperimentMatrix, ExperimentRunner
+from feature_forge import ExperimentalPlatform
 
-matrix = (
-    ExperimentMatrix()
-    .datasets(["titanic"])
-    .methods({"malmas": ["full"], "openfe": ["openfe"]})
-    .seeds([0, 1, 2])
+platform = ExperimentalPlatform()
+results = platform.run(
+    datasets=["titanic"],
+    methods=["malmas", "openfe"],  # openfe needs the `openfe` extra
+    models=["random_forest"],       # core default; xgboost needs the `xgboost` extra
+    seeds=[0, 1, 2],
 )
-
-runner = ExperimentRunner()
-results = runner.run(matrix.generate(), run_experiment)
+print(platform.report(results))
 ```
+
+`ExperimentalPlatform.run()` expands the cartesian product of
+`datasets × methods × seeds × models` and executes each case through
+the Hamilton-default engine. Tracking is opt-in (default `none`). See
+[Operations](operations.md) for cache status, garbage collection, and
+artifact list/verify commands.
 
 ### Custom Method
 

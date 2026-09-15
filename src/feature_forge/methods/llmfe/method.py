@@ -74,17 +74,18 @@ class LLMFEMethod(BaseMethod):
             await self._fit_single_shot(X_train, y_train)
 
     async def _fit_single_shot(self, X: pd.DataFrame, y: pd.Series) -> None:
-        template = get_registry().get("single_shot").system
         params = LLMFESingleShotParams(
             columns=", ".join(X.columns),
             task="classification" if y.nunique() <= 10 else "regression",
             n_features=self.n_features,
         )
-        prompt = params.render(template)
-        raw_response = await self._call_llm(prompt)
+        prompt_meta = get_registry().provenance("single_shot").model_dump()
+        prompt = get_registry().render("single_shot", params)
+        raw_response = await self._call_llm(prompt, prompt_meta=prompt_meta)
         code = strip_markdown_fences(raw_response)
         self._iteration_codes = [code]
         self._artifacts["prompt"] = prompt
+        self._artifacts["prompt_meta"] = prompt_meta
         self._artifacts["raw_response"] = raw_response
         self._artifacts["generated_code"] = code
 
@@ -102,7 +103,6 @@ class LLMFEMethod(BaseMethod):
         cols = ", ".join(X.columns)
 
         for i in range(self.n_features):
-            template = get_registry().get("iterative").system
             params = LLMFEIterativeParams(
                 columns=cols,
                 task=task,
@@ -110,12 +110,14 @@ class LLMFEMethod(BaseMethod):
                 iteration=i + 1,
                 existing_features=", ".join(cumulative_cols) if cumulative_cols else "none",
             )
-            prompt = params.render(template)
-            raw_response = await self._call_llm(prompt)
+            prompt_meta = get_registry().provenance("iterative").model_dump()
+            prompt = get_registry().render("iterative", params)
+            raw_response = await self._call_llm(prompt, prompt_meta=prompt_meta)
             code_block = strip_markdown_fences(raw_response)
             iteration_record: dict[str, Any] = {
                 "iteration": i,
                 "prompt": prompt,
+                "prompt_meta": prompt_meta,
                 "raw_response": raw_response,
                 "generated_code": code_block,
             }
@@ -171,10 +173,15 @@ class LLMFEMethod(BaseMethod):
     def provenance_records(self) -> list[dict[str, Any]]:
         return self._iterative_provenance_records("llmfe")
 
-    async def _call_llm(self, prompt: str) -> str:
+    async def _call_llm(
+        self,
+        prompt: str,
+        prompt_meta: dict[str, Any] | None = None,
+    ) -> str:
         response = await self.llm_client.complete(
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=2048,
+            prompt_meta=prompt_meta,
         )
         return response.content.strip()

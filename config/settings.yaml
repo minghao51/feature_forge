@@ -1,21 +1,51 @@
 # Default settings for feature_forge.
 # Override via environment variables (FF_* prefix) or init args.
-# Secrets are managed in .env via dotenvx — this file is committed in plaintext.
+# Secrets belong in a local, gitignored .env — this file is committed in plaintext.
 
 task: "classification"
 metric: "auc"
 n_rounds: 4
-min_effective: 2
+max_selected_features: 2
 random_state: 42
+intel_acceleration: true
+
+dataflow:
+  # Hamilton is the sole execution engine (ADR 0016 removed the legacy
+  # imperative engine). A "legacy" value is rejected with migration guidance.
+  engine: "hamilton"
+  artifact_root: "experiments/artifacts"
+  cache:
+    enabled: true
+    log_to_file: false
+    # Optional retention limits; null keeps entries until explicit cache GC.
+    max_age_days: null
+    max_size_mb: null
+    telemetry_max_events: 10000
+
+execution:
+  # Outer scheduler failure policy (ADR 0017 / plan 22). "continue" keeps
+  # scheduling every case despite failed cases; "fail_fast" stops scheduling
+  # new cases after the first terminal failed case result. In-flight work
+  # always finishes; this is never a hard kill. Per-run override:
+  # ExperimentalPlatform.run(failure_policy=..., cancellation_token=...)
+  # wins for that invocation without mutating these settings. Docs:
+  # docs/operations.md ("Execution failure policy and cancellation").
+  failure_policy: "continue"
 
 llm:
-  model: "deepseek-chat"
-  base_url: "https://api.deepseek.com"
+  # OpenCode Go subscription backend (OpenAI-compatible gateway).
+  # Model pool + value caps ($12/5h, $30/wk, $60/mo): https://opencode.ai/docs/go/
+  # To switch back to DeepSeek direct: provider "deepseek",
+  # model "deepseek-chat", base_url "https://api.deepseek.com".
+  provider: "openai"
+  model: "hy3"
+  base_url: "https://opencode.ai/zen/go/v1"
   temperature: 0.2
   max_tokens: 32768
   agent_max_tokens: 8192
   codegen_max_tokens: 16384
   cache_responses: true
+  cache_dir: "memory_files/llm_cache"
   max_concurrent_calls: 3
   thinking_enabled: true
   reasoning_effort: "medium"
@@ -35,3 +65,5 @@ memory:
 evaluation:
   cv_folds: 5
   feature_eval_backend: "threading"
+  # RLIMIT_AS cap for the sandbox worker; must exceed pandas+pyarrow VSZ (~1 GB).
+  sandbox_max_memory_mb: 2048

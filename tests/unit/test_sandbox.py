@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -19,51 +22,57 @@ from feature_forge.exceptions import CodeExecutionError, SandboxValidationError
 class TestToParquetSafe:
     """Cover _to_parquet_safe edge cases (lines 34-69)."""
 
-    def test_categorical_interval_dtype(self):
+    def test_categorical_interval_dtype(self) -> None:
         intervals = pd.IntervalIndex.from_breaks([0, 5, 10])
         cats = pd.Categorical(intervals)
         df = pd.DataFrame({"x": cats})
         result = _to_parquet_safe(df)
         assert result["x"].dtype == float
 
-    def test_categorical_with_str_conversion(self):
+    def test_categorical_with_str_conversion(self) -> None:
         cats = pd.Categorical(["a", "b", "c"])
         df = pd.DataFrame({"x": cats})
         result = _to_parquet_safe(df)
         assert result["x"].dtype == object
 
-    def test_object_column_numeric_coercion(self):
+    def test_object_column_numeric_coercion(self) -> None:
         df = pd.DataFrame({"x": ["1", "2", "3"]})
         result = _to_parquet_safe(df)
-        assert np.issubdtype(result["x"].dtype, np.number)
+        # _to_parquet_safe only produces numpy dtypes here, but pandas-stubs
+        # types Series.dtype as a numpy/extension union that cannot be narrowed.
+        assert np.issubdtype(cast("np.dtype[Any]", result["x"].dtype), np.number)
 
-    def test_object_column_all_strings(self):
+    def test_object_column_all_strings(self) -> None:
         df = pd.DataFrame({"x": ["hello", "world"]})
         result = _to_parquet_safe(df)
         assert result["x"].dtype == object
 
-    def test_extension_dtype_passthrough(self):
+    def test_extension_dtype_passthrough(self) -> None:
         s = pd.Series([1, 2, 3], dtype=pd.Int64Dtype())
         df = pd.DataFrame({"x": s})
         result = _to_parquet_safe(df)
         assert "x" in result.columns
 
-    def test_non_numeric_bool_preserved(self):
+    def test_non_numeric_bool_preserved(self) -> None:
         df = pd.DataFrame({"x": [True, False, True]})
         result = _to_parquet_safe(df)
         assert result["x"].dtype == bool
 
-    def test_mixed_object_column(self):
+    def test_mixed_object_column(self) -> None:
         df = pd.DataFrame({"x": [1, "two", 3.0]})
         result = _to_parquet_safe(df)
-        assert np.issubdtype(result["x"].dtype, np.number) or result["x"].dtype == object
+        # See test_object_column_numeric_coercion for the cast rationale.
+        assert (
+            np.issubdtype(cast("np.dtype[Any]", result["x"].dtype), np.number)
+            or result["x"].dtype == object
+        )
 
-    def test_series_with_only_nan_after_numeric(self):
+    def test_series_with_only_nan_after_numeric(self) -> None:
         df = pd.DataFrame({"x": ["nan", "nan", "nan"]})
         result = _to_parquet_safe(df)
         assert pd.api.types.is_string_dtype(result["x"].dtype) or result["x"].isna().all()
 
-    def test_numeric_column_passthrough(self):
+    def test_numeric_column_passthrough(self) -> None:
         df = pd.DataFrame({"x": [1.0, 2.0, 3.0]})
         result = _to_parquet_safe(df)
         assert result["x"].dtype == float
@@ -72,14 +81,14 @@ class TestToParquetSafe:
 class TestApplyResourceLimits:
     """Cover _apply_resource_limits edge cases (lines 317-334)."""
 
-    def _inject_mock_resource(self):
+    def _inject_mock_resource(self) -> Callable[[int], tuple[None, MagicMock]]:
         import sys
 
         mock_resource = MagicMock()
         mock_resource.RLIMIT_AS = 0
         mock_resource.getrlimit.return_value = (1024 * 1024 * 1024, 1024 * 1024 * 1024)
 
-        def _wrapper_fn(max_memory_mb):
+        def _wrapper_fn(max_memory_mb: int) -> tuple[None, MagicMock]:
             old = sys.modules.get("resource")
             sys.modules["resource"] = mock_resource
             import importlib
@@ -89,11 +98,12 @@ class TestApplyResourceLimits:
 
             if old is not None:
                 sys.modules["resource"] = old
-            return fn(max_memory_mb), mock_resource
+            fn(max_memory_mb)
+            return None, mock_resource
 
         return _wrapper_fn
 
-    def test_sets_rlimit(self):
+    def test_sets_rlimit(self) -> None:
         mock_resource = MagicMock()
         mock_resource.RLIMIT_AS = 0
         mock_resource.getrlimit.return_value = (1024 * 1024 * 1024, 1024 * 1024 * 1024)
@@ -112,7 +122,7 @@ class TestApplyResourceLimits:
 
         mock_resource.setrlimit.assert_called_once()
 
-    def test_capped_by_hard_limit(self):
+    def test_capped_by_hard_limit(self) -> None:
         import sys
 
         mock_resource = MagicMock()
@@ -130,7 +140,7 @@ class TestApplyResourceLimits:
         args = mock_resource.setrlimit.call_args[0]
         assert args[1][0] == 64 * 1024 * 1024
 
-    def test_capped_by_soft_limit(self):
+    def test_capped_by_soft_limit(self) -> None:
         import sys
 
         mock_resource = MagicMock()
@@ -148,7 +158,7 @@ class TestApplyResourceLimits:
         args = mock_resource.setrlimit.call_args[0]
         assert args[1][0] == 32 * 1024 * 1024
 
-    def test_zero_memory_skips(self):
+    def test_zero_memory_skips(self) -> None:
         import sys
 
         mock_resource = MagicMock()
@@ -164,16 +174,36 @@ class TestApplyResourceLimits:
                 del sys.modules["resource"]
         mock_resource.setrlimit.assert_not_called()
 
-    def test_import_fallback_no_error(self):
-        result = _apply_resource_limits(max_memory_mb=128)
-        assert result is None
+    def test_import_fallback_no_error(self) -> None:
+        """Real (unmocked) ``_apply_resource_limits`` completes without error.
+
+        Runs in a subprocess: setting RLIMIT_AS inside this process would
+        shrink it below its own pandas/pyarrow VSZ and break every later
+        allocation, even when restored.
+        """
+        import subprocess
+        import sys
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "from feature_forge.evaluation.sandbox import _apply_resource_limits; "
+                "assert _apply_resource_limits(max_memory_mb=128) is None",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
 
 
 class TestSandboxExecutorEdgeCases:
     """Cover sandbox executor edge paths."""
 
-    def test_worker_non_dataframe_return(self):
-        executor = SandboxedExecutor(timeout_seconds=2.0)
+    def test_worker_non_dataframe_return(self) -> None:
+        executor = SandboxedExecutor(timeout_seconds=5.0)
         code = """
 def generate_features(df):
     return [1, 2, 3]
@@ -181,30 +211,30 @@ def generate_features(df):
         with pytest.raises(CodeExecutionError, match="must return a DataFrame"):
             executor.execute(code, pd.DataFrame({"a": [1, 2, 3]}))
 
-    def test_forbidden_name_ref_expression(self):
+    def test_forbidden_name_ref_expression(self) -> None:
         executor = SandboxedExecutor()
         code = "__import__\ndef generate_features(df): return df"
         with pytest.raises(SandboxValidationError, match="Forbidden name reference"):
             executor.execute(code, pd.DataFrame())
 
-    def test_forbidden_import_from(self):
+    def test_forbidden_import_from(self) -> None:
         executor = SandboxedExecutor()
         code = "from os import path\ndef generate_features(df): return df"
         with pytest.raises(SandboxValidationError, match="Import from not allowed"):
             executor.execute(code, pd.DataFrame())
 
-    def test_forbidden_name_ref(self):
+    def test_forbidden_name_ref(self) -> None:
         executor = SandboxedExecutor()
         code = "x = open\ndef generate_features(df): return df"
         with pytest.raises(SandboxValidationError, match="Forbidden name reference"):
             executor.execute(code, pd.DataFrame())
 
-    def test_execute_invalid_syntax_during_parse(self):
+    def test_execute_invalid_syntax_during_parse(self) -> None:
         executor = SandboxedExecutor()
         with pytest.raises(CodeExecutionError, match="Invalid syntax"):
             executor.execute("def generate_features(df", pd.DataFrame())
 
-    def test_blocked_file_io_api_usage(self):
+    def test_blocked_file_io_api_usage(self) -> None:
         executor = SandboxedExecutor()
         code = """
 def generate_features(df):
@@ -215,7 +245,7 @@ def generate_features(df):
         with pytest.raises(SandboxValidationError, match="Blocked file I/O API usage"):
             executor.execute(code, pd.DataFrame({"a": [1, 2, 3]}))
 
-    def test_blocked_network_api_usage(self):
+    def test_blocked_network_api_usage(self) -> None:
         executor = SandboxedExecutor()
         code = """
 def generate_features(df):
@@ -225,14 +255,14 @@ def generate_features(df):
         with pytest.raises(SandboxValidationError, match="Blocked network API usage"):
             executor.execute(code, pd.DataFrame({"a": [1, 2, 3]}))
 
-    def test_missing_generate_features_in_worker(self):
-        executor = SandboxedExecutor(timeout_seconds=2.0)
+    def test_missing_generate_features_in_worker(self) -> None:
+        executor = SandboxedExecutor(timeout_seconds=5.0)
         code = "x = 42"
         with pytest.raises(CodeExecutionError, match="must define"):
             executor.execute(code, pd.DataFrame({"a": [1]}))
 
-    def test_temp_file_cleanup(self):
-        executor = SandboxedExecutor(timeout_seconds=2.0)
+    def test_temp_file_cleanup(self) -> None:
+        executor = SandboxedExecutor(timeout_seconds=5.0)
         code = """
 def generate_features(df):
     result = df.copy()
@@ -248,19 +278,19 @@ def generate_features(df):
 class TestParseAndValidate:
     """Cover parse_and_validate edge paths."""
 
-    def test_blocks_regular_import_not_allowed(self):
+    def test_blocks_regular_import_not_allowed(self) -> None:
         executor = SandboxedExecutor()
         code = "import os\ndef generate_features(df): return df"
         with pytest.raises(SandboxValidationError, match="Import not allowed"):
             executor.execute(code, pd.DataFrame())
 
-    def test_allows_regular_import_allowed(self):
+    def test_allows_regular_import_allowed(self) -> None:
         executor = SandboxedExecutor()
         code = "import math\ndef generate_features(df): return df"
         result = executor.execute(code, pd.DataFrame({"a": [1.0]}))
         assert isinstance(result, pd.DataFrame)
 
-    def test_blocks_dunder_attribute_access(self):
+    def test_blocks_dunder_attribute_access(self) -> None:
         executor = SandboxedExecutor()
         code = """
 def generate_features(df):
@@ -270,7 +300,7 @@ def generate_features(df):
         with pytest.raises(SandboxValidationError, match="Forbidden dunder attribute"):
             executor.execute(code, pd.DataFrame({"a": [1]}))
 
-    def test_allows_import_from_allowed(self):
+    def test_allows_import_from_allowed(self) -> None:
         executor = SandboxedExecutor()
         code = "from math import sqrt\ndef generate_features(df): return df"
         result = executor.execute(code, pd.DataFrame({"a": [1.0]}))
@@ -280,7 +310,7 @@ def generate_features(df):
 class TestExecuteFullPath:
     """Cover the full execute() success path with metadata assertions."""
 
-    def test_success_path_returns_features(self):
+    def test_success_path_returns_features(self) -> None:
         executor = SandboxedExecutor(timeout_seconds=5.0)
         code = """
 def generate_features(df):
@@ -293,7 +323,7 @@ def generate_features(df):
         assert list(result["double"]) == [2.0, 4.0, 6.0]
         assert len(result) == 3
 
-    def test_success_path_preserves_index(self):
+    def test_success_path_preserves_index(self) -> None:
         executor = SandboxedExecutor(timeout_seconds=5.0)
         code = """
 def generate_features(df):
@@ -306,7 +336,7 @@ def generate_features(df):
         assert list(result.index) == [10, 20]
         assert list(result["sum"]) == [11.0, 22.0]
 
-    def test_parquet_output_valid(self, tmp_path):
+    def test_parquet_output_valid(self, tmp_path: Path) -> None:
         executor = SandboxedExecutor(timeout_seconds=5.0)
         code = """
 def generate_features(df):

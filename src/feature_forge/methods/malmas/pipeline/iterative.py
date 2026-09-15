@@ -46,6 +46,7 @@ class BaseIterativePipeline:
         evaluator: CVEvaluator | None = None,
         sandbox: SandboxedExecutor | None = None,
         code_generator: CodeGenerator | None = None,
+        warm_start: bool = False,
     ) -> None:
         self.config = config
         self.llm_client = llm_client
@@ -59,6 +60,7 @@ class BaseIterativePipeline:
         )
         self.all_feature_codes: list[str] = []
         self.round_artifacts: list[dict[str, Any]] = []
+        self.warm_start = warm_start
 
     async def _select_agents(
         self,
@@ -88,6 +90,9 @@ class BaseIterativePipeline:
     def _strategy_label(self) -> str:
         return "base"
 
+    def _reset_learned_state(self) -> None:
+        """Reset state that must not cross normal fit boundaries."""
+
     async def run(
         self,
         X_train: pd.DataFrame,
@@ -98,6 +103,8 @@ class BaseIterativePipeline:
     ) -> dict[str, Any]:
         self.round_artifacts = []
         self.all_feature_codes = []
+        if not self.warm_start:
+            self._reset_learned_state()
 
         iterative_t0 = time.perf_counter()
         logger.info(
@@ -125,11 +132,8 @@ class BaseIterativePipeline:
 
             agents: list[Agent] = []
             for name in selected_names:
-                try:
-                    agent_cls = AgentRegistry.get_agent(name)
-                    agents.append(agent_cls(self.config, self.llm_client))  # type: ignore[call-arg,arg-type]
-                except ValueError:
-                    logger.warning("unknown_agent_skipped", agent=name)
+                agent_cls = AgentRegistry.get_agent(name)
+                agents.append(agent_cls(self.config, self.llm_client))
 
             logger.info(
                 "agents_selected",
@@ -166,8 +170,10 @@ class BaseIterativePipeline:
                     all_agent_gains[agent.name] = []
                 all_agent_gains[agent.name].append(agent_gain_df)
 
-            if core_results.generated_code:
-                self.all_feature_codes.append(core_results.generated_code)
+            round_codes = core_results.generated_codes or (
+                [core_results.generated_code] if core_results.generated_code else []
+            )
+            self.all_feature_codes.extend(round_codes)
 
             top_train = core_results.top_features_train
             top_test = core_results.top_features_test
@@ -194,6 +200,9 @@ class BaseIterativePipeline:
                 {
                     "round": round_idx + 1,
                     "generated_code": core_results.generated_code,
+                    "generated_codes": round_codes,
+                    "code_features": core_results.code_features,
+                    "feature_failures": core_results.feature_failures,
                     "all_features_train": core_results.all_features_train,
                     "all_features_test": core_results.all_features_test,
                     "selected_features_train": top_train,
@@ -259,6 +268,7 @@ class IterativePipeline(BaseIterativePipeline):
         sandbox: SandboxedExecutor | None = None,
         code_generator: CodeGenerator | None = None,
         memory_dir: str | None = None,
+        warm_start: bool = False,
     ) -> None:
         super().__init__(
             config,
@@ -267,16 +277,19 @@ class IterativePipeline(BaseIterativePipeline):
             evaluator=evaluator,
             sandbox=sandbox,
             code_generator=code_generator,
+            warm_start=warm_start,
         )
         self.router = router or RouterAgent(config, llm_client)
-        self.memory_dir = memory_dir or str(
-            config.memory.persistence_dir or "memory_files/agent_memories"
-        )
+        self.memory_dir = memory_dir or str(config.memory.persistence_dir)
         self.memories: dict[str, AgentMemory] = {}
 
     @property
     def _strategy_label(self) -> str:
         return self.router.strategy
+
+    def _reset_learned_state(self) -> None:
+        self.memories = {}
+        self.router.reset_state()
 
     async def _select_agents(
         self,
@@ -329,7 +342,7 @@ class IterativePipeline(BaseIterativePipeline):
             description=spec.logic,
             round_idx=round_idx,
         )
-        effective = gain > 0
+        effective = AgentMemory.metric_is_improvement(metric, gain)
         memory.record_feedback(
             feature_name=spec.name,
             metric=metric,
@@ -370,7 +383,11 @@ class IterativePipeline(BaseIterativePipeline):
                     )
             memory.save()
             if not agent_gain_df.empty:
-                self.router.update_performance(agent.name, agent_gain_df["gain"].mean())
+                raw_gain = float(agent_gain_df["gain"].mean())
+                self.router.update_performance(
+                    agent.name,
+                    self.core._improvement_value(raw_gain),
+                )
 
     def _get_memory(self, agent_name: str) -> AgentMemory:
         if agent_name not in self.memories:
@@ -381,6 +398,7 @@ class IterativePipeline(BaseIterativePipeline):
                 agent_name,
                 path,
                 max_size=self.config.memory.max_size,
+                load_existing=self.warm_start,
             )
             logger.debug("agent_memory_initialized", agent=agent_name, path=path)
         return self.memories[agent_name]

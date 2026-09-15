@@ -3,73 +3,26 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from unittest.mock import MagicMock
 
-import pandas as pd
+import pytest
 
 from feature_forge.config import Settings
-from feature_forge.experiment.case_executor import (
-    CaseComputation,
-    CaseComputationInput,
-    ExperimentCaseExecutor,
+from feature_forge.contracts import (
+    CaseExecutionPlan,
+    Layer,
+    ManifestRef,
+    StageDisposition,
+    StageExecution,
 )
 from feature_forge.experiment.execution import (
+    CaseComputationInput,
     ExperimentCase,
     ExperimentResult,
     ProcessPoolExecutionAdapter,
     SequentialExecutionAdapter,
 )
-from feature_forge.experiment.tracker import NoOpTracker
-from feature_forge.methods.base import BaseMethod
-
-
-class DummyMethod(BaseMethod):
-    """Simple deterministic method for seam tests."""
-
-    def __init__(self, **kwargs: object) -> None:
-        super().__init__(name="dummy")
-
-    def fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> DummyMethod:
-        return self
-
-    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        out = pd.DataFrame(index=X.index)
-        out["f_dummy"] = 1.0
-        return out
-
-
-class SpyTracker(NoOpTracker):
-    """Tracker spy for asserting executor side effects."""
-
-    def __init__(self) -> None:
-        super().__init__(project="test")
-        self.inits = 0
-        self.finishes = 0
-        self.metrics_logs = 0
-
-    def init_run(self, run_name: str, config: dict[str, object]) -> None:
-        self.inits += 1
-
-    def log_metrics(self, metrics: dict[str, float], step: int | None = None) -> None:
-        self.metrics_logs += 1
-
-    def finish(self) -> None:
-        self.finishes += 1
-
-
-def _sample_dataset() -> dict[str, object]:
-    train = pd.DataFrame(
-        {
-            "a": [1, 2, 3, 4, 5, 6],
-            "b": [2, 3, 4, 5, 6, 7],
-            "target": [0, 1, 0, 1, 0, 1],
-        }
-    )
-    return {
-        "train": train,
-        "test": pd.DataFrame(),
-        "target": "target",
-        "metadata": {"task": "classification"},
-    }
+from feature_forge.experiment.hamilton_executor import run_hamilton_case
 
 
 def pool_worker(case: ExperimentCase) -> ExperimentResult:
@@ -86,49 +39,7 @@ def pool_worker(case: ExperimentCase) -> ExperimentResult:
     )
 
 
-def test_case_executor_success_and_tracker_side_effects(monkeypatch):
-    monkeypatch.setattr(
-        "feature_forge.experiment.case_executor.DatasetRegistry.load",
-        lambda self, name: _sample_dataset(),
-    )
-    tracker = SpyTracker()
-    executor = ExperimentCaseExecutor(
-        settings=Settings(evaluation={"cv_folds": 2}),
-        tracker=tracker,
-        extra_methods={"dummy": DummyMethod},
-    )
-    case = ExperimentCase(dataset="demo", method="dummy", model="random_forest", seed=42)
-    result = executor.execute(case)
-
-    assert result.error is None
-    assert result.dataset == "demo"
-    assert result.method == "dummy"
-    assert tracker.inits == 1
-    assert tracker.finishes == 1
-    assert tracker.metrics_logs == 1
-
-
-def test_case_executor_error_semantics(monkeypatch):
-    monkeypatch.setattr(
-        "feature_forge.experiment.case_executor.DatasetRegistry.load",
-        lambda self, name: {"train": pd.DataFrame({"x": [1, 2]}), "target": None},
-    )
-    tracker = SpyTracker()
-    executor = ExperimentCaseExecutor(
-        settings=Settings(evaluation={"cv_folds": 2}),
-        tracker=tracker,
-        extra_methods={"dummy": DummyMethod},
-    )
-    case = ExperimentCase(dataset="broken", method="dummy", model="random_forest", seed=7)
-    result = executor.execute(case)
-
-    assert result.error is not None
-    assert "no target column" in result.error
-    assert tracker.inits == 1
-    assert tracker.finishes == 1
-
-
-def test_execution_backend_semantic_parity_seq_vs_pool():
+def test_execution_backend_semantic_parity_seq_vs_pool() -> None:
     cases = [
         ExperimentCase(dataset="d1", method="m1", model="xgboost", seed=1),
         ExperimentCase(dataset="d2", method="m2", model="xgboost", seed=2),
@@ -144,11 +55,72 @@ def test_execution_backend_semantic_parity_seq_vs_pool():
     assert seq_sorted == par_sorted
 
 
-def test_case_computation_input_is_serializable_shape():
+def test_case_computation_input_is_serializable_shape() -> None:
     payload = CaseComputationInput(
         case=ExperimentCase(dataset="d1", method="m1", model="xgboost", seed=1),
         settings_data=Settings().model_dump(),
     )
-    comp = CaseComputation(all_methods={})
-    result = comp.compute(payload)
-    assert result.error is not None
+    data = asdict(payload)
+    assert data["case"]["dataset"] == "d1"
+    assert data["settings_data"]["task"] == "classification"
+    assert data["dataset_overrides"] is None
+    assert data["method_overrides"] is None
+
+
+def test_run_hamilton_case_reconstructs_settings_and_executes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The process worker rebuilds settings from the serializable payload map."""
+    mock_executor = MagicMock()
+    mock_executor.plan_case.return_value = CaseExecutionPlan(
+        case_key="casekey",
+        attempt_id="attempt-1",
+        dataset="demo",
+        method="dummy",
+        model="xgboost",
+        unresolved_layers=list(Layer),
+    )
+    manifest_ref = ManifestRef(layer=Layer.BRONZE, run_id="attempt-1", sha256="a" * 64)
+    mock_executor.execute_case.return_value = ExperimentResult(
+        dataset="demo",
+        method="dummy",
+        model="xgboost",
+        seed=42,
+        cv_score=0.9,
+        gain=0.1,
+        baseline_score=0.8,
+        num_features_generated=1,
+        run_id="attempt-1",
+        case_fingerprint="casekey",
+        stages=[
+            StageExecution(
+                layer=Layer.BRONZE,
+                disposition=StageDisposition.EXECUTED,
+                manifest_ref=manifest_ref,
+                reuse_fingerprint="reuse",
+                layer_fingerprint="layerfp",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        "feature_forge.experiment.hamilton_executor.build_worker_local_hamilton_executor",
+        lambda settings, payload: mock_executor,
+    )
+    payload = CaseComputationInput(
+        case=ExperimentCase(
+            dataset="demo",
+            method="dummy",
+            model="xgboost",
+            seed=42,
+            case_key="casekey",
+            attempt_id="attempt-1",
+        ),
+        settings_data=Settings().model_dump(),
+    )
+    result = run_hamilton_case(payload)
+
+    mock_executor.execute_case.assert_called_once()
+    assert result.run_id == "attempt-1"
+    assert result.case_fingerprint == "casekey"
+    assert len(result.stages) == 1
+    assert result.stages[0].layer is Layer.BRONZE

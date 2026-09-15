@@ -17,7 +17,10 @@ X_test_enhanced = fe.transform(X_test)
 **Parameters:**
 - `config`: `Settings` instance (optional)
 - `llm_client`: `LLMClient` instance (optional)
-- `mode`: One of `'full'`, `'no_memory'`, `'no_router'`, or agent name
+- `mode`: One of `'full'`, `'no_memory'`, `'no_memory_static_router'`,
+  `'no_router'`, or a registered agent name. Unknown values fail before an LLM call.
+- `warm_start`: Reuse persisted MALMAS memory/router learning (`False` by default).
+  Normal repeated fits start from fresh learned state.
 
 **Methods:**
 - `fit(X, y)`: Run iterative feature engineering
@@ -35,6 +38,7 @@ from feature_forge.config import Settings
 
 settings = Settings()
 print(settings.llm.model)  # 'deepseek-chat'
+print(settings.max_selected_features)  # per-round selection cap
 ```
 
 **Environment variable examples:**
@@ -177,6 +181,8 @@ Entry-point discovery via `feature_forge.methods` group.
 - `discover()` → raw entry-point scan
 
 Built-in methods: `malmas`, `openfe`, `caafe`, `llmfe`, `malmus`
+(openfe requires the optional `openfe` extra:
+`pip install 'feature-forge[openfe]'`)
 
 ```python
 from feature_forge.methods import MethodRegistry
@@ -218,31 +224,20 @@ features = executor.execute(code, df)
 
 ## Experiment Harness
 
-### `ExperimentMatrix`
-
-Cartesian product experiment definitions.
+`ExperimentalPlatform` is the supported entry point for experiment matrices.
+The standalone `ExperimentMatrix` / `ExperimentRunner` classes were removed
+(see ADR 0006); matrix expansion is now built into `ExperimentalPlatform.run()`.
 
 ```python
-from feature_forge.experiment import ExperimentMatrix
+from feature_forge import ExperimentalPlatform
 
-matrix = (
-    ExperimentMatrix()
-    .datasets(["titanic"])
-    .methods({"malmas": ["full"], "openfe": ["openfe"]})
-    .seeds([0, 1, 2])
+platform = ExperimentalPlatform()
+results = platform.run(
+    datasets=["titanic"],
+    methods=["malmas", "openfe"],  # openfe needs the `openfe` extra
+    models=["random_forest"],
+    seeds=[0, 1, 2],
 )
-configs = matrix.generate()
-```
-
-### `ExperimentRunner`
-
-Execute experiment configurations.
-
-```python
-from feature_forge.experiment import ExperimentRunner, NoOpTracker
-
-runner = ExperimentRunner(tracker=NoOpTracker())
-results = runner.run(configs, experiment_fn)
 ```
 
 ### `Reporter`
@@ -267,12 +262,14 @@ platform = ExperimentalPlatform()
 results = platform.run(
     datasets=["titanic"],
     methods=["malmus", "caafe"],
-    models=["xgboost"],
+    models=["random_forest"],  # default when models=None
 )
 ```
 
 **Methods:**
-- `run(datasets, methods, models)` — Run experiments (param: `methods=`, not `baselines=`)
+- `run(datasets, methods, models)` — Run experiments (param: `methods=`, not `baselines=`); `models=None` defaults to the core-installed `random_forest`
+- `run(..., failure_policy=...)` — Optional per-run override of `settings.execution.failure_policy` (`"continue"` / `"fail_fast"`, ADR 0017). Under `fail_fast` the scheduler stops scheduling new cases after the first terminal failed result — identically on the sequential and process paths — and later cases are returned as typed cancelled results. The override wins only for that invocation, is recorded in tracker provenance, and never mutates the cached/global `Settings` instance.
+- `run(..., cancellation_token=...)` — Optional parent-process `CancellationToken` checked at case boundaries on both paths. A case in flight when cancellation arrives finishes with its real result; never-started cases come back as cancelled rows. See [Operations](operations.md#execution-failure-policy-and-cancellation) for the cooperative-cancellation model.
 - `register_method(name, cls)` — Register a custom method where `cls` is `type[BaseMethod]`
 - `list_methods()` — List available methods
 
@@ -283,8 +280,24 @@ Behavior notes:
   - `dataset`, `method`, `model`, `seed`
   - `cv_score`, `gain`, `baseline_score`, `num_features_generated`
   - `error` (nullable; set when case execution fails)
+  - `state` (additive, ADR 0017): `"succeeded"` / `"failed"` / `"cancelled"`. Every requested case yields exactly one row in original matrix order, including cancelled never-started cases. Cancelled rows carry no scores and no stage packages; their `error` holds the redacted cancellation record. The default run remains continue-on-error with unchanged row count/order.
 
 Result dict key is `method` (not `baseline`).
+
+Engine notes:
+- The default execution engine is Hamilton (`FF_DATAFLOW__ENGINE=hamilton`,
+  per ADR 0016, which supersedes ADR 0012). Each case runs through `HamiltonLayerExecutor`, which publishes
+  verified Bronze, Silver, Gold, and Platinum artifact packages under
+  `experiments/artifacts`.
+- The legacy imperative engine was removed per ADR 0016. Stale
+  `FF_DATAFLOW__ENGINE=legacy` / `dataflow.engine: legacy` configuration fails
+  fast with actionable migration guidance; the operational rollback path is a
+  package/version downgrade to the last compatibility release, not a runtime
+  engine switch.
+- Hamilton caching is enabled by default and is independent of the mandatory LLM
+  `DiskCache`. Cache deletion is safe — cases recompute from verified packages.
+  See [Operations](operations.md) for cache status, GC, clear, and artifact
+  list/verify commands.
 
 ### Execution Primitives
 
@@ -295,12 +308,21 @@ from feature_forge.experiment import (
     ExecutionBackend,
     SequentialExecutionAdapter,
     ProcessPoolExecutionAdapter,
-    ExperimentCaseExecutor,
 )
+from feature_forge.experiment.execution import CancellationToken
 ```
 
 - `ExperimentCase`: serializable run-unit dataclass.
 - `ExperimentResult`: normalized output dataclass (includes nullable `error`).
+  - `state`: explicit terminal state (`RunState.SUCCEEDED` / `FAILED` / `CANCELLED`); `None` keeps existing constructors back-compatible.
+  - `resolved_state`: the effective terminal state — explicit `state` when set; otherwise derived as `failed` when an `error` or `failure` record is present and `succeeded` otherwise. `cancelled` is only ever set explicitly, for cases that never started, and an already-running case is never reclassified as cancelled after producing a real success or failure. Public serialization (`ExperimentalPlatform.run()` rows) always surfaces the resolved value.
 - `ExecutionBackend`: backend seam interface.
 - `SequentialExecutionAdapter` / `ProcessPoolExecutionAdapter`: concrete execution adapters.
-- `ExperimentCaseExecutor`: orchestrates per-case execution with tracker side effects.
+  - `ProcessPoolExecutionAdapter.run(...)` uses a **bounded submission window** of at most `max_workers` futures, refilled only while the failure policy and token permit (ADR 0017, plan 22 §2.5). After a stop condition nothing new is submitted; queued futures are cancelled with `Future.cancel()` and, with the never-submitted tail, become typed cancelled results. Already-running workers finish and keep their real results — bounded cooperative cancellation, not hard termination. Original order and cardinality are preserved regardless of completion order, and the executor is shut down and joined before returning.
+- `CancellationToken`: parent-process cooperative cancellation signal (import from `feature_forge.experiment.execution`).
+  - `cancel(reason: str = "operator_request") -> None` — thread-safe and idempotent; the first reason wins.
+  - `is_cancelled() -> bool` — whether cancellation was requested.
+  - `reason: str | None` — the winning reason, or `None`.
+  - `CancellationToken.cancelled(reason=...)` classmethod builds an already-cancelled token.
+  - Parent-process only: the token is never serialized into `CaseComputationInput` and never crosses the process seam into a Hamilton DAG, sandbox, provider call, or cache key. Workers observe cancellation only through results returned by the parent.
+  - A cancelled case carries a typed `FailureRecord` with `failure_class="cancelled"` (stable, non-sensitive `error_type` `"CaseCancelled"`), the parent-allocated case/attempt identity, no stage packages, and no fabricated score. Records are redacted: category, stable error type, and case identity only — never exception text, prompts, feature values, inputs, or secrets. One redacted `case_cancelled` lifecycle event is journaled per never-started case.

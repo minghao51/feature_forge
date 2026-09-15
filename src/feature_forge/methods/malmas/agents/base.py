@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 import time
+import weakref
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from hashlib import sha256
@@ -159,7 +160,9 @@ class BaseFeatureAgent(Agent):
         ]
     ] = OrderedDict()
     _CACHE_MAX_SIZE: ClassVar[int] = 64
-    _fingerprint_cache: ClassVar[dict[tuple[int, int, int], str]] = {}
+    _fingerprint_cache: ClassVar[
+        dict[tuple[int, int, int], tuple[weakref.ref[pd.DataFrame], str]]
+    ] = {}
     _column_stats_cache: ClassVar[dict[tuple[str, str, int, int], dict[str, Any]]] = {}
 
     @classmethod
@@ -174,8 +177,12 @@ class BaseFeatureAgent(Agent):
             return "empty"
 
         cache_key = (id(X), X.shape[0], X.shape[1])
-        if cache_key in BaseFeatureAgent._fingerprint_cache:
-            return BaseFeatureAgent._fingerprint_cache[cache_key]
+        cached = BaseFeatureAgent._fingerprint_cache.get(cache_key)
+        # Validate object identity via weakref: after gc, a new DataFrame can
+        # reuse a dead object's id() and must not inherit its fingerprint
+        # (observed as a cross-test flake under random pytest ordering).
+        if cached is not None and cached[0]() is X:
+            return cached[1]
 
         sample = X.head(256)
         try:
@@ -188,7 +195,7 @@ class BaseFeatureAgent(Agent):
         if len(BaseFeatureAgent._fingerprint_cache) > 64:
             BaseFeatureAgent._fingerprint_cache.clear()
 
-        BaseFeatureAgent._fingerprint_cache[cache_key] = fp
+        BaseFeatureAgent._fingerprint_cache[cache_key] = (weakref.ref(X), fp)
         return fp
 
     @staticmethod
@@ -257,6 +264,7 @@ class BaseFeatureAgent(Agent):
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": user_prompt},
         ]
+        prompt_meta = get_registry().provenance(self.prompt_key).model_dump()
         logger.info(
             "agent_generate_start",
             agent=self.name,
@@ -270,6 +278,7 @@ class BaseFeatureAgent(Agent):
                 schema_description=_FEATURE_JSON_SCHEMA_DESC,
                 temperature=self.config.llm.temperature,
                 max_tokens=self.config.llm.agent_max_tokens,
+                prompt_meta=prompt_meta,
             )
             if not isinstance(response, (dict, list, str)):
                 raise AgentError(
@@ -377,14 +386,19 @@ class AgentRegistry:
 
     ENTRY_POINT_GROUP = "feature_forge.methods.malmas.agents"
 
-    _AGENT_CACHE: ClassVar[dict[str, type[Agent]]] = {}
+    _AGENT_CACHE: ClassVar[dict[str, type[BaseFeatureAgent]]] = {}
 
     @classmethod
-    def discover(cls) -> dict[str, type[Agent]]:
+    def discover(cls) -> dict[str, type[BaseFeatureAgent]]:
         """Discover all registered agents from entry points."""
         from feature_forge.evaluation.registry_utils import discover_entry_points
 
-        return discover_entry_points(cls.ENTRY_POINT_GROUP)  # type: ignore[return-value]
+        discovered = discover_entry_points(cls.ENTRY_POINT_GROUP)
+        return {
+            name: agent
+            for name, agent in discovered.items()
+            if isinstance(agent, type) and issubclass(agent, BaseFeatureAgent)
+        }
 
     _BUILTIN_PROMPT_AGENTS: ClassVar[dict[str, str]] = {
         "unary": "unary",
@@ -396,16 +410,26 @@ class AgentRegistry:
     }
 
     @classmethod
-    def get_builtin_agents(cls) -> dict[str, type[Agent]]:
-        return {name: cls.get_agent(name) for name in cls._BUILTIN_PROMPT_AGENTS}
+    def get_builtin_agents(cls) -> dict[str, type[BaseFeatureAgent]]:
+        return {
+            name: _make_prompt_agent(name, prompt)
+            for name, prompt in cls._BUILTIN_PROMPT_AGENTS.items()
+        }
 
     @classmethod
-    def get_agent(cls, name: str) -> type[Agent]:
-        if name not in cls._BUILTIN_PROMPT_AGENTS:
-            raise ValueError(f"Unknown built-in agent: {name}")
-        if name not in cls._AGENT_CACHE:
-            cls._AGENT_CACHE[name] = _make_prompt_agent(name, cls._BUILTIN_PROMPT_AGENTS[name])
-        return cls._AGENT_CACHE[name]
+    def get_agent(cls, name: str) -> type[BaseFeatureAgent]:
+        if name in cls._AGENT_CACHE:
+            return cls._AGENT_CACHE[name]
+        if name in cls._BUILTIN_PROMPT_AGENTS:
+            agent = _make_prompt_agent(name, cls._BUILTIN_PROMPT_AGENTS[name])
+        else:
+            discovered = cls.discover()
+            if name not in discovered:
+                available = sorted([*cls._BUILTIN_PROMPT_AGENTS, *discovered])
+                raise ValueError(f"Unknown agent {name!r}. Available: {available}")
+            agent = discovered[name]
+        cls._AGENT_CACHE[name] = agent
+        return agent
 
     @classmethod
     def builtin_agent_names(cls) -> list[str]:
@@ -414,6 +438,6 @@ class AgentRegistry:
     @classmethod
     def get_all_agents(cls) -> dict[str, type[Agent]]:
         """Return built-in + entry-point registered agents."""
-        agents = cls.get_builtin_agents()
+        agents: dict[str, type[Agent]] = dict(cls.get_builtin_agents())
         agents.update(cls.discover())
         return agents

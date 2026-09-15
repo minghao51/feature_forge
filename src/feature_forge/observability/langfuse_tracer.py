@@ -21,11 +21,23 @@ def _get_langfuse_observe() -> Callable[..., Any]:
 def trace_generation(name: str | None = None) -> Callable[..., Any]:
     """Decorator to trace LLM generation calls.
 
+    Passthrough when Langfuse credentials are absent: importing
+    ``langfuse.observe`` initializes a global client that prints
+    "Authentication error" on every traced call otherwise.
+
     Usage:
         @trace_generation(name="feature-plan")
         async def generate_plan(self, prompt):
             ...
     """
+    import os
+
+    if not (os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY")):
+
+        def _passthrough(fn: Callable[..., Any]) -> Callable[..., Any]:
+            return fn
+
+        return _passthrough
     observe = _get_langfuse_observe()
     return cast(
         Callable[..., Any],

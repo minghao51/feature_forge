@@ -335,12 +335,12 @@ The 6 specialized agents are based on the MALMAS agent taxonomy:
 
 | Agent | Specialization | Prompt File |
 |-------|---------------|-------------|
-| **Unary Feature** | Single-column transforms: log, sqrt, binning, encoding | `src/feature_forge/methods/malmas/prompts/unary.yaml` |
-| **Cross-Compositional** | Multi-column interactions: ratios, products, differences | `src/feature_forge/methods/malmas/prompts/cross_compositional.yaml` |
-| **Aggregation Construct** | GroupBy aggregations: mean/count/sum per category | `src/feature_forge/methods/malmas/prompts/aggregation.yaml` |
-| **Temporal Feature** | Date/time features: day-of-week, elapsed, cyclical encoding | `src/feature_forge/methods/malmas/prompts/temporal.yaml` |
-| **Local Transform** | Local numerical transforms: rolling, diff, lag | `src/feature_forge/methods/malmas/prompts/local_transform.yaml` |
-| **Local Pattern** | Distributional patterns: outlier flags, quantile ranks, z-scores | `src/feature_forge/methods/malmas/prompts/local_pattern.yaml` |
+| **Unary Feature** | Single-column transforms: log, sqrt, binning, encoding | `src/feature_forge/methods/malmas/prompts/unary.v1.yaml` |
+| **Cross-Compositional** | Multi-column interactions: ratios, products, differences | `src/feature_forge/methods/malmas/prompts/cross_compositional.v1.yaml` |
+| **Aggregation Construct** | GroupBy aggregations: mean/count/sum per category | `src/feature_forge/methods/malmas/prompts/aggregation.v1.yaml` |
+| **Temporal Feature** | Date/time features: day-of-week, elapsed, cyclical encoding | `src/feature_forge/methods/malmas/prompts/temporal.v1.yaml` |
+| **Local Transform** | Local numerical transforms: rolling, diff, lag | `src/feature_forge/methods/malmas/prompts/local_transform.v1.yaml` |
+| **Local Pattern** | Distributional patterns: outlier flags, quantile ranks, z-scores | `src/feature_forge/methods/malmas/prompts/local_pattern.v1.yaml` |
 
 Each agent:
 1. Receives dataset column metadata + memory context + positive/negative feature lists
@@ -465,12 +465,21 @@ Prompts are stored in each method's `prompts/*.yaml` package. Each YAML file has
 ### Prompt Model
 
 The `Prompt` Pydantic model validates prompt files:
-- `system: str` — Must be non-empty (validated)
+- `system: str` — Must be non-empty (validated); rendered with Jinja2 (`StrictUndefined`)
+- `user: str = ""` — Optional user-message template (chat-style prompts, rendered by `render_messages`)
 - `description: str = ""` — Optional metadata
+- `version: int` — Version resolved from the filename (`unary.v2.yaml` → 2)
+- `sha256: str` — Content hash over the `system`/`user` templates, computed at load
 
 ### PromptRegistry
 
-`PromptRegistry` provides lazy loading from the method-local prompts directory. It is accessed as a singleton via `get_registry()`.
+`PromptRegistry` loads **versioned** prompt files named `<name>.v<N>.yaml` from the method-local prompts directory (ADR 0009) and is accessed as a singleton via `get_registry()`. Key semantics:
+
+- A bare name resolves to the **highest version present** (latest wins): after adding `unary.v2.yaml`, `registry.get("unary")` returns v2.
+- An exact version can be pinned for reproducible reruns: `registry.get("unary", version=1)`.
+- Requesting a missing version raises `KeyError` listing the available versions.
+- `registry.provenance(name)` returns `PromptProvenance(prompt_name, prompt_version, prompt_sha256)`. Methods pass it as `prompt_meta=` to `LLMClient.complete/complete_json`, where it is recorded in the cache payload and on `llm_request`/`llm_cache_hit`/`llm_cache_miss`/`llm_response` log events — and never affects the cache key (the key already hashes the rendered messages).
+- Bumping a prompt means adding `name.v(N+1).yaml`; versioned files are never edited in place.
 
 ### Available Prompts
 
@@ -491,11 +500,14 @@ The `Prompt` Pydantic model validates prompt files:
 from feature_forge.methods.malmas.prompts import get_registry
 
 registry = get_registry()
-prompt = registry.get("unary")
-print(prompt.system)
+prompt = registry.get("unary")             # latest version
+pinned = registry.get("unary", version=1)  # exact version for reruns
+print(prompt.system, prompt.version)
+
+provenance = registry.provenance("unary")   # → prompt_meta for cache/logs
 ```
 
-> **Note:** Registries are method-scoped (for example, MALMAS prompts are loaded from `feature_forge.methods.malmas.prompts`).
+> **Note:** Registries are method-scoped (for example, MALMAS prompts are loaded from `feature_forge.methods.malmas.prompts`; agent-memory summaries live in `feature_forge.methods.malmas.memory.prompts`).
 
 ---
 

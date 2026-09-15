@@ -99,7 +99,7 @@ class TestCreateLLMClient:
         assert client.get_api_key() == "sk-secret-value"
 
     @pytest.mark.llm
-    def test_cache_wired_when_cache_responses_true(self) -> None:
+    def test_cache_wired_when_cache_responses_true(self, tmp_path: Path) -> None:
         from feature_forge.llm.cache import DiskCache
 
         config = LLMConfig(
@@ -107,10 +107,13 @@ class TestCreateLLMClient:
             provider="deepseek",
             api_key=SecretStr("sk-test"),
             cache_responses=True,
+            cache_dir=str(tmp_path / "cache"),
         )
         client = create_llm_client(config)
         assert isinstance(client._cache, DiskCache)
         assert client._cache.enabled is True
+        assert client._cache.cache_dir == tmp_path / "cache"
+        client.close()
 
     @pytest.mark.llm
     def test_cache_not_wired_when_cache_responses_false(self) -> None:
@@ -136,3 +139,20 @@ class TestCreateLLMClient:
         )
         client = create_llm_client(config, cache=explicit)
         assert client._cache is explicit
+
+    @pytest.mark.llm
+    def test_cache_dir_from_config(self, tmp_path: Path) -> None:
+        from feature_forge.llm.cache import DiskCache
+
+        cache_dir = tmp_path / "llm_cache"
+        config = LLMConfig(
+            model="deepseek-chat",
+            provider="deepseek",
+            api_key=SecretStr("sk-test"),
+            cache_responses=True,
+            cache_dir=str(cache_dir),
+        )
+        client = create_llm_client(config)
+        assert isinstance(client._cache, DiskCache)
+        assert client._cache.cache_dir == cache_dir
+        client.close()

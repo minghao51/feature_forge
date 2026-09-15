@@ -12,39 +12,39 @@ from feature_forge.data.registry import DatasetRegistry
 class TestDatasetRegistryDiscovery:
     """Verify DatasetRegistry handles entry point discovery."""
 
-    def test_builtin_datasets_available(self):
+    def test_builtin_datasets_available(self) -> None:
         registry = DatasetRegistry(sample_dir="/nonexistent")
         names = registry.list()
         assert "titanic" in names
         assert "house_prices" in names
 
-    def test_register_adds_dataset(self):
+    def test_register_adds_dataset(self) -> None:
         registry = DatasetRegistry(sample_dir="/nonexistent")
         registry.register("custom", {"source": "local", "target": "y"})
         assert "custom" in registry.list()
 
-    def test_info_returns_metadata(self):
+    def test_info_returns_metadata(self) -> None:
         registry = DatasetRegistry(sample_dir="/nonexistent")
         info = registry.info("titanic")
         assert info["target"] == "Survived"
         assert info["task"] == "classification"
 
-    def test_info_raises_on_unknown(self):
+    def test_info_raises_on_unknown(self) -> None:
         registry = DatasetRegistry(sample_dir="/nonexistent")
         with pytest.raises(KeyError):
             registry.info("nonexistent")
 
-    def test_list_returns_sorted(self):
+    def test_list_returns_sorted(self) -> None:
         registry = DatasetRegistry(sample_dir="/nonexistent")
         names = registry.list()
         assert names == sorted(names)
 
     @patch("importlib.metadata.entry_points")
-    def test_entry_point_discovery_merges_with_builtin(self, mock_entry_points):
+    def test_entry_point_discovery_merges_with_builtin(self, mock_entry_points: MagicMock) -> None:
         mock_ep = MagicMock()
         mock_ep.name = "test_ep_dataset"
 
-        def dummy_loader():
+        def dummy_loader() -> dict[str, object]:
             return {"train": None, "test": None, "target": "y", "metadata": {}}
 
         mock_ep.load.return_value = dummy_loader
@@ -56,7 +56,7 @@ class TestDatasetRegistryDiscovery:
         assert "titanic" in names  # builtin still present
 
     @patch("importlib.metadata.entry_points")
-    def test_entry_point_does_not_override_builtin(self, mock_entry_points):
+    def test_entry_point_does_not_override_builtin(self, mock_entry_points: MagicMock) -> None:
         mock_ep = MagicMock()
         mock_ep.name = "titanic"
         mock_ep.load.return_value = dict
@@ -68,12 +68,14 @@ class TestDatasetRegistryDiscovery:
         assert info["source"] == "kaggle"
 
     @patch("importlib.metadata.entry_points")
-    def test_entry_point_metadata_failure_warns_and_retries(self, mock_entry_points):
+    def test_entry_point_metadata_failure_warns_and_retries(
+        self, mock_entry_points: MagicMock
+    ) -> None:
         mock_ep = MagicMock()
         mock_ep.name = "flaky_dataset"
-        state = {"calls": 0}
+        state: dict[str, int] = {"calls": 0}
 
-        def flaky_loader():
+        def flaky_loader() -> dict[str, object]:
             state["calls"] += 1
             if state["calls"] == 1:
                 raise RuntimeError("temporary metadata failure")
@@ -94,7 +96,7 @@ class TestDatasetRegistryDiscovery:
         assert state["calls"] == 2
 
     @patch("importlib.metadata.entry_points")
-    def test_entry_point_discovery_empty(self, mock_entry_points):
+    def test_entry_point_discovery_empty(self, mock_entry_points: MagicMock) -> None:
         mock_entry_points.return_value = []
         registry = DatasetRegistry(sample_dir="/nonexistent")
         names = registry.list()

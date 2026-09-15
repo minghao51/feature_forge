@@ -54,8 +54,7 @@ src/feature_forge/              # Main package
     mlflow_backend.py           # MLflowTracker
     factory.py                  # create_tracker_from_config()
     reporter.py                 # Markdown report generation
-    case_executor.py            # ExperimentCaseExecutor
-    execution.py                # Sequential + ProcessPool adapters
+    execution.py                # Sequential + ProcessPool adapters, case payload types
   observability/                # Logging and tracing
     structlog_config.py         # structlog setup (TTY pretty / JSON)
     langfuse_tracer.py          # Langfuse integration
@@ -172,7 +171,7 @@ experiments/                    # Experiment ablation directories
 - Agent class attribute `prompt_key` maps to YAML filename (without extension)
 
 ### Configuration Layering
-- Priority (highest → lowest): constructor args → env vars (`FF_*`) → `.env` (dotenvx) → `config/settings.yaml`
+- Priority (highest → lowest): constructor args → env vars (`FF_*`) → `.env` (local gitignored) → `config/settings.yaml`
 - `Settings.settings_customise_sources()` defines the priority chain
 - Sub-configs as nested `BaseModel`: `LLMConfig`, `TrackerConfig`, `RouterConfig`, `MemoryConfig`, `RetryConfig`, `EvaluationConfig`
 

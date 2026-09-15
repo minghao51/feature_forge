@@ -6,9 +6,13 @@ from pathlib import Path
 
 DOCS_TO_CHECK = [
     Path("README.md"),
+    Path("REPORT_LOG.md"),
+    Path("AGENTS.md"),
+    Path("docs/README.md"),
     Path("docs/index.md"),
     Path("docs/methods.md"),
-    Path("AGENTS.md"),
+    Path("docs/decisions/README.md"),
+    Path("docs/deferred-design.md"),
     Path(".planning/OVERVIEW.md"),
     Path(".planning/STYLE.md"),
     Path(".planning/STATE.md"),

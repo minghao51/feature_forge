@@ -50,6 +50,11 @@ class AnthropicProvider(LLMClient):
     def _json_mode_kwargs(self) -> dict[str, Any]:
         return {}
 
+    def _structured_kwargs(self, schema_wrapper: dict[str, Any]) -> dict[str, Any]:
+        # Anthropic has no response_format param; structured outputs rely on
+        # the injected schema instruction + pydantic validation + repair.
+        return {}
+
     async def _call_api(
         self,
         messages: list[dict[str, str]],

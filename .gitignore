@@ -96,7 +96,8 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-# .env — committed as encrypted by dotenvx (safe to commit)
+# .env — local secrets, never committed (was dotenvx-encrypted until 2026-09-05; private key lost in machine migration)
+.env
 .env.keys
 .env.local
 .env.*.keys
@@ -139,6 +140,9 @@ Thumbs.db
 # feature_forge runtime
 memory_files/
 data/raw/
+experiments/**/artifacts/
+experiments/**/inputs/
+experiments/**/cache/
 *.pkl
 *.dill
 *.feather

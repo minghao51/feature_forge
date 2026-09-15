@@ -10,6 +10,7 @@ import pandas as pd
 
 from feature_forge.artifacts.base import ArtifactConfig, ArtifactExporter
 from feature_forge.artifacts.storage import DataFrameStorage
+from feature_forge.evaluation.metrics import MetricDirection, get_metric_direction
 from feature_forge.observability.structlog_config import get_logger
 
 if TYPE_CHECKING:
@@ -108,7 +109,7 @@ class BaseMethod(ArtifactExporter):
                         "method": method_name,
                         "iteration": it.get("iteration"),
                         "gain": gain,
-                        "kept": gain > 0,
+                        "kept": self._gain_is_improvement(gain),
                         "code": it.get("generated_code", ""),
                     }
                 )
@@ -131,6 +132,15 @@ class BaseMethod(ArtifactExporter):
                     }
                 )
         return records
+
+    def _gain_is_improvement(self, gain: float) -> bool:
+        evaluator = getattr(self, "evaluator", None)
+        check = getattr(type(evaluator), "is_improvement", None)
+        if callable(check):
+            return bool(check(evaluator, gain))
+        metric = getattr(getattr(evaluator, "config", None), "metric", "auc")
+        direction = get_metric_direction(str(metric))
+        return gain < 0 if direction is MetricDirection.MINIMIZE else gain > 0
 
     def _should_raise_on_feature_error(self) -> bool:
         return (
@@ -163,7 +173,7 @@ class BaseMethod(ArtifactExporter):
                 X, y, new_features, baseline_score=baseline_score
             )
             for col, gain in all_gains.items():
-                if gain > 0:
+                if self._gain_is_improvement(gain):
                     kept_features[col] = new_features[col].values
                     kept_gains[col] = gain
                     cumulative_cols.append(col)

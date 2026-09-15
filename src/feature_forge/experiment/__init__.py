@@ -1,7 +1,7 @@
 """Experiment harness for feature_forge."""
 
-from feature_forge.experiment.case_executor import ExperimentCaseExecutor
 from feature_forge.experiment.execution import (
+    CaseComputationInput,
     ExecutionBackend,
     ExperimentCase,
     ExperimentResult,
@@ -9,22 +9,30 @@ from feature_forge.experiment.execution import (
     SequentialExecutionAdapter,
 )
 from feature_forge.experiment.factory import create_tracker_from_config
+from feature_forge.experiment.hamilton_executor import (
+    HamiltonLayerExecutor,
+    build_worker_local_hamilton_executor,
+    run_hamilton_case,
+)
 from feature_forge.experiment.mlflow_backend import MLflowTracker
 from feature_forge.experiment.reporter import Reporter
 from feature_forge.experiment.tracker import ExperimentTracker, NoOpTracker
 from feature_forge.experiment.wandb_backend import WandBTracker
 
 __all__ = [
+    "CaseComputationInput",
     "ExecutionBackend",
     "ExperimentCase",
-    "ExperimentCaseExecutor",
     "ExperimentResult",
     "ExperimentTracker",
+    "HamiltonLayerExecutor",
     "MLflowTracker",
     "NoOpTracker",
     "ProcessPoolExecutionAdapter",
     "Reporter",
     "SequentialExecutionAdapter",
     "WandBTracker",
+    "build_worker_local_hamilton_executor",
     "create_tracker_from_config",
+    "run_hamilton_case",
 ]

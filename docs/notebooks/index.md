@@ -15,5 +15,5 @@ Interactive tutorials demonstrating Feature Forge capabilities.
 uv run jupyter lab notebooks/
 
 # With LLM (all cells run)
-dotenvx run -- uv run jupyter lab notebooks/
+uv run jupyter lab notebooks/
 ```

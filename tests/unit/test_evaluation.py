@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from feature_forge.config import Settings
+from feature_forge.config import EvaluationConfig, Settings
 from feature_forge.evaluation.cv import CVEvaluator
 from feature_forge.evaluation.metrics import (
     acc_score,
@@ -24,88 +24,98 @@ from feature_forge.exceptions import CodeExecutionError, EvaluationError
 
 
 class TestMetrics:
-    def test_auc_binary(self):
+    def test_auc_binary(self) -> None:
         y_true = np.array([0, 0, 1, 1])
         y_pred = np.array([0.1, 0.2, 0.8, 0.9])
         score = auc_score(y_true, y_pred)
         assert 0.0 <= score <= 1.0
 
-    def test_acc(self):
+    def test_acc(self) -> None:
         y_true = np.array([0, 1, 1, 0])
         y_pred = np.array([0, 1, 0, 0])
         score = acc_score(y_true, y_pred)
         assert score == 0.75
 
-    def test_acc_with_proba(self):
+    def test_acc_with_proba(self) -> None:
         y_true = np.array([0, 1, 1])
         y_pred = np.array([[0.8, 0.2], [0.1, 0.9], [0.6, 0.4]])
         score = acc_score(y_true, y_pred)
         assert score == pytest.approx(2 / 3)
 
-    def test_rmse(self):
+    def test_rmse(self) -> None:
         y_true = np.array([1.0, 2.0, 3.0])
         y_pred = np.array([1.1, 2.1, 2.9])
         score = rmse_score(y_true, y_pred)
         assert score > 0
 
-    def test_mae(self):
+    def test_mae(self) -> None:
         y_true = np.array([1.0, 2.0, 3.0])
         y_pred = np.array([1.5, 2.0, 2.5])
         score = mae_score(y_true, y_pred)
         assert score == pytest.approx(1 / 3)
 
-    def test_nrmse(self):
+    def test_nrmse(self) -> None:
         y_true = np.array([0.0, 10.0])
         y_pred = np.array([1.0, 9.0])
         score = nrmse_score(y_true, y_pred)
         assert score == pytest.approx(1.0 / 10.0)
 
-    def test_f1(self):
+    def test_f1(self) -> None:
         y_true = np.array([0, 1, 1, 0])
         y_pred = np.array([0, 1, 0, 0])
         score = f1_score_metric(y_true, y_pred)
         assert score > 0
 
-    def test_r2(self):
+    def test_r2(self) -> None:
         y_true = np.array([1.0, 2.0, 3.0])
         y_pred = np.array([1.1, 1.9, 3.2])
         score = r2_score_metric(y_true, y_pred)
         assert score > 0
 
-    def test_get_metric_unknown(self):
+    def test_get_metric_unknown(self) -> None:
         with pytest.raises(EvaluationError):
             get_metric("unknown_metric")
 
 
 class TestModelFactory:
-    def test_xgboost_classification(self):
+    def test_xgboost_classification(self) -> None:
+        pytest.importorskip("xgboost")
         factory = ModelFactory()
         model = factory.get_model("xgboost", "classification")
         assert model is not None
 
-    def test_xgboost_regression(self):
+    def test_xgboost_regression(self) -> None:
+        pytest.importorskip("xgboost")
         factory = ModelFactory()
         model = factory.get_model("xgboost", "regression")
         assert model is not None
 
-    def test_random_forest(self):
+    def test_random_forest(self) -> None:
         factory = ModelFactory()
         clf = factory.get_model("random_forest", "classification")
         reg = factory.get_model("random_forest", "regression")
         assert clf is not None
         assert reg is not None
 
-    def test_mlp(self):
+    def test_mlp(self) -> None:
         factory = ModelFactory()
         model = factory.get_model("mlp", "classification")
         assert model is not None
 
-    def test_unknown_model_raises(self):
+    def test_default_model_is_random_forest(self) -> None:
+        """``model_name=None`` resolves to the core default ``random_forest``."""
+        from sklearn.ensemble import RandomForestClassifier
+
+        factory = ModelFactory()
+        model = factory.get_model(None, "classification")
+        assert isinstance(model, RandomForestClassifier)
+
+    def test_unknown_model_raises(self) -> None:
         factory = ModelFactory()
         with pytest.raises(EvaluationError):
             factory.get_model("unknown", "classification")
 
-    def test_model_fit_predict(self):
+    def test_model_fit_predict(self) -> None:
         factory = ModelFactory()
         model = factory.get_model("random_forest", "classification")
         X = pd.DataFrame({"a": [1, 2, 3, 4], "b": [0, 1, 0, 1]})
@@ -116,8 +126,9 @@ class TestModelFactory:
 
 
 class TestSandboxedExecutor:
-    def test_valid_code(self):
-        executor = SandboxedExecutor(timeout_seconds=2.0, max_memory_mb=256)
+    def test_valid_code(self) -> None:
+        # 2048: caps below ~1 GB break pandas/pyarrow's VSZ in the worker
+        executor = SandboxedExecutor(timeout_seconds=2.0, max_memory_mb=2048)
         code = """
 import pandas as pd
 import numpy as np
@@ -132,42 +143,42 @@ def generate_features(df):
         assert list(result.columns) == ["double_a"]
         assert result["double_a"].tolist() == [2, 4, 6]
 
-    def test_forbidden_import(self):
+    def test_forbidden_import(self) -> None:
         executor = SandboxedExecutor()
         code = "import os\ndef generate_features(df): return df"
         with pytest.raises(CodeExecutionError, match="Import not allowed"):
             executor.execute(code, pd.DataFrame())
 
-    def test_forbidden_function(self):
+    def test_forbidden_function(self) -> None:
         executor = SandboxedExecutor()
         code = "eval('1+1')\ndef generate_features(df): return df"
         with pytest.raises(CodeExecutionError, match="Forbidden"):
             executor.execute(code, pd.DataFrame())
 
-    def test_builtins_bypass_blocked(self):
+    def test_builtins_bypass_blocked(self) -> None:
         executor = SandboxedExecutor()
         code = "os = __builtins__['__import__']('os')\ndef generate_features(df): return df"
         with pytest.raises(CodeExecutionError, match="Forbidden"):
             executor.execute(code, pd.DataFrame())
 
-    def test_import_not_in_allowed_builtins(self):
+    def test_import_not_in_allowed_builtins(self) -> None:
         from feature_forge.evaluation.sandbox import SandboxedExecutor as SE
 
         assert "__import__" not in SE.ALLOWED_BUILTINS
 
-    def test_direct_import_call_blocked(self):
+    def test_direct_import_call_blocked(self) -> None:
         executor = SandboxedExecutor()
         code = "os = __import__('os')\ndef generate_features(df): return df"
         with pytest.raises(CodeExecutionError, match="Forbidden"):
             executor.execute(code, pd.DataFrame())
 
-    def test_dunder_introspection_blocked(self):
+    def test_dunder_introspection_blocked(self) -> None:
         executor = SandboxedExecutor()
         code = "def generate_features(df):\n    return (1).__class__.__mro__"
         with pytest.raises(CodeExecutionError, match="dunder"):
             executor.execute(code, pd.DataFrame())
 
-    def test_socket_import_blocked_before_runtime(self):
+    def test_socket_import_blocked_before_runtime(self) -> None:
         executor = SandboxedExecutor()
         code = """
 import pandas as pd
@@ -180,7 +191,7 @@ def generate_features(df):
         with pytest.raises(CodeExecutionError, match="Import not allowed: socket"):
             executor.execute(code, pd.DataFrame({"a": [1]}))
 
-    def test_timeout_enforced(self):
+    def test_timeout_enforced(self) -> None:
         executor = SandboxedExecutor(timeout_seconds=0.2, max_memory_mb=256)
         code = """
 import pandas as pd
@@ -192,8 +203,8 @@ def generate_features(df):
         with pytest.raises(CodeExecutionError, match="timed out"):
             executor.execute(code, pd.DataFrame({"a": [1]}))
 
-    def test_large_result_transport(self):
-        executor = SandboxedExecutor(timeout_seconds=5.0, max_memory_mb=512)
+    def test_large_result_transport(self) -> None:
+        executor = SandboxedExecutor(timeout_seconds=5.0, max_memory_mb=2048)
         code = """
 import pandas as pd
 def generate_features(df):
@@ -207,33 +218,37 @@ def generate_features(df):
         assert list(result.columns) == ["x2", "x3"]
         assert len(result) == len(df)
 
-    def test_missing_generate_features(self):
+    def test_missing_generate_features(self) -> None:
         executor = SandboxedExecutor()
         code = "x = 1"
         with pytest.raises(CodeExecutionError, match="must define"):
             executor.execute(code, pd.DataFrame())
 
-    def test_invalid_syntax(self):
+    def test_invalid_syntax(self) -> None:
         executor = SandboxedExecutor()
         with pytest.raises(CodeExecutionError, match="Invalid syntax"):
             executor.execute("def generate_features(df", pd.DataFrame())
 
 
 class TestCVEvaluator:
-    def test_evaluate_baseline_classification(self):
+    def test_evaluate_baseline_classification(self) -> None:
         from feature_forge.config import Settings
 
-        config = Settings(task="classification", metric="auc", evaluation={"cv_folds": 3})
+        config = Settings(
+            task="classification", metric="auc", evaluation=EvaluationConfig(cv_folds=3)
+        )
         evaluator = CVEvaluator(config=config)
         X = pd.DataFrame({"a": list(range(20))})
         y = pd.Series([0, 1] * 10)
         score = evaluator.evaluate_baseline(X, y, model_name="random_forest")
         assert 0.0 <= score <= 1.0
 
-    def test_evaluate_feature_gain(self):
+    def test_evaluate_feature_gain(self) -> None:
         from feature_forge.config import Settings
 
-        config = Settings(task="classification", metric="auc", evaluation={"cv_folds": 3})
+        config = Settings(
+            task="classification", metric="auc", evaluation=EvaluationConfig(cv_folds=3)
+        )
         evaluator = CVEvaluator(config=config)
         X = pd.DataFrame({"a": list(range(20))})
         y = pd.Series([0, 1] * 10)
@@ -246,27 +261,27 @@ class TestCVEvaluator:
 
 
 class TestPrefilterCandidateColumns:
-    def test_empty_dataframe_returns_empty(self):
+    def test_empty_dataframe_returns_empty(self) -> None:
         from feature_forge.evaluation.prefilter import prefilter_candidate_columns
 
         result = prefilter_candidate_columns(pd.DataFrame(), max_candidates=50)
         assert result == []
 
-    def test_constant_columns_filtered(self):
+    def test_constant_columns_filtered(self) -> None:
         from feature_forge.evaluation.prefilter import prefilter_candidate_columns
 
         df = pd.DataFrame({"const": [1, 1, 1, 1], "varying": [1, 2, 3, 4]})
         result = prefilter_candidate_columns(df, max_candidates=50)
         assert result == ["varying"]
 
-    def test_all_constant_returns_empty(self):
+    def test_all_constant_returns_empty(self) -> None:
         from feature_forge.evaluation.prefilter import prefilter_candidate_columns
 
         df = pd.DataFrame({"a": [42] * 10, "b": ["x"] * 10})
         result = prefilter_candidate_columns(df, max_candidates=50)
         assert result == []
 
-    def test_under_50_candidates_returns_all(self):
+    def test_under_50_candidates_returns_all(self) -> None:
         from feature_forge.evaluation.prefilter import prefilter_candidate_columns
 
         cols = {f"col_{i}": list(range(10)) for i in range(10)}
@@ -274,7 +289,7 @@ class TestPrefilterCandidateColumns:
         result = prefilter_candidate_columns(df, max_candidates=50)
         assert len(result) == 10
 
-    def test_over_50_candidates_caps_at_50(self):
+    def test_over_50_candidates_caps_at_50(self) -> None:
         from feature_forge.evaluation.prefilter import prefilter_candidate_columns
 
         cols = {f"col_{i}": list(range(100)) for i in range(80)}
@@ -282,7 +297,7 @@ class TestPrefilterCandidateColumns:
         result = prefilter_candidate_columns(df, max_candidates=50)
         assert len(result) == 50
 
-    def test_high_variance_prioritized(self):
+    def test_high_variance_prioritized(self) -> None:
         from feature_forge.evaluation.prefilter import prefilter_candidate_columns
 
         cols = {}
@@ -295,17 +310,17 @@ class TestPrefilterCandidateColumns:
         result = prefilter_candidate_columns(df, max_candidates=50)
         assert result[0] == "high_var"
 
-    def test_non_numeric_gets_zero_variance(self):
+    def test_non_numeric_gets_zero_variance(self) -> None:
         from feature_forge.evaluation.prefilter import prefilter_candidate_columns
 
-        cols = {f"num_{i}": list(range(10)) for i in range(40)}
+        cols: dict[str, list[int | str]] = {f"num_{i}": list(range(10)) for i in range(40)}
         cols["cat"] = [f"x_{i}" for i in range(10)]
         df = pd.DataFrame(cols)
         result = prefilter_candidate_columns(df, max_candidates=50)
         assert "cat" in result
         assert len(result) == 41
 
-    def test_custom_max_candidate_features(self):
+    def test_custom_max_candidate_features(self) -> None:
         from feature_forge.evaluation.prefilter import prefilter_candidate_columns
 
         cols = {f"col_{i}": list(range(20)) for i in range(20)}
@@ -315,14 +330,14 @@ class TestPrefilterCandidateColumns:
 
 
 class TestCVPreprocessNoLeakage:
-    def test_fit_uses_own_medians(self):
+    def test_fit_uses_own_medians(self) -> None:
         evaluator = CVEvaluator(config=Settings(task="regression", metric="rmse"))
         train = pd.DataFrame({"a": [1.0, 2.0, 3.0, np.nan]})
         result, _state = evaluator._fit_preprocess(train)
         assert result["a"].isna().sum() == 0
         assert result["a"].iloc[3] == 2.0
 
-    def test_transform_uses_ref_medians(self):
+    def test_transform_uses_ref_medians(self) -> None:
         evaluator = CVEvaluator(config=Settings(task="regression", metric="rmse"))
         train = pd.DataFrame({"a": [10.0, 20.0, 30.0]})
         val = pd.DataFrame({"a": [1.0, np.nan]})
@@ -330,7 +345,7 @@ class TestCVPreprocessNoLeakage:
         val_proc = evaluator._transform_preprocess(val, state)
         assert val_proc["a"].iloc[1] == 20.0
 
-    def test_transform_categorical_uses_ref_categories(self):
+    def test_transform_categorical_uses_ref_categories(self) -> None:
         evaluator = CVEvaluator(config=Settings(task="classification", metric="auc"))
         train = pd.DataFrame({"cat": ["a", "b", "c"]})
         val = pd.DataFrame({"cat": ["a", "d"]})
@@ -343,16 +358,18 @@ class TestCVPreprocessNoLeakage:
 class TestCVEvaluatorEdgeCases:
     """Cover CVEvaluator edge cases (regression, auto-baseline, column dedup, fold failure)."""
 
-    def test_regression_uses_kfold(self):
-        config = Settings(task="regression", metric="rmse", evaluation={"cv_folds": 3})
+    def test_regression_uses_kfold(self) -> None:
+        config = Settings(task="regression", metric="rmse", evaluation=EvaluationConfig(cv_folds=3))
         evaluator = CVEvaluator(config=config)
         X = pd.DataFrame({"a": list(range(20))})
         y = pd.Series([float(i) for i in range(20)])
         score = evaluator.evaluate_baseline(X, y, model_name="random_forest")
         assert isinstance(score, float)
 
-    def test_evaluate_feature_auto_baseline(self):
-        config = Settings(task="classification", metric="auc", evaluation={"cv_folds": 3})
+    def test_evaluate_feature_auto_baseline(self) -> None:
+        config = Settings(
+            task="classification", metric="auc", evaluation=EvaluationConfig(cv_folds=3)
+        )
         evaluator = CVEvaluator(config=config)
         X = pd.DataFrame({"a": list(range(20))})
         y = pd.Series([0, 1] * 10)
@@ -362,8 +379,10 @@ class TestCVEvaluatorEdgeCases:
         )
         assert isinstance(gain, float)
 
-    def test_column_dedup(self):
-        config = Settings(task="classification", metric="auc", evaluation={"cv_folds": 3})
+    def test_column_dedup(self) -> None:
+        config = Settings(
+            task="classification", metric="auc", evaluation=EvaluationConfig(cv_folds=3)
+        )
         evaluator = CVEvaluator(config=config)
         X = pd.DataFrame({"a": list(range(20))})
         y = pd.Series([0, 1] * 10)
@@ -374,10 +393,12 @@ class TestCVEvaluatorEdgeCases:
         )
         assert isinstance(gain, float)
 
-    def test_cv_fold_exception_raises_evaluation_error(self):
+    def test_cv_fold_exception_raises_evaluation_error(self) -> None:
         from unittest.mock import patch
 
-        config = Settings(task="classification", metric="auc", evaluation={"cv_folds": 3})
+        config = Settings(
+            task="classification", metric="auc", evaluation=EvaluationConfig(cv_folds=3)
+        )
         evaluator = CVEvaluator(config=config)
         X = pd.DataFrame({"a": list(range(20))})
         y = pd.Series([0, 1] * 10)
@@ -387,13 +408,13 @@ class TestCVEvaluatorEdgeCases:
             with pytest.raises(Exception, match="cv fold crash"):
                 evaluator.evaluate_baseline(X, y, model_name="random_forest")
 
-    def test_preprocess_transform_missing_ref_state(self):
+    def test_preprocess_transform_missing_ref_state(self) -> None:
         evaluator = CVEvaluator(config=Settings(task="regression", metric="rmse"))
         val = pd.DataFrame({"a": [1.0, float("nan")]})
         result = evaluator._transform_preprocess(val, ref_state={})
         assert result["a"].isna().sum() == 0  # falls back to val median
 
-    def test_preprocess_transform_missing_categorical_ref(self):
+    def test_preprocess_transform_missing_categorical_ref(self) -> None:
         evaluator = CVEvaluator(config=Settings(task="classification", metric="auc"))
         val = pd.DataFrame({"cat": ["x", "y"]})
         result = evaluator._transform_preprocess(val, ref_state={})

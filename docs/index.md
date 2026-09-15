@@ -15,10 +15,10 @@ Feature Forge is a production-ready refactoring of the MALMAS (Memory-Augmented 
 - **Dynamic Router**: Data-driven, performance-driven, hybrid, and LLM-based agent selection
 - **Enforced LLM Caching**: DiskCache with SHA-256 keys prevents accidental API costs
 - **Sandboxed Execution**: AST-validated code execution for LLM-generated features
-- **Experiment Matrix**: Cartesian product of datasets × methods × seeds × models × rounds
+- **ExperimentalPlatform**: One-line experiment matrix — cartesian expansion of datasets × methods × seeds × models through the Hamilton-default engine; rounds remain settings-driven
 - **Methods**: OpenFE [[2]](#ref-2), CAAFE [[3]](#ref-3), LLM-FE [[4]](#ref-4), Malmus (structured JSON), MALMAS (multi-agent)
 - **Observability**: structlog + Langfuse + OpenTelemetry
-- **Tracking**: WandB (default) + MLflow (optional)
+- **Tracking**: Opt-in — defaults to `none` (no external tracker); WandB and MLflow available
 - **Sklearn Compatible**: `FeatureForge` inherits `BaseEstimator` + `TransformerMixin`
 
 ## Installation
@@ -32,8 +32,13 @@ cd feature-forge
 uv sync
 
 # Or with pip
-pip install -e ".[base,docs,opinion]"
+pip install -e .
 ```
+
+The core install ships the standard default model (`random_forest`) and
+first-party LLM methods. Heavyweight third-party methods/models use named
+extras such as `feature-forge[openfe]`, `[caafe]`, `[xgboost]`, `[lightgbm]`,
+or `[catboost]`.
 
 ## Quick Start
 
@@ -48,35 +53,40 @@ X_test_enhanced = fe.transform(X_test)
 
 # Use in a sklearn Pipeline
 from sklearn.pipeline import Pipeline
-from xgboost import XGBClassifier
+from sklearn.ensemble import RandomForestClassifier
 
 pipeline = Pipeline([
     ("fe", FeatureForge()),
-    ("clf", XGBClassifier()),
+    ("clf", RandomForestClassifier()),
 ])
 pipeline.fit(X_train, y_train)
 ```
 
-### Experiment Matrix
+### ExperimentalPlatform (Recommended)
 
 ```python
-from feature_forge.experiment import ExperimentMatrix, ExperimentRunner, Reporter
+from feature_forge import ExperimentalPlatform
 
-matrix = (
-    ExperimentMatrix()
-    .datasets(["titanic", "house-prices"])
-    .methods({"malmas": ["full"], "openfe": ["openfe"]})
-    .seeds([0, 1, 2])
-    .models(["xgboost", "lightgbm"])
-    .rounds([1, 2, 4])
+platform = ExperimentalPlatform()
+results = platform.run(
+    datasets=["titanic", "house-prices"],
+    methods=["malmas", "openfe"],  # openfe needs the `openfe` extra
+    models=["random_forest"],       # core default; xgboost needs the `xgboost` extra
+    seeds=[0, 1, 2],
 )
-
-runner = ExperimentRunner()
-results = runner.run(matrix.generate(), run_experiment)
-
-reporter = Reporter(results)
-print(reporter.to_markdown())
+print(platform.report(results))      # markdown comparison table
+df = platform.to_dataframe(results)  # raw pandas DataFrame
 ```
+
+`ExperimentalPlatform.run()` expands the cartesian product of
+`datasets × methods × seeds × models` and executes each case through
+the Hamilton-default engine. No separate matrix/runner classes are needed.
+Scheduling supports a continue (default) / `fail_fast` failure policy and
+cooperative case-boundary cancellation via
+`run(failure_policy=..., cancellation_token=...)` (ADR 0017) — running cases
+always finish; this is never a hard kill. Tracking is opt-in (default `none`);
+see [Operations](operations.md) for the failure-policy details plus cache
+status, garbage collection, and artifact list/verify commands.
 
 ### Custom Method
 
@@ -134,7 +144,7 @@ export FF_TRACKER__PROJECT=my-project
 ## Architecture
 
 ```
-Experiment Layer    → ExperimentMatrix, ExperimentRunner, Tracker, Reporter
+Experiment Layer    → ExperimentalPlatform, HamiltonLayerExecutor, Tracker, Reporter
 Methods Layer       → MethodRegistry, BaseMethod, 5 method packages (malmas, caafe, llmfe, malmus, openfe)
 Pipeline Layer      → FeatureForge, CorePipeline, IterativePipeline
 Agent Layer         → 6 Agents + Router + Registry (MALMAS-specific)
@@ -175,6 +185,8 @@ pre-commit run --all-files
 - [Implementation Plan](plan/00_index.md)
 - [API Reference](api_reference.md)
 - [Migration Guide](migration_guide.md)
+- [Operations](operations.md)
+- [Generated Stage DAGs](generated/stage_dags.md)
 - [Quick Start](quick_start.md)
 - [MALMAS Technical Roadmap](MALMAS_Technical_Roadmap.md)
 

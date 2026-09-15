@@ -2,12 +2,13 @@
 
 Configuration priority (highest to lowest):
 1. Constructor arguments
-2. Environment variables (FF_* prefix, injected by dotenvx)
+2. Environment variables (FF_* prefix; a local gitignored ``.env`` file is
+   loaded via pydantic-settings ``env_file`` — real env vars win over the file)
 3. YAML files (config/settings.yaml)
 
-Secrets are managed via dotenvx — ``dotenvx run --`` injects decrypted
-values into the environment before Python starts. Non-sensitive defaults
-live in ``config/settings.yaml``.
+Secrets live in a local, gitignored ``.env`` file (see ``.env.example``) or
+exported ``FF_*`` environment variables — never in committed files.
+Non-sensitive defaults live in ``config/settings.yaml``.
 
 Example:
     >>> from feature_forge.config import Settings
@@ -21,9 +22,11 @@ Example:
 from __future__ import annotations
 
 import functools
+from enum import StrEnum
+from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, SecretStr, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -45,6 +48,13 @@ class LLMConfig(BaseModel):
         temperature: Sampling temperature for generation.
         max_tokens: Maximum tokens per response.
         cache_responses: Whether to cache LLM responses.
+        cache_dir: Directory for the SQLite-backed LLM response cache.
+        cache_ttl_days: Optional entry age (in days) after which cached
+            responses expire. ``None`` keeps entries forever (historical
+            default — caches are reproducibility artifacts).
+        cache_size_limit_mb: Optional total cache size cap in MiB; when the
+            cap is exceeded, oldest-touched entries are evicted first
+            (diskcache LRU culling).
         max_concurrent_calls: Max concurrent LLM calls.
     """
 
@@ -57,6 +67,9 @@ class LLMConfig(BaseModel):
     agent_max_tokens: int = 8192
     codegen_max_tokens: int = 16384
     cache_responses: bool = True
+    cache_dir: str = "memory_files/llm_cache"
+    cache_ttl_days: float | None = Field(default=None, gt=0)
+    cache_size_limit_mb: float | None = Field(default=None, gt=0)
     max_concurrent_calls: int = 3
     thinking_enabled: bool = False
     reasoning_effort: Literal["low", "medium", "high", "max"] = "medium"
@@ -101,6 +114,126 @@ class TrackerConfig(BaseModel):
     backend: Literal["wandb", "mlflow", "none"] = "none"
     project: str = "feature-forge"
     entity: str | None = None
+
+
+class ExecutionEngine(StrEnum):
+    """Case execution engine selected by the public platform configuration.
+
+    Hamilton is the sole engine (ADR 0016); the ``legacy`` member was removed
+    after qualification. Stale ``legacy`` configuration is rejected with
+    actionable migration guidance instead of being reinterpreted.
+    """
+
+    HAMILTON = "hamilton"
+
+
+class HamiltonCacheConfig(BaseModel):
+    """Hamilton DAG cache settings.
+
+    Hamilton caching is independent from the mandatory LLM response cache.
+    ``path=None`` lets the runtime resolve a cache below ``artifact_root``.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    enabled: bool = True
+    path: Path | None = None
+    log_to_file: bool = False
+    max_age_days: float | None = Field(default=None, gt=0)
+    max_size_mb: float | None = Field(default=None, gt=0)
+    telemetry_max_events: int = Field(default=10_000, ge=1)
+
+
+_LEGACY_REMOVAL_ADVICE = (
+    "Hamilton is the sole execution engine since ADR 0016; the legacy engine "
+    "and the 'legacy' artifact policy were removed after qualification and are "
+    "never silently reinterpreted. Remove the stale key or set "
+    "dataflow.engine to 'hamilton' — see docs/migration_guide.md. Operational "
+    "rollback after this release is a downgrade to the last compatibility "
+    "release, not a runtime engine switch."
+)
+
+
+class DataflowConfig(BaseModel):
+    """Execution and durable-artifact policy for experiment cases.
+
+    Hamilton is the sole execution engine (ADR 0016). Stale ``legacy``
+    settings (``engine`` or ``artifact_policy``) are rejected with an
+    actionable migration error instead of being silently reinterpreted.
+    Medallion layer boundaries (``artifact_policy='layer_boundaries'``) are
+    mandatory for every platform run and derived by default.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    engine: ExecutionEngine = ExecutionEngine.HAMILTON
+    artifact_policy: Literal["layer_boundaries"] | None = None
+    artifact_root: Path = Path("experiments/artifacts")
+    cache: HamiltonCacheConfig = Field(default_factory=HamiltonCacheConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_removed_legacy_settings(cls, values: object) -> object:
+        """Fail fast on pre-removal legacy settings with migration guidance."""
+        if not isinstance(values, dict):
+            return values
+        stale: list[str] = []
+        engine = values.get("engine")
+        engine_value = engine.value if isinstance(engine, ExecutionEngine) else engine
+        if isinstance(engine_value, str) and engine_value.strip().lower() == "legacy":
+            stale.append(
+                "dataflow.engine is set to 'legacy' "
+                "(YAML `dataflow.engine: legacy` or env `FF_DATAFLOW__ENGINE=legacy`)"
+            )
+        policy = values.get("artifact_policy")
+        if isinstance(policy, str) and policy.strip().lower() == "legacy":
+            stale.append(
+                "dataflow.artifact_policy is set to 'legacy' "
+                "(YAML `dataflow.artifact_policy: legacy` or env "
+                "`FF_DATAFLOW__ARTIFACT_POLICY=legacy`)"
+            )
+        if stale:
+            raise ValueError(
+                "Rejected stale legacy execution configuration (ADR 0016): "
+                + "; ".join(stale)
+                + ". "
+                + _LEGACY_REMOVAL_ADVICE
+            )
+        return values
+
+    @model_validator(mode="before")
+    @classmethod
+    def _derive_policy(cls, values: object) -> object:
+        """Derive the mandatory layer-boundaries policy when unset."""
+        if isinstance(values, dict) and "artifact_policy" not in values:
+            return {**values, "artifact_policy": "layer_boundaries"}
+        return values
+
+
+class FailurePolicy(StrEnum):
+    """Scheduler behavior after a terminal failed case result (ADR 0017).
+
+    ``CONTINUE`` keeps scheduling every requested case (historical default).
+    ``FAIL_FAST`` stops scheduling new cases after the first terminal failed
+    case result; feature-level rejections, warnings, cache misses, and
+    recovered retries never trigger it.
+    """
+
+    CONTINUE = "continue"
+    FAIL_FAST = "fail_fast"
+
+
+class ExecutionPolicyConfig(BaseModel):
+    """Outer experiment scheduler policy.
+
+    Runtime enforcement (sequential fail-fast scheduling, bounded process
+    submission, cooperative cancellation) is implemented per plan 22 /
+    ADR 0017 (accepted 2026-09-14).
+    """
+
+    model_config = {"extra": "forbid"}
+
+    failure_policy: FailurePolicy = FailurePolicy.CONTINUE
 
 
 class RouterConfig(BaseModel):
@@ -190,18 +323,35 @@ class EvaluationConfig(BaseModel):
         fail_on_feature_error: Raise on feature evaluation failure instead of logging.
         fail_on_agent_error: Raise on agent generation failure instead of skipping.
         sandbox_timeout_seconds: Max seconds for sandbox worker execution.
-        sandbox_max_memory_mb: Max memory (MB) for sandbox worker process.
+        sandbox_max_memory_mb: Max address-space (MB) for the sandbox worker.
+            Must exceed the pandas/pyarrow/OpenBLAS runtime footprint (~1 GB
+            VSZ); 2048 keeps headroom for loaded libraries plus user data.
         max_candidate_features: Cap on candidate features sent to CV scoring.
+        booster_n_jobs: n_jobs for OpenMP-backed estimators (xgboost,
+            lightgbm, random_forest) when Intel acceleration is inactive.
+            Default 1 (safe pin); 2026-09-06 benchmarks measured 16-234x
+            regressions for nested n_jobs>1 fits on a busy shared host, so
+            only raise this on a quiet, measured machine. -1 = all cores.
+            Forced to 1 whenever Intel acceleration is active (ADR 0010).
     """
 
     cv_folds: int = 5
     fail_on_feature_error: bool = False
     fail_on_agent_error: bool = False
     sandbox_timeout_seconds: float = 5.0
-    sandbox_max_memory_mb: int = 512
+    sandbox_max_memory_mb: int = 2048
     max_candidate_features: int = 50
     max_cv_workers: int | None = None
     feature_eval_backend: Literal["threading", "loky"] = "threading"
+    booster_n_jobs: int = 1
+
+    @field_validator("booster_n_jobs")
+    @classmethod
+    def _validate_booster_n_jobs(cls, v: int) -> int:
+        """Allow -1 (all cores) or any positive count; anything else is a typo."""
+        if v != -1 and v < 1:
+            raise ValueError("booster_n_jobs must be -1 (all cores) or >= 1")
+        return v
 
     @field_validator("cv_folds")
     @classmethod
@@ -255,6 +405,7 @@ class Settings(BaseSettings):
         env_prefix="FF_",
         env_nested_delimiter="__",
         yaml_file="config/settings.yaml",
+        env_file=".env",
         extra="ignore",
     )
 
@@ -262,8 +413,16 @@ class Settings(BaseSettings):
     task: Literal["classification", "regression"] = "classification"
     metric: str = "auc"
     n_rounds: int = 4
-    min_effective: int = 2
+    max_selected_features: int = Field(default=2, ge=1)
     random_state: int = 42
+    # Intel Extension for Scikit-learn (sklearnex) acceleration. When True and
+    # scikit-learn-intelex is installed (the `intel` extra), sklearn is patched
+    # to run on the Intel/DAAL backend (libiomp5). Boosting estimators stay at
+    # n_jobs=1 and evaluation stays in-process (threading joblib backend, no
+    # fork-after-OpenMP) to avoid the libiomp5/libgomp OpenMP deadlock with the
+    # libgomp-linked XGBoost/LightGBM wheels. See
+    # docs/decisions/0010-intel-openmp-bootstrap.md.
+    intel_acceleration: bool = True
 
     # Subsystem configs
     llm: LLMConfig = Field(default_factory=LLMConfig)
@@ -272,6 +431,18 @@ class Settings(BaseSettings):
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     retry: RetryConfig = Field(default_factory=RetryConfig)
     evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
+    dataflow: DataflowConfig = Field(default_factory=DataflowConfig)
+    execution: ExecutionPolicyConfig = Field(default_factory=ExecutionPolicyConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_min_effective(cls, values: object) -> object:
+        """Accept the old constructor/YAML key without changing env prefixes."""
+        if isinstance(values, dict) and "min_effective" in values:
+            migrated = dict(values)
+            migrated["max_selected_features"] = migrated.pop("min_effective")
+            return migrated
+        return values
 
     @field_validator("n_rounds")
     @classmethod

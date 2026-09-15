@@ -1,5 +1,8 @@
 # MALMAS Technical Roadmap
 
+> **Founding vision — April 2026 (reclassified as provenance, not guidance).**
+> This document describes the original `MALMAS` research codebase and the plan to turn it into a production `malmas` package. Feature Forge (`feature_forge`) is the realized form: package structure, sklearn-compatible API, `LLMClient` abstraction, config dataclasses, and sandboxed execution are all implemented. Paths referenced here (`main_demo/`, `global_config.py`, `malmas/`, `baselines/`) no longer exist. For the realized architecture and accepted decisions, see [`docs/plan/00_index.md`](plan/00_index.md) and [`docs/decisions/`](https://github.com/minghao51/feature_forge/tree/main/docs/decisions). For the forward-looking plan, see [`docs/plan/20_long_term_roadmap.md`](plan/20_long_term_roadmap.md).
+
 ## From Research Code to Production-Ready Python Package
 
 **Memory-Augmented LLM-based Multi-Agent System for Automated Feature Engineering**

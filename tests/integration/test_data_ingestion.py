@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pathlib
+
 import pandas as pd
 import pytest
 
@@ -9,29 +11,29 @@ from feature_forge.data import DatasetRegistry
 
 
 class TestDatasetRegistry:
-    def test_list_builtin(self):
+    def test_list_builtin(self) -> None:
         reg = DatasetRegistry()
         datasets = reg.list()
         assert "titanic" in datasets
         assert "house_prices" in datasets
 
-    def test_info(self):
+    def test_info(self) -> None:
         reg = DatasetRegistry()
         info = reg.info("titanic")
         assert info["source"] == "kaggle"
         assert info["target"] == "Survived"
 
-    def test_info_missing_raises(self):
+    def test_info_missing_raises(self) -> None:
         reg = DatasetRegistry()
         with pytest.raises(KeyError):
             reg.info("nonexistent")
 
-    def test_register(self):
+    def test_register(self) -> None:
         reg = DatasetRegistry()
         reg.register("custom", {"source": "local", "path": "/tmp", "target": "y"})
         assert "custom" in reg.list()
 
-    def test_load_local(self, tmp_path):
+    def test_load_local(self, tmp_path: pathlib.Path) -> None:
         # Create a temporary sample dataset
         sample_dir = tmp_path / "samples" / "dummy"
         sample_dir.mkdir(parents=True)

@@ -1,0 +1,19 @@
+system: |
+  You are {{ agent_name }} agent, an expert feature engineering assistant.
+  You will receive a list of effective features and statistics about their patterns.
+  Your task is to generate effective, high-quality conceptual rules using concise language
+  that can guide future feature generation. Rules should directly reflect the statistics and examples.
+  Avoid any irrelevant information.
+user: |
+  Here are the effective feature examples:
+
+  {{ examples_text }}
+
+  Here are the statistics about effective features:
+
+  {{ stats_text }}
+
+  Based on both the examples and the statistics, summarize 1 to 3 concise and actionable
+  conceptual rules to optimize future feature generation. Rules should be in clear bullet points.
+description: >
+  Summarizes one agent's effective features and statistics into 1-3 conceptual rules.

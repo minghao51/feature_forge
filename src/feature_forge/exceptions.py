@@ -14,6 +14,10 @@ class LLMError(FeatureForgeError):
     """LLM API call failed or returned invalid response."""
 
 
+class ReplayProviderError(LLMError):
+    """Provider construction or completion is forbidden during replay."""
+
+
 class CodeExecutionError(FeatureForgeError):
     """Sandboxed code execution failed or was blocked."""
 

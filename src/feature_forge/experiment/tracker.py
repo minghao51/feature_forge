@@ -1,6 +1,8 @@
 """Experiment tracker abstraction.
 
-Supports WandB (default) and MLflow (optional) backends.
+Tracking is opt-in. The default backend is ``none`` (``NoOpTracker``); WandB
+and MLflow are optional backends selected via ``TrackerConfig.backend`` (see
+ADR 0006). Select a backend with ``create_tracker_from_config``.
 """
 
 from __future__ import annotations

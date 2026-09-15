@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from feature_forge.evaluation.metrics import MetricDirection, get_metric_direction
 from feature_forge.methods.malmas.memory.persistence import MemoryPersistence
 from feature_forge.methods.malmas.memory.retrieval import retrieve_top_k
 
@@ -29,7 +30,14 @@ class AgentMemory:
         conceptual_summary: Latest LLM-generated conceptual summary.
     """
 
-    def __init__(self, agent_name: str, memory_path: str, max_size: int = 100) -> None:
+    def __init__(
+        self,
+        agent_name: str,
+        memory_path: str,
+        max_size: int = 100,
+        *,
+        load_existing: bool = True,
+    ) -> None:
         self.agent_name = agent_name
         self._persistence = MemoryPersistence(memory_path)
         self.max_size = max_size
@@ -43,7 +51,8 @@ class AgentMemory:
         self._procedural_names: set[str] = set()
         self._unused_procedural_names: set[str] = set()
         self._feedback_names: set[str] = set()
-        self._load()
+        if load_existing:
+            self._load()
 
     def _load(self) -> None:
         """Load persisted memory state."""
@@ -157,6 +166,12 @@ class AgentMemory:
             self._rebuild_indices()
 
     # ── Feedback Memory ─────────────────────────────────────────────
+
+    @staticmethod
+    def metric_is_improvement(metric: str, gain: float) -> bool:
+        """Interpret a raw score delta using the metric's direction."""
+        direction = get_metric_direction(metric)
+        return gain < 0 if direction is MetricDirection.MINIMIZE else gain > 0
 
     def record_feedback(
         self,

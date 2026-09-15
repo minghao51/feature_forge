@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
 import pytest
 
 from feature_forge.config import RetryConfig
@@ -19,16 +22,22 @@ class SimpleProvider(LLMClient):
     def provider_name(self) -> str:
         return "test"
 
-    async def _call_api(self, messages, temperature, max_tokens, **kwargs):
+    async def _call_api(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
         return {"content": "response", "usage": {}}
 
-    def _extract_content(self, raw_response):
-        return raw_response.get("content", "")
+    def _extract_content(self, raw_response: dict[str, Any]) -> str:
+        return str(raw_response.get("content", ""))
 
-    def _extract_usage(self, raw_response):
+    def _extract_usage(self, raw_response: dict[str, Any]) -> tuple[int, int, int]:
         return 10, 5, 15
 
-    def _json_mode_kwargs(self):
+    def _json_mode_kwargs(self) -> dict[str, Any]:
         return {"response_format": {"type": "json_object"}}
 
 
@@ -36,11 +45,17 @@ class TestLLMClientBase:
     """Cover LLMClient base class uncovered paths."""
 
     @pytest.mark.asyncio
-    async def test_complete_json_with_json_mode(self):
+    async def test_complete_json_with_json_mode(self) -> None:
         class JsonModeProvider(SimpleProvider):
             async def _do_complete(
-                self, messages, temperature=0.2, max_tokens=4096, json_mode=False, **kwargs
-            ):
+                self,
+                messages: list[dict[str, str]],
+                temperature: float = 0.2,
+                max_tokens: int = 4096,
+                json_mode: bool = False,
+                prompt_meta: Mapping[str, Any] | None = None,
+                **kwargs: Any,
+            ) -> LLMResponse:
                 return LLMResponse(content='{"result": "ok"}', model="test")
 
         p = JsonModeProvider()
@@ -51,9 +66,15 @@ class TestLLMClientBase:
         assert result == {"result": "ok"}
 
     @pytest.mark.asyncio
-    async def test_do_complete_exception_wrapping(self):
+    async def test_do_complete_exception_wrapping(self) -> None:
         class FailingProvider(SimpleProvider):
-            async def _call_api(self, messages, temperature, max_tokens, **kwargs):
+            async def _call_api(
+                self,
+                messages: list[dict[str, str]],
+                temperature: float,
+                max_tokens: int,
+                **kwargs: Any,
+            ) -> Any:
                 msg = "API connection failed"
                 raise ConnectionError(msg)
 
@@ -62,9 +83,15 @@ class TestLLMClientBase:
             await p._do_complete([{"role": "user", "content": "hi"}])
 
     @pytest.mark.asyncio
-    async def test_do_complete_llm_error_passthrough(self):
+    async def test_do_complete_llm_error_passthrough(self) -> None:
         class LLLErrorProvider(SimpleProvider):
-            async def _call_api(self, messages, temperature, max_tokens, **kwargs):
+            async def _call_api(
+                self,
+                messages: list[dict[str, str]],
+                temperature: float,
+                max_tokens: int,
+                **kwargs: Any,
+            ) -> Any:
                 raise LLMError("rate limited")
 
         p = LLLErrorProvider()
@@ -72,13 +99,21 @@ class TestLLMClientBase:
             await p._do_complete([{"role": "user", "content": "hi"}])
 
     @pytest.mark.asyncio
-    async def test_retry_with_config(self):
+    async def test_retry_with_config(self) -> None:
         class RetryProvider(SimpleProvider):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.count = 0
 
-            async def _do_complete(self, messages, temperature=0.2, max_tokens=4096, **kwargs):
+            async def _do_complete(
+                self,
+                messages: list[dict[str, str]],
+                temperature: float = 0.2,
+                max_tokens: int = 4096,
+                json_mode: bool = False,
+                prompt_meta: Mapping[str, Any] | None = None,
+                **kwargs: Any,
+            ) -> LLMResponse:
                 self.count += 1
                 return LLMResponse(content="ok", model="test")
 
@@ -87,14 +122,14 @@ class TestLLMClientBase:
         result = await p.complete([{"role": "user", "content": "hi"}])
         assert result.content == "ok"
 
-    def test_inject_json_schema_no_system(self):
+    def test_inject_json_schema_no_system(self) -> None:
         messages = [{"role": "user", "content": "hello"}]
         enhanced = LLMClient._inject_json_schema(messages, '{"type": "object"}')
         assert enhanced[0]["role"] == "system"
         assert "MUST respond with valid JSON" in enhanced[0]["content"]
         assert enhanced[1]["role"] == "user"
 
-    def test_inject_json_schema_with_system(self):
+    def test_inject_json_schema_with_system(self) -> None:
         messages = [
             {"role": "system", "content": "You are a helpful AI."},
             {"role": "user", "content": "hello"},
@@ -104,27 +139,28 @@ class TestLLMClientBase:
         assert "You are a helpful AI." in enhanced[0]["content"]
         assert "MUST respond with valid JSON" in enhanced[0]["content"]
 
-    def test_parse_json_response_valid(self):
+    def test_parse_json_response_valid(self) -> None:
         provider = SimpleProvider()
         result = provider._parse_json_response('{"key": "value"}')
         assert result == {"key": "value"}
 
-    def test_parse_json_response_empty(self):
+    def test_parse_json_response_empty(self) -> None:
         provider = SimpleProvider()
         with pytest.raises(LLMError, match="empty content"):
             provider._parse_json_response("")
 
-    def test_parse_json_response_invalid(self):
+    def test_parse_json_response_invalid(self) -> None:
         provider = SimpleProvider()
         with pytest.raises(LLMError, match="invalid JSON"):
             provider._parse_json_response("{broken")
 
-    def test_parse_json_response_markdown_fenced(self):
+    def test_parse_json_response_markdown_fenced(self) -> None:
+        # ADR 0011: fenced replies now parse (tolerant parser); the old
+        # behavior raised "invalid JSON" on fences.
         provider = SimpleProvider()
-        with pytest.raises(LLMError, match="invalid JSON"):
-            provider._parse_json_response('```json\n{"key": "value"}\n```')
+        assert provider._parse_json_response('```json\n{"key": "value"}\n```') == {"key": "value"}
 
-    def test_build_cache_key_deterministic(self):
+    def test_build_cache_key_deterministic(self) -> None:
         provider = SimpleProvider()
         key1 = provider.build_cache_key(
             [{"role": "user", "content": "hi"}], temperature=0.2, max_tokens=100
@@ -135,7 +171,7 @@ class TestLLMClientBase:
         assert key1 == key2
         assert len(key1) == 64
 
-    def test_build_cache_key_different(self):
+    def test_build_cache_key_different(self) -> None:
         provider = SimpleProvider()
         key1 = provider.build_cache_key(
             [{"role": "user", "content": "hi"}], temperature=0.2, max_tokens=100
@@ -145,7 +181,7 @@ class TestLLMClientBase:
         )
         assert key1 != key2
 
-    def test_api_key_secret_property(self):
+    def test_api_key_secret_property(self) -> None:
         from pydantic import SecretStr
 
         provider = SimpleProvider()
@@ -153,11 +189,11 @@ class TestLLMClientBase:
         assert isinstance(provider.api_key_secret, SecretStr)
 
     @pytest.mark.asyncio
-    async def test_retry_no_config(self):
+    async def test_retry_no_config(self) -> None:
         """_retry calls fn directly when no config set."""
         provider = SimpleProvider()
 
-        async def dummy():
+        async def dummy() -> str:
             return "direct"
 
         result = await provider._retry(dummy)

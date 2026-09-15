@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
+from typing import Any, cast
 
 import pandas as pd
 import pytest
 
 from feature_forge.config import Settings
-from feature_forge.llm.base import LLMClient, LLMResponse
-from feature_forge.methods.malmas.agents import (
-    AgentRegistry,
-    RouterAgent,
-)
+from feature_forge.llm.base import JSONValue, LLMClient, LLMResponse
+from feature_forge.methods.malmas.agents import AgentRegistry
+from feature_forge.methods.malmas.agents.base import BaseFeatureAgent
+from feature_forge.methods.malmas.agents.router import RouterAgent
+
+
+def _get_agent_cls(name: str) -> type[BaseFeatureAgent]:
+    """Return a built-in agent class (typed as BaseFeatureAgent since 2026-09-06)."""
+    return AgentRegistry.get_agent(name)
 
 
 class FakeLLM(LLMClient):
@@ -27,21 +33,34 @@ class FakeLLM(LLMClient):
     def provider_name(self) -> str:
         return "fake"
 
-    async def _do_complete(self, messages, temperature=0.2, max_tokens=4096, **kwargs):
+    async def _do_complete(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float = 0.2,
+        max_tokens: int = 4096,
+        json_mode: bool = False,
+        prompt_meta: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> LLMResponse:
         resp = self.responses[self.call_count % len(self.responses)]
         self.call_count += 1
         return LLMResponse(content=resp, model=self.model)
 
     async def _do_complete_json(
-        self, messages, schema_description, temperature=0.2, max_tokens=4096
-    ):
+        self,
+        messages: list[dict[str, str]],
+        schema_description: str,
+        temperature: float = 0.2,
+        max_tokens: int = 4096,
+        prompt_meta: Mapping[str, Any] | None = None,
+    ) -> JSONValue:
         resp = self.responses[self.call_count % len(self.responses)]
         self.call_count += 1
-        return json.loads(resp)
+        return cast(JSONValue, json.loads(resp))
 
 
 class TestAgentRegistry:
-    def test_get_builtin_agents(self):
+    def test_get_builtin_agents(self) -> None:
         agents = AgentRegistry.get_builtin_agents()
         assert "unary" in agents
         assert "cross_compositional" in agents
@@ -51,11 +70,11 @@ class TestAgentRegistry:
         assert "local_pattern" in agents
         assert len(agents) == 6
 
-    def test_get_all_agents_includes_builtins(self):
+    def test_get_all_agents_includes_builtins(self) -> None:
         agents = AgentRegistry.get_all_agents()
         assert "unary" in agents
 
-    def test_agent_class_identity_stable(self):
+    def test_agent_class_identity_stable(self) -> None:
         cls1 = AgentRegistry.get_agent("unary")
         cls2 = AgentRegistry.get_agent("unary")
         assert cls1 is cls2
@@ -63,7 +82,7 @@ class TestAgentRegistry:
 
 class TestBaseFeatureAgent:
     @pytest.fixture
-    def fake_llm(self):
+    def fake_llm(self) -> FakeLLM:
         response = json.dumps(
             [
                 {
@@ -82,12 +101,12 @@ class TestBaseFeatureAgent:
         return FakeLLM([response])
 
     @pytest.fixture
-    def config(self):
+    def config(self) -> Settings:
         return Settings()
 
     @pytest.mark.asyncio
-    async def test_generate_parses_features(self, fake_llm, config):
-        agent = AgentRegistry.get_agent("unary")(config=config, llm_client=fake_llm)
+    async def test_generate_parses_features(self, fake_llm: FakeLLM, config: Settings) -> None:
+        agent = _get_agent_cls("unary")(config=config, llm_client=fake_llm)
         X = pd.DataFrame({"age": [20, 30, 40]})
         y = pd.Series([0, 1, 0])
         specs = await agent.generate(X, y, context={})
@@ -96,35 +115,43 @@ class TestBaseFeatureAgent:
         assert specs[0].agent_name == "unary"
 
     @pytest.mark.asyncio
-    async def test_generate_with_memory_context(self, fake_llm, config):
-        agent = AgentRegistry.get_agent("cross_compositional")(config=config, llm_client=fake_llm)
+    async def test_generate_with_memory_context(self, fake_llm: FakeLLM, config: Settings) -> None:
+        agent = _get_agent_cls("cross_compositional")(config=config, llm_client=fake_llm)
         X = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
         y = pd.Series([0, 1])
         specs = await agent.generate(X, y, context={"memory": "previous success with ratios"})
         assert len(specs) == 1
 
-    def test_parse_response_strips_markdown(self, config):
-        agent = AgentRegistry.get_agent("unary")(config=config, llm_client=FakeLLM())
+    def test_parse_response_strips_markdown(self, config: Settings) -> None:
+        agent = _get_agent_cls("unary")(config=config, llm_client=FakeLLM())
         content = '```json\n[{"base_columns": "x", "derived_features": [{"name": "f1", "type": "num", "transform": "t", "logic": "l"}]}]\n```'
         specs = agent._parse_response(content)
         assert len(specs) == 1
         assert specs[0].name == "f1"
 
-    def test_parse_response_invalid_json_raises(self, config):
+    def test_parse_response_invalid_json_raises(self, config: Settings) -> None:
         from feature_forge.exceptions import AgentError
 
-        agent = AgentRegistry.get_agent("unary")(config=config, llm_client=FakeLLM())
+        agent = _get_agent_cls("unary")(config=config, llm_client=FakeLLM())
         with pytest.raises(AgentError):
             agent._parse_response("not json")
 
 
 class TestRouterAgent:
     @pytest.fixture
-    def router(self):
+    def router(self) -> RouterAgent:
         config = Settings()
         return RouterAgent(config=config)
 
-    def test_analyze_dataset(self, router):
+    async def test_llm_based_selection_structured(self) -> None:
+        # ADR 0011: router uses complete_structured(RouterSelection)
+        fake = FakeLLM(responses=['{"agents": ["unary", "temporal"]}'])
+        router = RouterAgent(config=Settings(), llm_client=fake)
+        selected = await router._llm_based_selection(round_idx=0)
+        assert "unary" in selected
+        assert "temporal" in selected
+
+    def test_analyze_dataset(self, router: RouterAgent) -> None:
         df = pd.DataFrame(
             {
                 "num": [1.0, 2.0],
@@ -143,7 +170,7 @@ class TestRouterAgent:
         assert len(chars["categorical_columns"]) == 1
         assert len(chars["datetime_columns"]) == 1
 
-    def test_data_driven_selection(self, router):
+    def test_data_driven_selection(self, router: RouterAgent) -> None:
         router.dataset_characteristics = {
             "total_columns": 5,
             "numerical_columns": ["a", "b"],
@@ -158,14 +185,14 @@ class TestRouterAgent:
         assert "aggregation" in selected
         assert "temporal" not in selected
 
-    def test_performance_driven_selection(self, router):
+    def test_performance_driven_selection(self, router: RouterAgent) -> None:
         router.agent_performance["unary"] = [0.1, 0.2]
         router.agent_performance["cross_compositional"] = [-0.05]
         selected = router._performance_driven_selection()
         assert "unary" in selected
         assert "cross_compositional" not in selected
 
-    def test_hybrid_selection(self, router):
+    def test_hybrid_selection(self, router: RouterAgent) -> None:
         router.dataset_characteristics = {
             "total_columns": 5,
             "numerical_columns": ["a", "b"],
@@ -179,25 +206,25 @@ class TestRouterAgent:
         assert "unary" in selected
 
     @pytest.mark.asyncio
-    async def test_select_agents_warmup(self, router):
+    async def test_select_agents_warmup(self, router: RouterAgent) -> None:
         df = pd.DataFrame({"a": [1, 2]})
         selected = await router.select_agents(round_idx=0, df=df)
         assert len(selected) == 6  # All agents during warmup
 
     @pytest.mark.asyncio
-    async def test_select_agents_post_warmup(self, router):
+    async def test_select_agents_post_warmup(self, router: RouterAgent) -> None:
         df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
         desc = {"a": {"type": "numerical"}, "b": {"type": "numerical"}}
         selected = await router.select_agents(round_idx=1, df=df, description=desc)
         assert len(selected) >= router.min_agents
 
-    def test_update_performance(self, router):
+    def test_update_performance(self, router: RouterAgent) -> None:
         router.update_performance("unary", 0.05)
         assert router.agent_performance["unary"] == [0.05]
         router.update_performance("unary", 0.03)
         assert router.agent_performance["unary"] == [0.05, 0.03]
 
-    def test_get_summary(self, router):
+    def test_get_summary(self, router: RouterAgent) -> None:
         router.update_performance("unary", 0.1)
         summary = router.get_summary()
         assert summary["average_performance"]["unary"] == 0.1
@@ -207,35 +234,33 @@ class TestRouterAgent:
 class TestAllAgentsInstantiate:
     """Smoke test that all agents can be instantiated."""
 
-    def test_unary(self):
-        agent = AgentRegistry.get_agent("unary")(config=Settings(), llm_client=FakeLLM())
+    def test_unary(self) -> None:
+        agent = _get_agent_cls("unary")(config=Settings(), llm_client=FakeLLM())
         assert agent.name == "unary"
 
-    def test_cross_compositional(self):
-        agent = AgentRegistry.get_agent("cross_compositional")(
-            config=Settings(), llm_client=FakeLLM()
-        )
+    def test_cross_compositional(self) -> None:
+        agent = _get_agent_cls("cross_compositional")(config=Settings(), llm_client=FakeLLM())
         assert agent.name == "cross_compositional"
 
-    def test_aggregation(self):
-        agent = AgentRegistry.get_agent("aggregation")(config=Settings(), llm_client=FakeLLM())
+    def test_aggregation(self) -> None:
+        agent = _get_agent_cls("aggregation")(config=Settings(), llm_client=FakeLLM())
         assert agent.name == "aggregation"
 
-    def test_temporal(self):
-        agent = AgentRegistry.get_agent("temporal")(config=Settings(), llm_client=FakeLLM())
+    def test_temporal(self) -> None:
+        agent = _get_agent_cls("temporal")(config=Settings(), llm_client=FakeLLM())
         assert agent.name == "temporal"
 
-    def test_local_transform(self):
-        agent = AgentRegistry.get_agent("local_transform")(config=Settings(), llm_client=FakeLLM())
+    def test_local_transform(self) -> None:
+        agent = _get_agent_cls("local_transform")(config=Settings(), llm_client=FakeLLM())
         assert agent.name == "local_transform"
 
-    def test_local_pattern(self):
-        agent = AgentRegistry.get_agent("local_pattern")(config=Settings(), llm_client=FakeLLM())
+    def test_local_pattern(self) -> None:
+        agent = _get_agent_cls("local_pattern")(config=Settings(), llm_client=FakeLLM())
         assert agent.name == "local_pattern"
 
 
 class TestInferColumnDescriptions:
-    def test_numerical_columns(self):
+    def test_numerical_columns(self) -> None:
         from feature_forge.methods.malmas.agents.base import BaseFeatureAgent
 
         df = pd.DataFrame({"a": [1.0, 2.0, 3.0], "b": [4.0, 5.0, 6.0]})
@@ -246,7 +271,7 @@ class TestInferColumnDescriptions:
         assert desc["a"]["min"] == 1.0
         assert desc["a"]["max"] == 3.0
 
-    def test_categorical_columns(self):
+    def test_categorical_columns(self) -> None:
         from feature_forge.methods.malmas.agents.base import BaseFeatureAgent
 
         df = pd.DataFrame({"cat": ["x", "y", "x", "z"]})
@@ -255,21 +280,21 @@ class TestInferColumnDescriptions:
         assert desc["cat"]["type"] == "categorical"
         assert desc["cat"]["unique"] == 3
 
-    def test_missing_values(self):
+    def test_missing_values(self) -> None:
         from feature_forge.methods.malmas.agents.base import BaseFeatureAgent
 
         df = pd.DataFrame({"a": [1.0, None, 3.0]})
         desc = BaseFeatureAgent._infer_column_descriptions(df)
         assert desc["a"]["missing"] == 1
 
-    def test_empty_dataframe(self):
+    def test_empty_dataframe(self) -> None:
         from feature_forge.methods.malmas.agents.base import BaseFeatureAgent
 
         df = pd.DataFrame()
         desc = BaseFeatureAgent._infer_column_descriptions(df)
         assert desc == {}
 
-    def test_cache_key_uses_tuple_not_hash(self):
+    def test_cache_key_uses_tuple_not_hash(self) -> None:
         from feature_forge.methods.malmas.agents.base import BaseFeatureAgent
 
         BaseFeatureAgent._column_desc_cache.clear()
@@ -281,7 +306,7 @@ class TestInferColumnDescriptions:
             f"Expected prefix {expected_prefix} in cache"
         )
 
-    def test_cache_key_changes_with_values(self):
+    def test_cache_key_changes_with_values(self) -> None:
         from feature_forge.methods.malmas.agents.base import BaseFeatureAgent
 
         BaseFeatureAgent._column_desc_cache.clear()
@@ -291,7 +316,7 @@ class TestInferColumnDescriptions:
         _ = BaseFeatureAgent._infer_column_descriptions(df2)
         assert len(BaseFeatureAgent._column_desc_cache) == 2
 
-    def test_categorical_all_nan_top_is_empty_string(self):
+    def test_categorical_all_nan_top_is_empty_string(self) -> None:
         from feature_forge.methods.malmas.agents.base import BaseFeatureAgent
 
         df = pd.DataFrame({"cat": [None, None, None]})
@@ -300,7 +325,7 @@ class TestInferColumnDescriptions:
 
 
 class TestBuildUserPromptAutoEnrichment:
-    def test_empty_description_auto_enriched(self):
+    def test_empty_description_auto_enriched(self) -> None:
         from feature_forge.methods.malmas.agents.base import BaseFeatureAgent
 
         class DummyAgent(BaseFeatureAgent):
@@ -315,7 +340,7 @@ class TestBuildUserPromptAutoEnrichment:
         assert "mean" in prompt
         assert "a" in prompt
 
-    def test_provided_description_not_overwritten(self):
+    def test_provided_description_not_overwritten(self) -> None:
         from feature_forge.methods.malmas.agents.base import BaseFeatureAgent
 
         class DummyAgent(BaseFeatureAgent):
@@ -336,7 +361,7 @@ class TestRouterAgentEdgeCases:
 
     # ── Exclusion edge cases ──────────────────────────────────
 
-    def test_exclude_by_single_column(self):
+    def test_exclude_by_single_column(self) -> None:
         config = Settings()
         router = RouterAgent(config=config)
         router.dataset_characteristics = {
@@ -350,7 +375,7 @@ class TestRouterAgentEdgeCases:
         selected = router._data_driven_selection()
         assert "cross_compositional" not in selected
 
-    def test_exclude_no_numerical_columns(self):
+    def test_exclude_no_numerical_columns(self) -> None:
         config = Settings()
         router = RouterAgent(config=config)
         router.dataset_characteristics = {
@@ -364,7 +389,7 @@ class TestRouterAgentEdgeCases:
         selected = router._data_driven_selection()
         assert "local_transform" not in selected
 
-    def test_exclude_no_categorical_for_grouping(self):
+    def test_exclude_no_categorical_for_grouping(self) -> None:
         config = Settings()
         router = RouterAgent(config=config)
         router.dataset_characteristics = {
@@ -378,7 +403,7 @@ class TestRouterAgentEdgeCases:
         selected = router._data_driven_selection()
         assert "aggregation" not in selected
 
-    def test_exclude_requires_enrich(self):
+    def test_exclude_requires_enrich(self) -> None:
         config = Settings()
         router = RouterAgent(config=config)
         router.dataset_characteristics = {
@@ -392,7 +417,7 @@ class TestRouterAgentEdgeCases:
         selected = router._data_driven_selection()
         assert "local_pattern" not in selected
 
-    def test_requires_enrich_included_when_present(self):
+    def test_requires_enrich_included_when_present(self) -> None:
         config = Settings()
         router = RouterAgent(config=config)
         router.dataset_characteristics = {
@@ -406,7 +431,7 @@ class TestRouterAgentEdgeCases:
         selected = router._data_driven_selection()
         assert "local_pattern" in selected
 
-    def test_dataset_char_is_none_returns_all(self):
+    def test_dataset_char_is_none_returns_all(self) -> None:
         config = Settings()
         router = RouterAgent(config=config)
         router.dataset_characteristics = None
@@ -415,7 +440,7 @@ class TestRouterAgentEdgeCases:
 
     # ── min_agents padding ────────────────────────────────────
 
-    def test_data_driven_min_agents_padding(self):
+    def test_data_driven_min_agents_padding(self) -> None:
         config = Settings()
         config.router.min_agents = 1
         router = RouterAgent(config=config)
@@ -430,7 +455,7 @@ class TestRouterAgentEdgeCases:
         selected = router._data_driven_selection()
         assert len(selected) >= router.min_agents
 
-    def test_perf_driven_min_agents_with_negative_gains(self):
+    def test_perf_driven_min_agents_with_negative_gains(self) -> None:
         config = Settings()
         router = RouterAgent(config=config)
         router.agent_performance = {name: [-0.1] for name in router.agent_names}
@@ -439,7 +464,7 @@ class TestRouterAgentEdgeCases:
 
     # ── Performance-driven empty ──────────────────────────────
 
-    def test_perf_driven_empty_performance(self):
+    def test_perf_driven_empty_performance(self) -> None:
         config = Settings()
         router = RouterAgent(config=config)
         router.agent_performance = {name: [] for name in router.agent_names}
@@ -448,7 +473,7 @@ class TestRouterAgentEdgeCases:
 
     # ── Hybrid padding ────────────────────────────────────────
 
-    def test_hybrid_min_agents_padding(self):
+    def test_hybrid_min_agents_padding(self) -> None:
         config = Settings()
         router = RouterAgent(config=config)
         router.dataset_characteristics = {
@@ -462,7 +487,7 @@ class TestRouterAgentEdgeCases:
         selected = router._hybrid_selection()
         assert len(selected) >= router.min_agents
 
-    def test_hybrid_capped_at_max_agents(self):
+    def test_hybrid_capped_at_max_agents(self) -> None:
         config = Settings()
         config.router.max_agents = 2
         router = RouterAgent(config=config)
@@ -480,7 +505,7 @@ class TestRouterAgentEdgeCases:
     # ── Select agents strategy dispatch ───────────────────────
 
     @pytest.mark.asyncio
-    async def test_select_agents_data_driven_strategy(self):
+    async def test_select_agents_data_driven_strategy(self) -> None:
         config = Settings()
         config.router.strategy = "data_driven"
         router = RouterAgent(config=config)
@@ -496,7 +521,7 @@ class TestRouterAgentEdgeCases:
         assert isinstance(selected[0], str)
 
     @pytest.mark.asyncio
-    async def test_select_agents_performance_driven_strategy(self):
+    async def test_select_agents_performance_driven_strategy(self) -> None:
         config = Settings()
         config.router.strategy = "performance_driven"
         router = RouterAgent(config=config)
@@ -513,7 +538,7 @@ class TestRouterAgentEdgeCases:
         assert len(selected) >= 1
 
     @pytest.mark.asyncio
-    async def test_select_agents_llm_strategy_fallback(self):
+    async def test_select_agents_llm_strategy_fallback(self) -> None:
         config = Settings()
         config.router.strategy = "llm"
         router = RouterAgent(config=config, llm_client=None)
@@ -531,21 +556,26 @@ class TestRouterAgentEdgeCases:
     # ── LLM-based selection ───────────────────────────────────
 
     @pytest.mark.asyncio
-    async def test_llm_selection_returns_valid_agents(self):
+    async def test_llm_selection_returns_valid_agents(self) -> None:
         class FakeLLM:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.model = "fake"
 
             async def complete_json(
-                self, messages, schema_description="", temperature=0.2, max_tokens=4096
-            ):
-                return json.loads('{"agents":["unary","temporal"]}')
+                self,
+                messages: list[dict[str, str]],
+                schema_description: str = "",
+                temperature: float = 0.2,
+                max_tokens: int = 4096,
+            ) -> JSONValue:
+                return cast(JSONValue, json.loads('{"agents":["unary","temporal"]}'))
 
-            async def complete(self, messages, **kwargs):
+            async def complete(self, messages: list[dict[str, str]], **kwargs: Any) -> LLMResponse:
                 return LLMResponse(content='{"agents":["unary","temporal"]}', model="fake")
 
         config = Settings()
         config.router.strategy = "llm"
+        # local duck-typed stub, not an LLMClient subclass
         router = RouterAgent(config=config, llm_client=FakeLLM())  # type: ignore[arg-type]
         router.dataset_characteristics = {
             "total_columns": 5,
@@ -560,21 +590,26 @@ class TestRouterAgentEdgeCases:
         assert "temporal" in selected
 
     @pytest.mark.asyncio
-    async def test_llm_selection_invalid_json_falls_back(self):
+    async def test_llm_selection_invalid_json_falls_back(self) -> None:
         class FakeLLM:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.model = "fake"
 
             async def complete_json(
-                self, messages, schema_description="", temperature=0.2, max_tokens=4096
-            ):
+                self,
+                messages: list[dict[str, str]],
+                schema_description: str = "",
+                temperature: float = 0.2,
+                max_tokens: int = 4096,
+            ) -> JSONValue:
                 raise Exception("not json")
 
-            async def complete(self, messages, **kwargs):
+            async def complete(self, messages: list[dict[str, str]], **kwargs: Any) -> LLMResponse:
                 return LLMResponse(content="not json", model="fake")
 
         config = Settings()
         config.router.strategy = "llm"
+        # local duck-typed stub, not an LLMClient subclass
         router = RouterAgent(config=config, llm_client=FakeLLM())  # type: ignore[arg-type]
         router.dataset_characteristics = {
             "total_columns": 5,
@@ -588,7 +623,7 @@ class TestRouterAgentEdgeCases:
         assert len(selected) >= 1
 
     @pytest.mark.asyncio
-    async def test_llm_selection_no_llm_falls_back(self):
+    async def test_llm_selection_no_llm_falls_back(self) -> None:
         config = Settings()
         config.router.strategy = "llm"
         router = RouterAgent(config=config, llm_client=None)
@@ -605,7 +640,7 @@ class TestRouterAgentEdgeCases:
 
     # ── Build selection context ────────────────────────────────
 
-    def test_build_selection_context_with_chars(self):
+    def test_build_selection_context_with_chars(self) -> None:
         config = Settings()
         router = RouterAgent(config=config)
         router.dataset_characteristics = {
@@ -620,7 +655,7 @@ class TestRouterAgentEdgeCases:
         assert "Current iteration: Round 1" in ctx
         assert "Total columns: 5" in ctx
 
-    def test_build_selection_context_with_performance(self):
+    def test_build_selection_context_with_performance(self) -> None:
         config = Settings()
         router = RouterAgent(config=config)
         router.dataset_characteristics = {
@@ -637,7 +672,7 @@ class TestRouterAgentEdgeCases:
         assert "unary: 0.1500" in ctx or "unary" in ctx
         assert "temporal: No data yet" in ctx
 
-    def test_build_selection_context_with_task_description(self):
+    def test_build_selection_context_with_task_description(self) -> None:
         config = Settings()
         router = RouterAgent(config=config)
         router.dataset_characteristics = {
@@ -655,7 +690,7 @@ class TestRouterAgentEdgeCases:
 
 
 class TestLLMConfig:
-    def test_max_tokens_default_matches_yaml(self):
+    def test_max_tokens_default_matches_yaml(self) -> None:
         from feature_forge.config import LLMConfig
 
         cfg = LLMConfig()

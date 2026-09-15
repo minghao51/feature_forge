@@ -17,6 +17,8 @@ class _FakeForge:
         self.config = config
         self.kwargs = kwargs
         self.fit_calls = 0
+        self.fit_transform_calls = 0
+        self.transform_calls = 0
         self.generated_scripts = ["script_a"]
         self.feature_metadata = [{"name": "f1"}]
 
@@ -25,6 +27,12 @@ class _FakeForge:
         self.fit_kwargs = kwargs
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        self.transform_calls += 1
+        return pd.DataFrame({"f1": [1] * len(X)}, index=X.index)
+
+    def fit_transform(self, X: pd.DataFrame, y: pd.Series) -> pd.DataFrame:
+        self.fit_transform_calls += 1
+        self.fit(X, y)
         return pd.DataFrame({"f1": [1] * len(X)}, index=X.index)
 
     def get_artifacts(self) -> dict[str, Any]:
@@ -49,7 +57,7 @@ def test_fit_and_transform_delegate_to_feature_forge() -> None:
 
     with patch("feature_forge.methods.malmas.method.FeatureForge", _FakeForge):
         method = MALMASMethod(config=_settings())
-        method.fit(X, y, progress=False)
+        method.fit(X, y)
         out = method.transform(X)
 
     assert list(out.columns) == ["f1"]
@@ -57,6 +65,20 @@ def test_fit_and_transform_delegate_to_feature_forge() -> None:
     assert method.generated_scripts == ["script_a"]
     assert method.feature_metadata == [{"name": "f1"}]
     assert "generated_code" in method.get_artifacts()
+
+
+def test_mode_and_client_are_forwarded_to_feature_forge() -> None:
+    client = object()
+    X = pd.DataFrame({"a": [1, 2]})
+    y = pd.Series([0, 1])
+
+    with patch("feature_forge.methods.malmas.method.FeatureForge", _FakeForge):
+        method = MALMASMethod(config=_settings(), mode="unary", llm_client=client)  # type: ignore[arg-type]
+        method.fit(X, y)
+
+    assert method._forge is not None
+    assert method._forge.kwargs["mode"] == "unary"
+    assert method._forge.kwargs["llm_client"] is client
 
 
 def test_fit_transform_returns_feature_forge_output_once() -> None:
@@ -69,3 +91,6 @@ def test_fit_transform_returns_feature_forge_output_once() -> None:
 
     assert list(enhanced.columns) == ["f1"]
     assert enhanced.shape == (2, 1)
+    assert method._forge is not None
+    assert method._forge.fit_transform_calls == 1
+    assert method._forge.transform_calls == 0

@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
+from typing import Any, cast
 
 import pandas as pd
 import pytest
 
 from feature_forge.api import FeatureForge
-from feature_forge.config import Settings
-from feature_forge.llm.base import LLMClient, LLMResponse
+from feature_forge.config import EvaluationConfig, Settings
+from feature_forge.llm.base import JSONValue, LLMClient, LLMResponse
 from feature_forge.methods.malmas.agents.base import Agent
 from feature_forge.methods.malmas.pipeline.ablations import (
     NoMemoryStaticRouterPipeline,
@@ -20,6 +22,8 @@ from feature_forge.methods.malmas.pipeline.codegen import CodeGenerator
 from feature_forge.methods.malmas.pipeline.core import CorePipeline
 from feature_forge.methods.malmas.pipeline.iterative import IterativePipeline
 from feature_forge.methods.malmas.pipeline.result import PipelineResult
+from feature_forge.methods.malmas.types import AgentName
+from feature_forge.types import FeatureSpec
 
 
 class FakeLLM(LLMClient):
@@ -34,17 +38,32 @@ class FakeLLM(LLMClient):
     def provider_name(self) -> str:
         return "fake"
 
-    async def _do_complete(self, messages, temperature=0.2, max_tokens=4096, **kwargs):
+    async def _do_complete(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float = 0.2,
+        max_tokens: int = 4096,
+        json_mode: bool = False,
+        prompt_meta: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> LLMResponse:
         resp = self.responses[self.call_count % len(self.responses)]
         self.call_count += 1
         return LLMResponse(content=resp, model=self.model)
 
     async def _do_complete_json(
-        self, messages, schema_description, temperature=0.2, max_tokens=4096
-    ):
+        self,
+        messages: list[dict[str, str]],
+        schema_description: str,
+        temperature: float = 0.2,
+        max_tokens: int = 4096,
+        prompt_meta: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> JSONValue:
         resp = self.responses[self.call_count % len(self.responses)]
         self.call_count += 1
-        return json.loads(resp)
+        parsed: JSONValue = json.loads(resp)
+        return parsed
 
 
 class FakeAgent(Agent):
@@ -54,26 +73,31 @@ class FakeAgent(Agent):
     def system_prompt(self) -> str:
         return "fake"
 
-    def __init__(self, specs: list[dict] | None = None) -> None:
-        super().__init__(name="fake_agent", config=Settings(), llm_client=FakeLLM())
-        self._specs = specs or []
+    def __init__(self, specs: list[dict[str, Any]] | None = None) -> None:
+        super().__init__(name=AgentName("fake_agent"), config=Settings(), llm_client=FakeLLM())
+        # Specs are raw dicts that the pipeline duck-types as FeatureSpec
+        # (codegen accepts both); the cast keeps the runtime payload identical.
+        self._specs = cast("list[FeatureSpec]", specs or [])
 
-    async def generate(self, X, y, context):
+    async def generate(
+        self, X: pd.DataFrame, y: pd.Series, context: dict[str, Any]
+    ) -> list[FeatureSpec]:
         return self._specs
 
 
 class TestCodeGenerator:
     @pytest.mark.asyncio
-    async def test_generate_code(self):
+    async def test_generate_code(self) -> None:
         llm = FakeLLM(["def generate_features(df): return df"])
         cg = CodeGenerator(llm)
-        code = await cg.generate_code([{"name": "f1"}])
+        # Raw dict spec is intentional: codegen must accept plain spec dicts.
+        code = await cg.generate_code(cast("list[FeatureSpec]", [{"name": "f1"}]))
         assert "def generate_features" in code
 
 
 class TestCorePipeline:
     @pytest.fixture
-    def sample_data(self):
+    def sample_data(self) -> tuple[pd.DataFrame, pd.Series]:
         X = pd.DataFrame(
             {"a": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], "b": [0, 1, 0, 1, 0, 1, 0, 1]}
         )
@@ -81,7 +105,7 @@ class TestCorePipeline:
         return X, y
 
     @pytest.mark.asyncio
-    async def test_run_with_fake_agent(self, sample_data):
+    async def test_run_with_fake_agent(self, sample_data: tuple[pd.DataFrame, pd.Series]) -> None:
         X, y = sample_data
         specs = [
             {
@@ -105,7 +129,7 @@ def generate_features(df):
 """
         llm = FakeLLM([code])
         config = Settings(
-            task="classification", metric="auc", n_rounds=1, evaluation={"cv_folds": 2}
+            task="classification", metric="auc", n_rounds=1, evaluation=EvaluationConfig(cv_folds=2)
         )
         pipeline = CorePipeline(config=config, llm_client=llm)
         agent = FakeAgent(specs)
@@ -114,7 +138,9 @@ def generate_features(df):
         assert "sum_ab" in result.features_train.columns
 
     @pytest.mark.asyncio
-    async def test_run_no_specs_returns_empty(self, sample_data):
+    async def test_run_no_specs_returns_empty(
+        self, sample_data: tuple[pd.DataFrame, pd.Series]
+    ) -> None:
         X, y = sample_data
         llm = FakeLLM(["[]"])
         config = Settings(n_rounds=1)
@@ -124,7 +150,9 @@ def generate_features(df):
         assert result.features_train.empty
 
     @pytest.mark.asyncio
-    async def test_run_returns_generated_code(self, sample_data):
+    async def test_run_returns_generated_code(
+        self, sample_data: tuple[pd.DataFrame, pd.Series]
+    ) -> None:
         X, y = sample_data
         specs = [
             {
@@ -144,7 +172,7 @@ def generate_features(df):
 """
         llm = FakeLLM([code])
         config = Settings(
-            task="classification", metric="auc", n_rounds=1, evaluation={"cv_folds": 2}
+            task="classification", metric="auc", n_rounds=1, evaluation=EvaluationConfig(cv_folds=2)
         )
         pipeline = CorePipeline(config=config, llm_client=llm)
         agent = FakeAgent(specs)
@@ -154,13 +182,13 @@ def generate_features(df):
 
 class TestIterativePipeline:
     @pytest.fixture
-    def sample_data(self):
+    def sample_data(self) -> tuple[pd.DataFrame, pd.Series]:
         X = pd.DataFrame({"a": list(range(20)), "b": [0, 1] * 10})
         y = pd.Series([0, 1] * 10)
         return X, y
 
     @pytest.mark.asyncio
-    async def test_run_one_round(self, sample_data):
+    async def test_run_one_round(self, sample_data: tuple[pd.DataFrame, pd.Series]) -> None:
         X, y = sample_data
         json_resp = json.dumps(
             [
@@ -187,7 +215,7 @@ def generate_features(df):
             task="classification",
             metric="auc",
             n_rounds=1,
-            evaluation={"cv_folds": 2},
+            evaluation=EvaluationConfig(cv_folds=2),
             min_effective=1,
         )
         pipeline = IterativePipeline(config=config, llm_client=llm)
@@ -198,7 +226,9 @@ def generate_features(df):
         assert len(result["round_summaries"]) == 1
 
     @pytest.mark.asyncio
-    async def test_round_artifacts_no_selected_features_does_not_crash(self, sample_data):
+    async def test_round_artifacts_no_selected_features_does_not_crash(
+        self, sample_data: tuple[pd.DataFrame, pd.Series]
+    ) -> None:
         X, y = sample_data
         json_resp = json.dumps(
             [
@@ -225,7 +255,7 @@ def generate_features(df):
         responses = [json_resp] * 6 + [code] * 6
         llm = FakeLLM(responses)
         config = Settings(
-            task="classification", metric="auc", n_rounds=1, evaluation={"cv_folds": 2}
+            task="classification", metric="auc", n_rounds=1, evaluation=EvaluationConfig(cv_folds=2)
         )
         pipeline = IterativePipeline(config=config, llm_client=llm)
         result = await pipeline.run(X, y, X_test=X.copy())
@@ -234,7 +264,7 @@ def generate_features(df):
 
 class TestAsyncEntryPoints:
     @pytest.mark.asyncio
-    async def test_malmas_async_fit(self):
+    async def test_malmas_async_fit(self) -> None:
         json_resp = json.dumps(
             [
                 {
@@ -256,7 +286,10 @@ def generate_features(df):
         fe = FeatureForge(
             llm_client=llm,
             config=Settings(
-                task="classification", metric="auc", n_rounds=1, evaluation={"cv_folds": 2}
+                task="classification",
+                metric="auc",
+                n_rounds=1,
+                evaluation=EvaluationConfig(cv_folds=2),
             ),
         )
         X = pd.DataFrame({"a": list(range(20)), "b": [0, 1] * 10})
@@ -265,7 +298,7 @@ def generate_features(df):
         assert "selected_features" in result
 
     @pytest.mark.asyncio
-    async def test_malmas_sync_fit_inside_running_loop(self):
+    async def test_malmas_sync_fit_inside_running_loop(self) -> None:
         json_resp = json.dumps(
             [
                 {
@@ -292,7 +325,10 @@ def generate_features(df):
         fe = FeatureForge(
             llm_client=llm,
             config=Settings(
-                task="classification", metric="auc", n_rounds=1, evaluation={"cv_folds": 2}
+                task="classification",
+                metric="auc",
+                n_rounds=1,
+                evaluation=EvaluationConfig(cv_folds=2),
             ),
         )
         X = pd.DataFrame({"a": list(range(20)), "b": [0, 1] * 10})
@@ -303,13 +339,13 @@ def generate_features(df):
 
 class TestAblations:
     @pytest.fixture
-    def sample_data(self):
+    def sample_data(self) -> tuple[pd.DataFrame, pd.Series]:
         X = pd.DataFrame({"a": list(range(20)), "b": [0, 1] * 10})
         y = pd.Series([0, 1] * 10)
         return X, y
 
     @pytest.mark.asyncio
-    async def test_single_agent_pipeline(self, sample_data):
+    async def test_single_agent_pipeline(self, sample_data: tuple[pd.DataFrame, pd.Series]) -> None:
         X, y = sample_data
         json_resp = json.dumps(
             [
@@ -339,7 +375,7 @@ def generate_features(df):
             task="classification",
             metric="auc",
             n_rounds=1,
-            evaluation={"cv_folds": 2},
+            evaluation=EvaluationConfig(cv_folds=2),
             min_effective=1,
         )
         pipeline = SingleAgentPipeline("unary", config=config, llm_client=llm)
@@ -347,12 +383,12 @@ def generate_features(df):
         assert "X_train_enhanced" in result
 
     @pytest.mark.asyncio
-    async def test_no_router_pipeline(self, sample_data):
+    async def test_no_router_pipeline(self, sample_data: tuple[pd.DataFrame, pd.Series]) -> None:
         X, y = sample_data
         # 6 agents return empty specs, so no code gen calls needed
         llm = FakeLLM(["[]"] * 6)
         config = Settings(
-            task="classification", metric="auc", n_rounds=1, evaluation={"cv_folds": 2}
+            task="classification", metric="auc", n_rounds=1, evaluation=EvaluationConfig(cv_folds=2)
         )
         pipeline = NoRouterPipeline(config=config, llm_client=llm)
         result = await pipeline.run(X, y)
@@ -361,7 +397,7 @@ def generate_features(df):
 
 class TestPerAgentContext:
     @pytest.fixture
-    def sample_data(self):
+    def sample_data(self) -> tuple[pd.DataFrame, pd.Series]:
         X = pd.DataFrame(
             {"a": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], "b": [0, 1, 0, 1, 0, 1, 0, 1]}
         )
@@ -369,26 +405,30 @@ class TestPerAgentContext:
         return X, y
 
     @pytest.mark.asyncio
-    async def test_core_pipeline_passes_per_agent_context(self, sample_data):
+    async def test_core_pipeline_passes_per_agent_context(
+        self, sample_data: tuple[pd.DataFrame, pd.Series]
+    ) -> None:
         X, y = sample_data
 
         class ContextCapturingAgent(Agent):
-            def __init__(self, name):
-                super().__init__(name=name, config=Settings(), llm_client=FakeLLM())
-                self.received_context = None
+            def __init__(self, name: str) -> None:
+                super().__init__(name=AgentName(name), config=Settings(), llm_client=FakeLLM())
+                self.received_context: dict[str, Any] | None = None
 
             @property
-            def system_prompt(self):
+            def system_prompt(self) -> str:
                 return "fake"
 
-            async def generate(self, X, y, context):
+            async def generate(
+                self, X: pd.DataFrame, y: pd.Series, context: dict[str, Any]
+            ) -> list[FeatureSpec]:
                 self.received_context = context
                 return []
 
         agent1 = ContextCapturingAgent("agent1")
         agent2 = ContextCapturingAgent("agent2")
         config = Settings(
-            task="classification", metric="auc", n_rounds=1, evaluation={"cv_folds": 2}
+            task="classification", metric="auc", n_rounds=1, evaluation=EvaluationConfig(cv_folds=2)
         )
         pipeline = CorePipeline(config=config, llm_client=FakeLLM([]))
 
@@ -398,21 +438,21 @@ class TestPerAgentContext:
 
 
 class TestSklearnAPI:
-    def test_malmas_feature_engineer_init(self):
+    def test_malmas_feature_engineer_init(self) -> None:
         from feature_forge.api import FeatureForge
 
         llm = FakeLLM([])
         fe = FeatureForge(llm_client=llm)
         assert fe.mode == "full"
 
-    def test_fit_transform_smoke(self):
+    def test_fit_transform_smoke(self) -> None:
         from feature_forge.api import FeatureForge
 
         llm = FakeLLM([])
         fe = FeatureForge(llm_client=llm, mode="no_router")
         assert fe is not None
 
-    def test_transform_executes_cached_code(self):
+    def test_transform_executes_cached_code(self) -> None:
         from feature_forge.api import FeatureForge
 
         json_resp = json.dumps(
@@ -437,22 +477,29 @@ def generate_features(df):
             task="classification",
             metric="auc",
             n_rounds=1,
-            evaluation={"cv_folds": 2},
+            evaluation=EvaluationConfig(cv_folds=2),
             min_effective=1,
         )
         fe = FeatureForge(config=config, llm_client=llm, mode="no_router")
         X = pd.DataFrame({"a": list(range(20)), "b": [0, 1] * 10})
         y = pd.Series([0, 1] * 10)
         fe.fit(X, y)
+        # Isolate replay from statistical selection: this test verifies that a
+        # selected successful code batch is applied to new data.
+        fe.selected_features = ["sum_ab"]
+        assert fe.pipeline_result is not None
+        fe.pipeline_result["round_artifacts"][0]["selected_features_train"] = pd.DataFrame(
+            columns=["sum_ab"]
+        )
 
         X_new = pd.DataFrame({"a": [10, 20, 30], "b": [1, 2, 3]})
         X_out = fe.transform(X_new)
         assert "sum_ab" in X_out.columns
 
-    def test_transform_records_failures_in_best_effort_mode(self):
+    def test_transform_records_failures_in_best_effort_mode(self) -> None:
         from feature_forge.api import FeatureForge
 
-        cfg = Settings(evaluation={"fail_on_feature_error": False})
+        cfg = Settings(evaluation=EvaluationConfig(fail_on_feature_error=False))
         fe = FeatureForge(llm_client=FakeLLM([]), config=cfg)
         fe.feature_codes = ["def generate_features(df):\n    raise ValueError('boom')"]
         X = pd.DataFrame({"a": [1, 2]})
@@ -460,7 +507,7 @@ def generate_features(df):
         assert list(X_out.columns) == ["a"]
         assert len(fe.transform_failures) == 1
 
-    def test_get_pipeline_modes(self):
+    def test_get_pipeline_modes(self) -> None:
         from feature_forge.api import FeatureForge
 
         fe = FeatureForge(llm_client=FakeLLM([]), mode="no_memory")
@@ -479,7 +526,7 @@ def generate_features(df):
         pipeline = fe._get_pipeline()
         assert pipeline.__class__.__name__ == "SingleAgentPipeline"
 
-    def test_transform_gracefully_handles_sandbox_failure(self):
+    def test_transform_gracefully_handles_sandbox_failure(self) -> None:
         from feature_forge.api import FeatureForge
 
         fe = FeatureForge(llm_client=FakeLLM([]))
@@ -489,7 +536,7 @@ def generate_features(df):
         X_out = fe.transform(X)
         assert list(X_out.columns) == ["a"]
 
-    def test_get_feature_names_out(self):
+    def test_get_feature_names_out(self) -> None:
         from feature_forge.api import FeatureForge
 
         fe = FeatureForge(llm_client=FakeLLM([]))
@@ -498,7 +545,7 @@ def generate_features(df):
         assert names == ["a", "b", "f1", "f2"]
 
     @pytest.mark.asyncio
-    async def test_no_memory_static_router_does_not_update_router_performance(self):
+    async def test_no_memory_static_router_does_not_update_router_performance(self) -> None:
         pipeline = NoMemoryStaticRouterPipeline(
             config=Settings(task="classification", metric="auc", n_rounds=1),
             llm_client=FakeLLM([]),

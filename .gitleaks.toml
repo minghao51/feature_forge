@@ -1,0 +1,10 @@
+# gitleaks configuration (used by the `secrets` CI job).
+# Baseline rules + allowlist for dotenvx ciphertext that legitimately lives in
+# git history (the private key was lost, so these blobs are inert — see
+# REPORT_LOG.md 2026-09-05). Plaintext keys (sk-..., ghp_..., ...) must fail.
+
+[allowlist]
+  description = "dotenvx public-key-encrypted values are safe by construction"
+  regexes = [
+    '''encrypted:[A-Za-z0-9+/=]{40,}''',
+  ]

@@ -23,7 +23,7 @@ settings = Settings(task="classification", metric="auc")
 
 **Secrets Management:**
 - Non-sensitive defaults are now in `config/settings.yaml`
-- Only secrets (API keys) go in `.env` (encrypted with dotenvx)
+- Only secrets (API keys) go in `.env` (local, gitignored — never committed)
 - Use `FF_LLM__API_KEY` for a single key across all providers, or set provider-specific keys (DEEPSEEK_API_KEY, OPENAI_API_KEY, etc.)
 
 ### LLM Client
@@ -97,13 +97,21 @@ X_test_enhanced = fe.transform(X_test)
 # No built-in tracking
 ```
 
-**After:**
-```python
-from feature_forge.experiment import ExperimentRunner, WandBTracker
+**After:** experiment tracking is opt-in and defaults to `none` (no
+external tracker). `ExperimentalPlatform` builds the tracker from
+`TrackerConfig` automatically, or you can pass one explicitly:
 
-tracker = WandBTracker(project="feature-forge")
-runner = ExperimentRunner(tracker=tracker)
+```python
+from feature_forge.config import TrackerConfig
+from feature_forge.experiment import create_tracker_from_config, WandBTracker
+
+# Opt-in: default backend is "none"; wandb/mlflow require credentials
+config = TrackerConfig(backend="wandb", project="feature-forge")
+tracker = create_tracker_from_config(config)  # or WandBTracker(project="feature-forge")
 ```
+
+`ExperimentalPlatform.run(tracker=...)` accepts the same instance to override
+the configured backend.
 
 ## Baseline → Method Migration (v0.1 → v0.2)
 
@@ -153,14 +161,14 @@ platform.register_baseline("custom", MyBaseline)
 platform.list_baselines()
 
 # After
-platform.run(datasets=["titanic"], methods=["malmus"], models=["xgboost"])
+platform.run(datasets=["titanic"], methods=["malmus"], models=["random_forest"])
 platform.register_method("custom", MyMethod)
 platform.list_methods()
 ```
 
 ### ExperimentalPlatform Execution Seam Changes
 
-- `ExperimentalPlatform.run()` now executes through `ExperimentCase` + `ExperimentCaseExecutor` + `ExecutionBackend`.
+- `ExperimentalPlatform.run()` now executes through `ExperimentCase` + `HamiltonLayerExecutor` + `ExecutionBackend`.
 - Parallel mode uses process-pool execution via top-level `run_case(payload)`.
 - `parallel=True` accepts registry-discovered methods and rejects instance-local `register_method(...)` methods due to process serialization boundaries.
 - Run outputs are normalized to `ExperimentResult` shape and now include nullable `error`.
@@ -179,7 +187,68 @@ prompt = get_registry().get("unary")
 system_text = prompt.system
 ```
 
-Prompt YAML files live in method packages (e.g., `src/feature_forge/methods/malmas/prompts/unary.yaml`).
+Prompt YAML files live in method packages (e.g., `src/feature_forge/methods/malmas/prompts/unary.v1.yaml`).
+
+## Hamilton-only execution (landed)
+
+The imperative legacy execution engine and the `legacy` artifact-policy branch
+have been removed (ADR 0016); Hamilton is the sole execution engine. Before
+upgrading to the removal release:
+
+- Remove `FF_DATAFLOW__ENGINE=legacy`, YAML `dataflow.engine: legacy`, and
+  `artifact_policy: legacy` overrides. The removal release rejects stale legacy
+  configuration with an actionable migration error pointing here; it is never
+  silently reinterpreted as Hamilton, and engines are never mixed in one
+  attempt.
+- Run evidence is published as verified Bronze/Silver/Gold/Platinum packages on
+  the Hamilton path.
+- The runtime rollback switch is gone. Operational rollback is a package/version
+  downgrade to the last compatibility release — retain that release if you may
+  need emergency rollback.
+- The historical Hamilton/legacy parity evidence is preserved at
+  `experiments/legacy_removal/2026-09-14/`.
+
+## Execution failure policy and cancellation (additive, ADR 0017)
+
+The optional `execution.failure_policy` setting controls the outer experiment
+scheduler (plan 22). The default `continue` keeps scheduling every requested
+case regardless of failed cases — no behavior change. `fail_fast` stops
+scheduling new cases after the first terminal failed case result; in-flight
+work always finishes safely (this is never a hard kill).
+
+- YAML: `execution.failure_policy: continue` (default) or `fail_fast`
+- Environment: `FF_EXECUTION__FAILURE_POLICY=fail_fast`
+- Invalid values fail at configuration construction, before any dataset or
+  provider work.
+
+Runtime enforcement has landed (plan 22 PRs 1–4): sequential fail-fast
+scheduling, bounded process-pool submission, and the cooperative cancellation
+token are all active. Additions since PR 1:
+
+- **Per-run override** — `ExperimentalPlatform.run(failure_policy=...)` wins
+  over `settings.execution.failure_policy` for that invocation only, is
+  recorded in tracker provenance, and never mutates the cached/global
+  `Settings` instance.
+- **Cooperative cancellation token** —
+  `ExperimentalPlatform.run(cancellation_token=...)` accepts a
+  parent-process `CancellationToken` (`feature_forge.experiment.execution`)
+  checked at case boundaries on both the sequential and process paths. A case
+  in flight when cancellation arrives keeps its real result; on the process
+  path at most `max_workers` cases may still complete after a stop condition
+  (bounded, documented — not hard termination).
+- **Result `state` field** — result rows now carry an additive `state`
+  (`succeeded` / `failed` / `cancelled`). Every requested case yields exactly
+  one row in original matrix order, including cancelled never-started cases
+  (no scores, no stage packages, redacted cancellation record). Existing
+  `error` handling is unchanged.
+
+**No migration action is required**: the default remains `continue`
+on-error, row count/order is unchanged, and the new keyword arguments are
+optional. See [Operations](operations.md#execution-failure-policy-and-cancellation),
+`docs/decisions/0017-failure-policy-and-cancellation-contract.md`, and
+`docs/plan/22_fail_fast_cancellation_contract.md`. Case-level retry is
+explicitly out of scope: the `ResourceConfig.max_attempts` fields remain
+dormant, and fail-fast evaluates only after a terminal result.
 
 ## Breaking Changes
 
@@ -195,3 +264,7 @@ Prompt YAML files live in method packages (e.g., `src/feature_forge/methods/malm
 10. **ExperimentalPlatform API** — `baselines=` → `methods=`, `list_baselines()` → `list_methods()`, `register_baseline()` → `register_method()`
 11. **Parallel seam constraint** — `parallel=True` disallows instance-local `register_method(...)` methods; use entry-point/registry methods or set `parallel=False`.
 12. **Result normalization** — Case results follow `ExperimentResult` shape with nullable `error`.
+13. **Heavyweight methods/models are optional extras** — the core install ships the `random_forest` default model. Use the named `openfe`, `caafe`, `xgboost`, `lightgbm`, or `catboost` extra when needed; the `ExperimentalPlatform` default model is now `random_forest` (previously `xgboost`).
+14. **Default model changed** — `ExperimentalPlatform.run(models=None)` and `ModelFactory.get_model(None, ...)` now resolve to `random_forest` instead of `xgboost`.
+15. **Selection cap renamed** — `Settings.max_selected_features` replaces the misleading `min_effective` name. Constructor input using `min_effective` remains a migration alias, but serialized configuration uses the new name.
+16. **MALMAS fit isolation** — unknown modes/agents now fail closed, and normal fits reset memory/router learning. Pass `warm_start=True` explicitly to reuse persisted learned state.

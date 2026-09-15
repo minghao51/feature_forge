@@ -1,0 +1,511 @@
+{
+  "checks": [
+    {
+      "description": "Every case in the Hamilton/legacy matrix completed with finite metrics.",
+      "details": {
+        "problems": []
+      },
+      "id": "matrix_completed",
+      "passed": true
+    },
+    {
+      "description": "Each case produced exactly one sandbox-executed feature.",
+      "details": {
+        "problems": []
+      },
+      "id": "single_sandboxed_feature",
+      "passed": true
+    },
+    {
+      "description": "cv_score, baseline, and gain agree within the documented absolute tolerance (1e-09).",
+      "details": {
+        "problems": []
+      },
+      "id": "metric_parity_within_tolerance",
+      "passed": true
+    },
+    {
+      "description": "All Hamilton medallion packages verify with expected lineage.",
+      "details": {
+        "problems": []
+      },
+      "id": "hamilton_packages_verified",
+      "passed": true
+    },
+    {
+      "description": "The default-on Hamilton cache stored at least one result.",
+      "details": {
+        "exists": true,
+        "serialized_results": 51
+      },
+      "id": "hamilton_cache_active",
+      "passed": true
+    }
+  ],
+  "commands": {
+    "argv": [
+      "scripts/qualify_legacy_removal.py",
+      "--output",
+      "experiments/legacy_removal/2026-09-14"
+    ],
+    "executable": "/home/howt/work/feature_forge/.venv/bin/python3"
+  },
+  "dataset": {
+    "columns": 31,
+    "distribution_version": "1.8.0",
+    "offline": true,
+    "registration": {
+      "path": "/home/howt/work/feature_forge/experiments/legacy_removal/2026-09-14/inputs/breast_cancer_bundled",
+      "rows": 569,
+      "source": "local",
+      "target": "target",
+      "task": "classification"
+    },
+    "rows": 569,
+    "source": "sklearn.datasets.load_breast_cancer"
+  },
+  "determinism_policy": {
+    "excluded_fields": [
+      "allocated attempt/run identifiers",
+      "manifest SHA-256 digests (they cover manifest timestamps)",
+      "cache oldest/newest entry timestamps"
+    ],
+    "json": "sorted keys, stable field set, no wall-clock timestamps"
+  },
+  "environment": {
+    "apache_hamilton_version": "1.90.0",
+    "feature_forge_version": "0.1.0",
+    "machine": "x86_64",
+    "numpy_version": "2.4.4",
+    "operating_system": "linux",
+    "pandas_version": "2.3.3",
+    "python_version": "3.12.13",
+    "runtime": {
+      "intel_active": true,
+      "sklearnex_version": "2026.1.0"
+    },
+    "scikit_learn_version": "1.8.0",
+    "thread_limits": {
+      "MKL_NUM_THREADS": "1",
+      "NUMEXPR_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+    }
+  },
+  "gold_decisions": [
+    {
+      "all_decisions_accepted": true,
+      "candidates_accepted": 1,
+      "candidates_executed": 1,
+      "candidates_proposed": 1,
+      "failure_counts": {},
+      "present": true,
+      "seed": 0
+    },
+    {
+      "all_decisions_accepted": true,
+      "candidates_accepted": 1,
+      "candidates_executed": 1,
+      "candidates_proposed": 1,
+      "failure_counts": {},
+      "present": true,
+      "seed": 1
+    }
+  ],
+  "hamilton_cache": {
+    "entries": 59,
+    "exists": true,
+    "path": "/home/howt/work/feature_forge/experiments/legacy_removal/2026-09-14/artifacts/hamilton/control/cache/hamilton",
+    "serialized_bytes": 1293560,
+    "serialized_results": 51,
+    "total_bytes": 2656976
+  },
+  "matrix": {
+    "cv_folds": 3,
+    "dataset": "breast_cancer_bundled",
+    "engines": [
+      "hamilton",
+      "legacy"
+    ],
+    "expected_cases_per_engine": 2,
+    "method": "qualify_sandboxed_feature",
+    "model": "random_forest",
+    "seeds": [
+      0,
+      1
+    ]
+  },
+  "offline_policy": {
+    "dataset_source": "local",
+    "llm_provider_calls": 0,
+    "network_calls": 0,
+    "note": "The method accepts no llm_client, so no LLM client or provider is ever constructed; the dataset is a local sklearn bundle."
+  },
+  "package_verification": [
+    {
+      "checked_artifacts": 2,
+      "errors": [],
+      "expected_upstream_count": 0,
+      "layer": "bronze",
+      "seed": 0,
+      "upstream_count": 0,
+      "valid": true
+    },
+    {
+      "checked_artifacts": 6,
+      "errors": [],
+      "expected_upstream_count": 1,
+      "layer": "silver",
+      "seed": 0,
+      "upstream_count": 1,
+      "valid": true
+    },
+    {
+      "checked_artifacts": 9,
+      "errors": [],
+      "expected_upstream_count": 1,
+      "layer": "gold",
+      "seed": 0,
+      "upstream_count": 1,
+      "valid": true
+    },
+    {
+      "checked_artifacts": 8,
+      "errors": [],
+      "expected_upstream_count": 2,
+      "layer": "platinum",
+      "seed": 0,
+      "upstream_count": 2,
+      "valid": true
+    },
+    {
+      "checked_artifacts": 2,
+      "errors": [],
+      "expected_upstream_count": 0,
+      "layer": "bronze",
+      "seed": 1,
+      "upstream_count": 0,
+      "valid": true
+    },
+    {
+      "checked_artifacts": 6,
+      "errors": [],
+      "expected_upstream_count": 1,
+      "layer": "silver",
+      "seed": 1,
+      "upstream_count": 1,
+      "valid": true
+    },
+    {
+      "checked_artifacts": 9,
+      "errors": [],
+      "expected_upstream_count": 1,
+      "layer": "gold",
+      "seed": 1,
+      "upstream_count": 1,
+      "valid": true
+    },
+    {
+      "checked_artifacts": 8,
+      "errors": [],
+      "expected_upstream_count": 2,
+      "layer": "platinum",
+      "seed": 1,
+      "upstream_count": 2,
+      "valid": true
+    }
+  ],
+  "parity": [
+    {
+      "dataset": "breast_cancer_bundled",
+      "deltas": {
+        "baseline_score": 0.0,
+        "cv_score": 0.0,
+        "gain": 3.707971429900425e-17
+      },
+      "feature_counts_match": true,
+      "method": "qualify_sandboxed_feature",
+      "model": "random_forest",
+      "num_features_generated": {
+        "hamilton": 1,
+        "legacy": 1
+      },
+      "seed": 0,
+      "within_tolerance": true
+    },
+    {
+      "dataset": "breast_cancer_bundled",
+      "deltas": {
+        "baseline_score": 0.0,
+        "cv_score": 0.0,
+        "gain": 0.0
+      },
+      "feature_counts_match": true,
+      "method": "qualify_sandboxed_feature",
+      "model": "random_forest",
+      "num_features_generated": {
+        "hamilton": 1,
+        "legacy": 1
+      },
+      "seed": 1,
+      "within_tolerance": true
+    }
+  ],
+  "passed": true,
+  "plan_reference": {
+    "document": "docs/plan/21_hamilton_default_execution_handoff.md",
+    "gates_evidenced": [
+      "3: representative Hamilton/legacy metric parity within tolerance",
+      "5: one real experiment matrix with reproducibility metadata"
+    ],
+    "scope_note": "Legacy removal itself still requires the remaining section 16 gates and a separate maintainer decision and ADR.",
+    "section": "16. Merge and rollback strategy"
+  },
+  "resolved_settings": {
+    "hamilton": {
+      "dataflow": {
+        "artifact_policy": "layer_boundaries",
+        "artifact_root": "/home/howt/work/feature_forge/experiments/legacy_removal/2026-09-14/artifacts/hamilton",
+        "cache": {
+          "enabled": true,
+          "log_to_file": false,
+          "max_age_days": null,
+          "max_size_mb": null,
+          "path": "/home/howt/work/feature_forge/experiments/legacy_removal/2026-09-14/artifacts/hamilton/control/cache/hamilton",
+          "telemetry_max_events": 10000
+        },
+        "engine": "hamilton"
+      },
+      "evaluation": {
+        "booster_n_jobs": 1,
+        "cv_folds": 3,
+        "fail_on_agent_error": true,
+        "fail_on_feature_error": true,
+        "feature_eval_backend": "threading",
+        "max_candidate_features": 1,
+        "max_cv_workers": null,
+        "sandbox_max_memory_mb": 4096,
+        "sandbox_timeout_seconds": 60.0
+      },
+      "intel_acceleration": true,
+      "llm": {
+        "agent_max_tokens": 8192,
+        "api_key": {
+          "configured": false
+        },
+        "base_url": null,
+        "cache_dir": "memory_files/llm_cache",
+        "cache_responses": true,
+        "cache_size_limit_mb": null,
+        "cache_ttl_days": null,
+        "codegen_max_tokens": 16384,
+        "max_concurrent_calls": 3,
+        "max_tokens": 32768,
+        "model": "offline-qualification",
+        "provider": "openai",
+        "reasoning_effort": "medium",
+        "temperature": 0.2,
+        "thinking_enabled": true
+      },
+      "max_selected_features": 1,
+      "memory": {
+        "max_size": 100,
+        "persistence_dir": "memory_files/agent_memories"
+      },
+      "metric": "auc",
+      "n_rounds": 1,
+      "random_state": 42,
+      "retry": {
+        "backoff_base": 1.0,
+        "backoff_exponent": 2.0,
+        "backoff_max": 30.0,
+        "max_retries": 3
+      },
+      "router": {
+        "max_agents": null,
+        "min_agents": 1,
+        "strategy": "hybrid",
+        "warmup_rounds": 1
+      },
+      "task": "classification",
+      "tracker": {
+        "backend": "none",
+        "entity": null,
+        "project": "feature-forge"
+      }
+    },
+    "legacy": {
+      "dataflow": {
+        "artifact_policy": "legacy",
+        "artifact_root": "/home/howt/work/feature_forge/experiments/legacy_removal/2026-09-14/artifacts/legacy",
+        "cache": {
+          "enabled": true,
+          "log_to_file": false,
+          "max_age_days": null,
+          "max_size_mb": null,
+          "path": "/home/howt/work/feature_forge/experiments/legacy_removal/2026-09-14/artifacts/legacy/control/cache/hamilton",
+          "telemetry_max_events": 10000
+        },
+        "engine": "legacy"
+      },
+      "evaluation": {
+        "booster_n_jobs": 1,
+        "cv_folds": 3,
+        "fail_on_agent_error": true,
+        "fail_on_feature_error": true,
+        "feature_eval_backend": "threading",
+        "max_candidate_features": 1,
+        "max_cv_workers": null,
+        "sandbox_max_memory_mb": 4096,
+        "sandbox_timeout_seconds": 60.0
+      },
+      "intel_acceleration": true,
+      "llm": {
+        "agent_max_tokens": 8192,
+        "api_key": {
+          "configured": false
+        },
+        "base_url": null,
+        "cache_dir": "memory_files/llm_cache",
+        "cache_responses": true,
+        "cache_size_limit_mb": null,
+        "cache_ttl_days": null,
+        "codegen_max_tokens": 16384,
+        "max_concurrent_calls": 3,
+        "max_tokens": 32768,
+        "model": "offline-qualification",
+        "provider": "openai",
+        "reasoning_effort": "medium",
+        "temperature": 0.2,
+        "thinking_enabled": true
+      },
+      "max_selected_features": 1,
+      "memory": {
+        "max_size": 100,
+        "persistence_dir": "memory_files/agent_memories"
+      },
+      "metric": "auc",
+      "n_rounds": 1,
+      "random_state": 42,
+      "retry": {
+        "backoff_base": 1.0,
+        "backoff_exponent": 2.0,
+        "backoff_max": 30.0,
+        "max_retries": 3
+      },
+      "router": {
+        "max_agents": null,
+        "min_agents": 1,
+        "strategy": "hybrid",
+        "warmup_rounds": 1
+      },
+      "task": "classification",
+      "tracker": {
+        "backend": "none",
+        "entity": null,
+        "project": "feature-forge"
+      }
+    }
+  },
+  "results": {
+    "hamilton": [
+      {
+        "baseline_score": 0.9918945042805856,
+        "case_fingerprint": "7946a5a14b739e39439d37a4c2970d175d3fe9895222df4998bfb7294e70e6d8",
+        "cv_score": 0.9906926150741987,
+        "dataset": "breast_cancer_bundled",
+        "error": null,
+        "failure_class": null,
+        "gain": -0.0012018892063868265,
+        "method": "qualify_sandboxed_feature",
+        "model": "random_forest",
+        "num_features_generated": 1,
+        "seed": 0,
+        "stages": [
+          {
+            "disposition": "executed",
+            "layer": "bronze"
+          },
+          {
+            "disposition": "executed",
+            "layer": "silver"
+          },
+          {
+            "disposition": "executed",
+            "layer": "gold"
+          },
+          {
+            "disposition": "executed",
+            "layer": "platinum"
+          }
+        ]
+      },
+      {
+        "baseline_score": 0.987042422602844,
+        "case_fingerprint": "13fc2fd6a19bd5a4d6715dc86bcefabce91591b2dcf2b4b064f0096ded67175c",
+        "cv_score": 0.9911356091732468,
+        "dataset": "breast_cancer_bundled",
+        "error": null,
+        "failure_class": null,
+        "gain": 0.004093186570402807,
+        "method": "qualify_sandboxed_feature",
+        "model": "random_forest",
+        "num_features_generated": 1,
+        "seed": 1,
+        "stages": [
+          {
+            "disposition": "reused",
+            "layer": "bronze"
+          },
+          {
+            "disposition": "executed",
+            "layer": "silver"
+          },
+          {
+            "disposition": "executed",
+            "layer": "gold"
+          },
+          {
+            "disposition": "executed",
+            "layer": "platinum"
+          }
+        ]
+      }
+    ],
+    "legacy": [
+      {
+        "baseline_score": 0.9918945042805856,
+        "case_fingerprint": null,
+        "cv_score": 0.9906926150741987,
+        "dataset": "breast_cancer_bundled",
+        "error": null,
+        "failure_class": null,
+        "gain": -0.0012018892063868636,
+        "method": "qualify_sandboxed_feature",
+        "model": "random_forest",
+        "num_features_generated": 1,
+        "seed": 0,
+        "stages": []
+      },
+      {
+        "baseline_score": 0.987042422602844,
+        "case_fingerprint": null,
+        "cv_score": 0.9911356091732468,
+        "dataset": "breast_cancer_bundled",
+        "error": null,
+        "failure_class": null,
+        "gain": 0.004093186570402807,
+        "method": "qualify_sandboxed_feature",
+        "model": "random_forest",
+        "num_features_generated": 1,
+        "seed": 1,
+        "stages": []
+      }
+    ]
+  },
+  "schema_version": "1",
+  "tolerance_policy": {
+    "metric_tolerance_absolute": 1e-09,
+    "rationale": "Both engines use identical StratifiedKFold splits (same seed, same row order), the same seeded random forest, and the same metric, so the expected difference is exactly zero; the absolute tolerance only absorbs floating-point summation order."
+  }
+}

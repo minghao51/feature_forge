@@ -6,8 +6,11 @@ from typing import Any
 
 import pandas as pd
 
-from feature_forge.api import FeatureForge
+from feature_forge.api import FeatureForge, validate_mode
 from feature_forge.config import Settings, get_settings
+from feature_forge.evaluation.cv import CVEvaluator
+from feature_forge.evaluation.kit import EvaluationKit
+from feature_forge.llm.base import LLMClient
 from feature_forge.methods.base import BaseMethod
 
 
@@ -18,15 +21,42 @@ class MALMASMethod(BaseMethod):
     interchangeable with other methods via the unified protocol.
     """
 
-    def __init__(self, config: Settings | None = None, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        config: Settings | None = None,
+        mode: str = "full",
+        llm_client: LLMClient | None = None,
+        evaluator: CVEvaluator | None = None,
+        warm_start: bool = False,
+        **kwargs: Any,
+    ) -> None:
         super().__init__("malmas")
         self._config = config or get_settings()
+        self._mode = validate_mode(mode)
+        self._llm_client = llm_client
+        self._evaluator = evaluator
+        self._warm_start = warm_start
         self._kwargs = kwargs
         self._forge: FeatureForge | None = None
 
-    def fit(self, X_train: pd.DataFrame, y_train: pd.Series, **kwargs: Any) -> MALMASMethod:
-        self._forge = FeatureForge(config=self._config, **self._kwargs)
-        self._forge.fit(X_train, y_train, **kwargs)
+    def _new_forge(self) -> FeatureForge:
+        evaluation_kit = None
+        if self._evaluator is not None:
+            evaluation_kit = EvaluationKit.from_settings(self._config)
+            evaluation_kit.evaluator = self._evaluator
+            evaluation_kit.model_factory = self._evaluator.model_factory
+        return FeatureForge(
+            config=self._config,
+            mode=self._mode,
+            llm_client=self._llm_client,
+            warm_start=self._warm_start,
+            evaluation_kit=evaluation_kit,
+            **self._kwargs,
+        )
+
+    def fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> MALMASMethod:
+        self._forge = self._new_forge()
+        self._forge.fit(X_train, y_train)
         return self
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
@@ -34,11 +64,9 @@ class MALMASMethod(BaseMethod):
             raise RuntimeError("MALMASMethod not fitted yet")
         return self._forge.transform(X)
 
-    def fit_transform(
-        self, X_train: pd.DataFrame, y_train: pd.Series, **kwargs: Any
-    ) -> pd.DataFrame:
-        self.fit(X_train, y_train, **kwargs)
-        return self.transform(X_train)
+    def fit_transform(self, X_train: pd.DataFrame, y_train: pd.Series) -> pd.DataFrame:
+        self._forge = self._new_forge()
+        return self._forge.fit_transform(X_train, y_train)
 
     @property
     def generated_scripts(self) -> list[str]:

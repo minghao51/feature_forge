@@ -8,7 +8,7 @@
 ┌─────────────────────────────────────────────────────────┐
 │  ExperimentalPlatform / FeatureForge (sklearn API)      │
 ├─────────────────────────────────────────────────────────┤
-│  Experiment Layer  │ matrix → runner → case_executor    │
+│  Experiment Layer  │ ExperimentalPlatform → HamiltonLayerExecutor            │
 ├─────────────────────────────────────────────────────────┤
 │  Methods Layer     │ MethodRegistry → BaseMethod        │
 │                    │ malmas / caafe / llmfe / openfe /  │
@@ -38,7 +38,7 @@ Layered: **Plugin-registry pattern with entry points for methods, agents, metric
 |-------|----------|---------|
 | Public API (sklearn) | `src/feature_forge/api.py` | `FeatureForge(BaseEstimator, TransformerMixin)` — fit/transform with pipeline dispatch |
 | Platform API | `src/feature_forge/platform.py` | `ExperimentalPlatform` facade — method comparison with cartesian matrix |
-| Experiment harness | `src/feature_forge/experiment/` | `ExperimentalPlatform` → `ExperimentCaseExecutor` — sequential or process-pool; tracker via `create_tracker_from_config` |
+| Experiment harness | `src/feature_forge/experiment/` | `ExperimentalPlatform` → `HamiltonLayerExecutor` (sole engine, ADR 0016); tracker via `create_tracker_from_config` (default `none`) |
 | Methods (plugin registry) | `src/feature_forge/methods/` | `BaseMethod` + `MethodRegistry` (entry-point discovery) — 5 methods |
 | MALMAS agents | `src/feature_forge/methods/malmas/agents/` | 6 specialized agents + `RouterAgent` — entry-point pluggable |
 | MALMAS pipeline | `src/feature_forge/methods/malmas/pipeline/` | `CorePipeline` (single-round) → `IterativePipeline` (multi-round with router/memory) |
@@ -49,7 +49,7 @@ Layered: **Plugin-registry pattern with entry points for methods, agents, metric
 | Data loading | `src/feature_forge/data/` | `DatasetRegistry` (entry-point) + `ingestion` — titanic, house_prices built-in |
 | Observability | `src/feature_forge/observability/` | structlog config + Langfuse tracer |
 | Artifacts | `src/feature_forge/artifacts/` | `ArtifactExporter` base + `DataFrameStorage` (memory/disk/hybrid) |
-| Configuration | `src/feature_forge/config.py` | `Settings(BaseSettings)` — YAML → env (`FF_*`) → .env (dotenvx) |
+| Configuration | `src/feature_forge/config.py` | `Settings(BaseSettings)` — YAML → env (`FF_*`) → local `.env` (gitignored) |
 | Types | `src/feature_forge/types.py` | `FeatureSpec`, `DatasetName`, `MetricName`, newtypes |
 
 **Entry points**:
@@ -61,7 +61,7 @@ Layered: **Plugin-registry pattern with entry points for methods, agents, metric
 
 **Sklearn flow**: `FeatureForge.fit(X, y)` → `IterativePipeline.run()` → N rounds of [Router selects agents → agents generate FeatureSpecs → CorePipeline generates/executes code → CVEvaluator scores] → `FeatureForge.transform(X)` applies code via `SandboxedExecutor`
 
-**Experiment flow**: `ExperimentalPlatform.run()` → cartesian `datasets × methods × models × seeds` → `ExperimentCaseExecutor.execute()` per case → `MethodRegistry` resolves method → `BaseMethod.fit_transform()` → results collected → `Reporter.to_markdown()`
+**Experiment flow**: `ExperimentalPlatform.run()` → cartesian `datasets × methods × models × seeds` → `HamiltonLayerExecutor.execute_case()` per case → `MethodRegistry` resolves method → `BaseMethod.fit_transform()` → results collected → `Reporter.to_markdown()`
 
 **LLM call flow**: `LLMClient.chat()` → provider-specific SDK (openai/anthropic/deepseek/litellm) → response cached by SHA-256 key in `DiskCache` → optional Langfuse trace
 
@@ -75,7 +75,7 @@ Layered: **Plugin-registry pattern with entry points for methods, agents, metric
 | Package manager | uv | Dependency management, virtual environments |
 | Build system | hatchling | PEP 517 build backend |
 | Config | pydantic-settings + PyYAML | Layered config: YAML → env → .env |
-| Secrets | dotenvx | Encrypted `.env` file management |
+| Secrets | local `.env` (gitignored) + `FF_*` env vars | Plaintext local secrets; `.env` never committed |
 | LLM clients | openai, anthropic | SDK for LLM API calls |
 | LLM routing | litellm (optional) | Multi-provider LLM proxy |
 | ML models | scikit-learn, xgboost | Baseline and evaluation models |
@@ -85,8 +85,8 @@ Layered: **Plugin-registry pattern with entry points for methods, agents, metric
 | Execution sandbox | multiprocessing + ast | Sandboxed LLM code execution |
 | Logging | structlog | Structured JSON/console logging |
 | Observability | Langfuse, OpenTelemetry | LLM call tracing and monitoring |
-| Experiment tracking | wandb (default), mlflow (opt) | Metric and artifact logging |
-| Caching | diskcache | LLM response cache (SHA-256 keys) |
+| Experiment tracking | none (default, NoOp); wandb/mlflow opt-in | Metric and artifact logging |
+| Caching | diskcache | Mandatory LLM response cache (SHA-256 keys) + Hamilton node cache (default-on, disposable acceleration) |
 | Testing | pytest, hypothesis | Unit/integration/property testing |
 | Linting | ruff | Linting + formatting |
 | Type checking | mypy (strict) | Static type analysis |
@@ -123,7 +123,7 @@ No Docker. No external services required at runtime (LLM APIs called via HTTP).
 
 ### Auth Flow
 
-No user authentication. All auth is API-key-based for external services: LLM provider keys (`FF_LLM__API_KEY` or provider-specific env vars), WandB key (`WANDB_API_KEY`), and Langfuse keys (`LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY`). Secrets are managed via dotenvx-encrypted `.env` file; non-sensitive defaults live in `config/settings.yaml`.
+No user authentication. All auth is API-key-based for external services: LLM provider keys (`FF_LLM__API_KEY` or provider-specific env vars), WandB key (`WANDB_API_KEY`), and Langfuse keys (`LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY`). Secrets live in a local, gitignored `.env` file or exported env vars; non-sensitive defaults live in `config/settings.yaml`.
 
 ## Environment Variables
 

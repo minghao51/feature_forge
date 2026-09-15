@@ -43,21 +43,21 @@ class StandaloneBaseline:
 class IncompleteBaseline:
     """A class that does NOT satisfy MethodProtocol (missing methods)."""
 
-    def fit(self, X, y):
+    def fit(self, X: pd.DataFrame, y: pd.Series) -> IncompleteBaseline:
         return self
 
 
 class TestMethodProtocol:
     """Verify that MethodProtocol works as a runtime-checkable protocol."""
 
-    def test_standalone_baseline_class_satisfies(self):
+    def test_standalone_baseline_class_satisfies(self) -> None:
         assert isinstance(StandaloneBaseline(), MethodProtocol)
 
-    def test_standalone_baseline_instance_satisfies(self):
+    def test_standalone_baseline_instance_satisfies(self) -> None:
         instance = StandaloneBaseline()
         assert isinstance(instance, MethodProtocol)
 
-    def test_instance_has_required_members(self):
+    def test_instance_has_required_members(self) -> None:
         instance = StandaloneBaseline()
         assert hasattr(instance, "name")
         assert hasattr(instance, "fit")
@@ -67,18 +67,18 @@ class TestMethodProtocol:
         assert hasattr(instance, "feature_metadata")
         assert hasattr(instance, "get_artifacts")
 
-    def test_plain_object_does_not_satisfy(self):
+    def test_plain_object_does_not_satisfy(self) -> None:
         assert not isinstance(object(), MethodProtocol)
 
-    def test_incomplete_class_does_not_satisfy(self):
+    def test_incomplete_class_does_not_satisfy(self) -> None:
         assert not isinstance(IncompleteBaseline(), MethodProtocol)
 
-    def test_baseline_abc_instance_satisfies(self):
+    def test_baseline_abc_instance_satisfies(self) -> None:
         # Cannot instantiate ABC directly, but check the class structure
         assert hasattr(BaseMethod, "fit")
         assert hasattr(BaseMethod, "transform")
 
-    def test_builtin_classes_have_correct_structure(self):
+    def test_builtin_classes_have_correct_structure(self) -> None:
         for cls in [MalmusMethod, CAAFEMethod, OpenFEMethod]:
             assert hasattr(cls, "fit")
             assert hasattr(cls, "transform")
@@ -86,7 +86,7 @@ class TestMethodProtocol:
             assert hasattr(cls, "generated_scripts")
             assert hasattr(cls, "get_artifacts")
 
-    def test_baseline_is_protocol(self):
+    def test_baseline_is_protocol(self) -> None:
         # BaseMethod ABC should produce instances that satisfy the protocol
         # (if it were instantiable — concrete subclasses do)
         assert hasattr(BaseMethod, "generated_scripts")

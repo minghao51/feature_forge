@@ -1,0 +1,16 @@
+{
+  "cache_total_bytes": 8226203,
+  "cold_duration_ms": 1400.1466409972636,
+  "dataset_rows": 100000,
+  "eligible_nodes": 10,
+  "peak_rss_kib": 309068,
+  "provider_calls": 0,
+  "sandbox_executions": 0,
+  "schema_version": "1",
+  "serialized_bytes": 7727987,
+  "serialized_results": 20,
+  "source_loads": 2,
+  "warm_duration_ms": 327.0428020041436,
+  "warm_hit_rate": 1.0,
+  "warm_hits": 10
+}

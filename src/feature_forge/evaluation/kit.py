@@ -17,7 +17,10 @@ class EvaluationKit:
     @classmethod
     def from_settings(cls, settings: Settings | None = None) -> EvaluationKit:
         settings = settings or Settings()
-        model_factory = ModelFactory(random_state=settings.random_state)
+        model_factory = ModelFactory(
+            random_state=settings.random_state,
+            booster_n_jobs=settings.evaluation.booster_n_jobs,
+        )
         evaluator = CVEvaluator(config=settings, model_factory=model_factory)
         sandbox = SandboxedExecutor(
             timeout_seconds=settings.evaluation.sandbox_timeout_seconds,

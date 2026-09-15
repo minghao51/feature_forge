@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pandas as pd
 
@@ -22,3 +22,6 @@ class PipelineResult:
     baseline_score: float
     gains: dict[str, float]
     generated_code: str
+    generated_codes: list[str] = field(default_factory=list)
+    code_features: list[list[str]] = field(default_factory=list)
+    feature_failures: list[dict[str, str]] = field(default_factory=list)

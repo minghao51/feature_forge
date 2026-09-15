@@ -11,7 +11,7 @@ from feature_forge.methods.base import MethodRegistry
 class TestPluginDiscovery:
     """Verify that built-in entry points are discoverable."""
 
-    def test_method_entry_points_discovered(self):
+    def test_method_entry_points_discovered(self) -> None:
         methods = MethodRegistry.get_all_methods()
         assert "malmas" in methods
         assert "openfe" in methods
@@ -19,7 +19,7 @@ class TestPluginDiscovery:
         assert "llmfe" in methods
         assert "malmus" in methods
 
-    def test_metric_entry_points_discovered(self):
+    def test_metric_entry_points_discovered(self) -> None:
         metrics = MetricRegistry.get_all()
         assert "auc" in metrics
         assert "acc" in metrics
@@ -29,7 +29,7 @@ class TestPluginDiscovery:
         assert "r2" in metrics
         assert "nrmse" in metrics
 
-    def test_model_entry_points_discovered(self):
+    def test_model_entry_points_discovered(self) -> None:
         models = ModelRegistry.get_all()
         assert "xgboost" in models
         assert "lightgbm" in models
@@ -37,13 +37,13 @@ class TestPluginDiscovery:
         assert "random_forest" in models
         assert "mlp" in models
 
-    def test_dataset_entry_points_discovered(self):
+    def test_dataset_entry_points_discovered(self) -> None:
         registry = DatasetRegistry(sample_dir="/nonexistent")
         datasets = registry.list()
         assert "titanic" in datasets
         assert "house_prices" in datasets
 
-    def test_method_registry_caches_discovery(self):
+    def test_method_registry_caches_discovery(self) -> None:
         MethodRegistry.clear_cache()
         MethodRegistry.get_all_methods()
         first = MethodRegistry._discovered
@@ -51,7 +51,7 @@ class TestPluginDiscovery:
         second = MethodRegistry._discovered
         assert first is second  # cached discovered reference
 
-    def test_metric_registry_caches_discovery(self):
+    def test_metric_registry_caches_discovery(self) -> None:
         MetricRegistry.clear_cache()
         MetricRegistry.get_all()
         first = MetricRegistry._discovered
@@ -59,7 +59,7 @@ class TestPluginDiscovery:
         second = MetricRegistry._discovered
         assert first is second  # cached discovered reference
 
-    def test_model_registry_caches_discovery(self):
+    def test_model_registry_caches_discovery(self) -> None:
         ModelRegistry.clear_cache()
         ModelRegistry.get_all()
         first = ModelRegistry._discovered
@@ -67,7 +67,7 @@ class TestPluginDiscovery:
         second = ModelRegistry._discovered
         assert first is second  # cached discovered reference
 
-    def test_registry_refresh_rebuilds_discovery_cache(self):
+    def test_registry_refresh_rebuilds_discovery_cache(self) -> None:
         MethodRegistry.clear_cache()
         MetricRegistry.clear_cache()
         ModelRegistry.clear_cache()

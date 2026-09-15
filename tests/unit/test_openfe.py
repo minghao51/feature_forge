@@ -21,68 +21,78 @@ pytestmark = pytest.mark.contract
 
 
 class TestOpenFEContract:
-    def test_is_subclass_of_baseline(self):
+    def test_is_subclass_of_baseline(self) -> None:
         assert issubclass(OpenFEMethod, BaseMethod)
 
-    def test_has_required_members(self):
+    def test_has_required_members(self) -> None:
         for attr in ("fit", "transform", "fit_transform", "generated_scripts", "feature_metadata"):
             assert hasattr(OpenFEMethod, attr)
 
-    def test_generated_scripts_empty(self):
+    def test_generated_scripts_empty(self) -> None:
         method = OpenFEMethod()
         assert method.generated_scripts == []
 
-    def test_feature_metadata_empty_when_no_artifacts(self):
+    def test_feature_metadata_empty_when_no_artifacts(self) -> None:
         method = OpenFEMethod()
         assert method.feature_metadata == []
 
-    def test_default_name(self):
+    def test_default_name(self) -> None:
         method = OpenFEMethod()
         assert method.name == "openfe"
 
 
 class TestOpenFEErrors:
-    def test_transform_before_fit_raises(self):
+    def test_transform_before_fit_raises(self) -> None:
         method = OpenFEMethod()
         with pytest.raises(EvaluationError, match="not fitted"):
             method.transform(pd.DataFrame({"a": [1]}))
 
-    def test_fit_missing_openfe_raises(self):
+    def test_fit_missing_openfe_raises(self) -> None:
         method = OpenFEMethod()
         X = pd.DataFrame({"a": [1, 2, 3]})
         y = pd.Series([0, 1, 0])
         with patch.dict("sys.modules", {"openfe": None}):
-            with pytest.raises(EvaluationError, match="openfe not installed"):
+            with pytest.raises(EvaluationError, match=r"feature-forge\[openfe\]"):
                 method.fit(X, y)
+
+    def test_transform_missing_openfe_raises(self) -> None:
+        method = OpenFEMethod()
+        method._ofe = object()  # bypass the not-fitted guard
+        method._features = []
+        with patch.dict("sys.modules", {"openfe": None}):
+            with pytest.raises(EvaluationError, match=r"feature-forge\[openfe\]"):
+                method.transform(pd.DataFrame({"a": [1]}))
 
 
 class TestOperatorNames:
     """Cover _operator_names static method (lines 102-116)."""
 
-    def test_none_returns_none(self):
+    def test_none_returns_none(self) -> None:
         assert OpenFEMethod._operator_names(None) is None
 
-    def test_node_with_name(self):
+    def test_node_with_name(self) -> None:
         node = MagicMock()
         node.name = "add(a, b)"
         result = OpenFEMethod._operator_names([node])
         assert result == ["add(a, b)"]
 
-    def test_node_with_repr(self):
+    def test_node_with_repr(self) -> None:
         node = MagicMock()
         del node.name
-        node.__repr__ = MagicMock(return_value="CustomNode(a, b)")
+        # MagicMock allows per-instance dunder overrides; mypy cannot model it.
+        node.__repr__ = MagicMock(return_value="CustomNode(a, b)")  # type: ignore[method-assign]
         result = OpenFEMethod._operator_names([node])
         assert result == ["CustomNode(a, b)"]
 
-    def test_node_with_repr_fallback(self):
+    def test_node_with_repr_fallback(self) -> None:
         node = MagicMock()
         del node.name
-        node.__repr__ = MagicMock(return_value="ReprNode(x, y)")
+        # MagicMock allows per-instance dunder overrides; mypy cannot model it.
+        node.__repr__ = MagicMock(return_value="ReprNode(x, y)")  # type: ignore[method-assign]
         result = OpenFEMethod._operator_names([node])
         assert result == ["ReprNode(x, y)"]
 
-    def test_multiple_operators(self):
+    def test_multiple_operators(self) -> None:
         nodes = []
         for name in ("add", "multiply", "log"):
             node = MagicMock()
@@ -95,19 +105,19 @@ class TestOperatorNames:
 class TestImportanceDf:
     """Cover _importance_df static method (lines 118-128)."""
 
-    def test_numpy_array_returns_dataframe(self):
+    def test_numpy_array_returns_dataframe(self) -> None:
         arr = np.array([0.1, 0.2, 0.3])
         result = OpenFEMethod._importance_df(arr)
         assert isinstance(result, pd.DataFrame)
         assert list(result["rank"]) == [0, 1, 2]
         assert list(result["importance"]) == [0.1, 0.2, 0.3]
 
-    def test_invalid_importance_returns_empty(self):
+    def test_invalid_importance_returns_empty(self) -> None:
         result = OpenFEMethod._importance_df("not-an-array")
         assert isinstance(result, pd.DataFrame)
         assert len(result) == 0
 
-    def test_empty_array(self):
+    def test_empty_array(self) -> None:
         arr = np.array([])
         result = OpenFEMethod._importance_df(arr)
         assert isinstance(result, pd.DataFrame)
@@ -117,7 +127,7 @@ class TestImportanceDf:
 class TestExtractArtifacts:
     """Cover _extract_artifacts with mocked OpenFE internals."""
 
-    def test_extracts_selected_operators(self):
+    def test_extracts_selected_operators(self) -> None:
         method = OpenFEMethod()
         mock_node = MagicMock()
         mock_node.name = "add(a, b)"
@@ -126,7 +136,7 @@ class TestExtractArtifacts:
         method._extract_artifacts()
         assert method._artifacts["selected_operators"] == ["add(a, b)"]
 
-    def test_candidate_features_none_warns(self):
+    def test_candidate_features_none_warns(self) -> None:
         method = OpenFEMethod()
         mock_node = MagicMock()
         mock_node.name = "add(a, b)"
@@ -138,7 +148,7 @@ class TestExtractArtifacts:
             method._extract_artifacts()
         assert method._artifacts["candidate_operators"] is None
 
-    def test_importances_none_warns(self):
+    def test_importances_none_warns(self) -> None:
         method = OpenFEMethod()
         mock_node = MagicMock()
         mock_node.name = "add(a, b)"
@@ -151,7 +161,7 @@ class TestExtractArtifacts:
             method._extract_artifacts()
         assert method._artifacts["feature_importances"] is None
 
-    def test_full_artifact_extraction(self):
+    def test_full_artifact_extraction(self) -> None:
         method = OpenFEMethod()
         node = MagicMock()
         node.name = "mul(a, b)"

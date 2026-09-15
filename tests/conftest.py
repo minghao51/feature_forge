@@ -3,12 +3,45 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import Any
 
 import pandas as pd
 import pytest
 
 from feature_forge.llm.base import LLMClient
+
+# Provider-credential env vars that must never leak from a developer shell or
+# local .env into unit tests (code under test can auto-create real LLM
+# clients and hit the network — observed via FeatureForge.__init__).
+_CREDENTIAL_VARS = (
+    "FF_LLM__API_KEY",
+    "DEEPSEEK_API_KEY",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "WANDB_API_KEY",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
+)
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Isolate tests from the developer's local config and secrets.
+
+    ``Settings.model_config["env_file"]`` points at a local, gitignored
+    ``.env`` (2026-09-05 change) that may contain real API keys. Without
+    this guard, ``Settings()`` constructed inside code under test picks up
+    those secrets and can make live network calls. Tests that want to
+    exercise .env loading pass an explicit ``_env_file=`` constructor arg,
+    which is unaffected by this fixture.
+    """
+    from feature_forge.config import Settings
+
+    monkeypatch.setitem(Settings.model_config, "env_file", None)
+    for var in _CREDENTIAL_VARS:
+        monkeypatch.delenv(var, raising=False)
+
 
 _AUTO_MARK_DIRS = {"unit": "unit", "integration": "integration"}
 _MARKER_DECORATORS = {"property", "metamorphic", "contract", "differential"}
@@ -56,10 +89,12 @@ class FakeLLM(LLMClient):
         schema_description: str,
         temperature: float = 0.2,
         max_tokens: int = 4096,
+        prompt_meta: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         enhanced = self._inject_json_schema(messages, schema_description)
         response = await self._do_complete(enhanced, temperature, max_tokens, json_mode=True)
-        return json.loads(response.content)
+        parsed: dict[str, Any] = json.loads(response.content)
+        return parsed
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
@@ -72,13 +107,13 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 
 
 @pytest.fixture
-def fake_llm():
+def fake_llm() -> FakeLLM:
     """Return a FakeLLM instance with no responses configured."""
     return FakeLLM()
 
 
 @pytest.fixture
-def sample_config():
+def sample_config() -> dict[str, str | int]:
     """Return a minimal valid configuration dict."""
     return {
         "task": "classification",
@@ -89,7 +124,7 @@ def sample_config():
 
 
 @pytest.fixture
-def sample_dataframe():
+def sample_dataframe() -> pd.DataFrame:
     """Return a small synthetic DataFrame for tests."""
     return pd.DataFrame(
         {
@@ -101,6 +136,6 @@ def sample_dataframe():
 
 
 @pytest.fixture
-def sample_series():
+def sample_series() -> pd.Series:
     """Return a binary classification target."""
     return pd.Series([0, 1, 0, 1, 0], name="target")

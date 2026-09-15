@@ -1,5 +1,10 @@
 site_name: Feature Forge
 site_url: https://minghao51.github.io/feature_forge/
+exclude_docs: |
+  README.md
+  archive/
+  decisions/
+  deferred-design.md
 theme:
   name: material
   custom_dir: overrides
@@ -65,9 +70,11 @@ nav:
   - Methods: methods.md
   - API Reference: api_reference.md
   - Migration Guide: migration_guide.md
-  - MALMAS Technical Roadmap: MALMAS_Technical_Roadmap.md
+  - Operations: operations.md
+  - Generated Stage DAGs: generated/stage_dags.md
   - Implementation Plan:
       - Overview: plan/00_index.md
+      - MALMAS Founding Roadmap: MALMAS_Technical_Roadmap.md
       - 01 Architecture: plan/01_architecture.md
       - 02 Directory Structure: plan/02_directory_structure.md
       - 03 Key Design Decisions: plan/03_key_design_decisions.md
@@ -85,6 +92,12 @@ nav:
       - 15 Notebook Updates: plan/15_notebook_updates_handoff.md
       - 16 Prompt Colocation: plan/16_prompt_colocation_pydantic.md
       - 17 Code Simplification: plan/17_code_simplification.md
+      - 18 SAGE Memory: plan/18_sage_inspired_memory_evolution.md
+      - 19 UX Improvements: plan/19_ux_improvements.md
+      - 20 Long-Term Roadmap: plan/20_long_term_roadmap.md
+      - 21 Hamilton Default Execution: plan/21_hamilton_default_execution_handoff.md
+      - 22 Fail-Fast and Cancellation: plan/22_fail_fast_cancellation_contract.md
+      - 23 Evaluation Integrity and Sandbox Hardening: plan/23_evaluation_integrity_security_hardening.md
   - Notebooks:
       - Overview: notebooks/index.md
       - 01 Getting Started: notebooks/01_getting_started.ipynb

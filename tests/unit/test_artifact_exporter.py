@@ -2,22 +2,37 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 
 from feature_forge.artifacts.base import ArtifactConfig, ArtifactExporter
-from feature_forge.llm.base import LLMResponse
+from feature_forge.llm.base import LLMClient, LLMResponse
 
 
 class FakeLLM:
+    """Duck-typed stand-in for LLMClient; cast where a LLMClient is required
+    (src exposes no protocol for the client interface)."""
+
     def __init__(self, code: str) -> None:
         self.code = code
 
-    async def complete(self, messages, temperature=0.2, max_tokens=4096, **kwargs):
+    async def complete(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float = 0.2,
+        max_tokens: int = 4096,
+        **kwargs: Any,
+    ) -> LLMResponse:
         return LLMResponse(content=self.code, model="fake")
 
-    async def _do_complete(self, messages, temperature=0.2, max_tokens=4096, **kwargs):
+    async def _do_complete(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float = 0.2,
+        max_tokens: int = 4096,
+        **kwargs: Any,
+    ) -> LLMResponse:
         return await self.complete(messages, temperature, max_tokens, **kwargs)
 
 
@@ -33,24 +48,24 @@ class ConcreteExporter(ArtifactExporter):
 
 
 class TestArtifactConfig:
-    def test_defaults(self):
+    def test_defaults(self) -> None:
         cfg = ArtifactConfig()
         assert cfg.storage_mode == "memory"
         assert cfg.storage_format == "parquet"
 
 
 class TestArtifactExporterABC:
-    def test_concrete_exporter_generated_scripts(self):
+    def test_concrete_exporter_generated_scripts(self) -> None:
         exporter = ConcreteExporter()
         assert exporter.generated_scripts == ["print('hello')"]
 
-    def test_concrete_exporter_get_artifacts(self):
+    def test_concrete_exporter_get_artifacts(self) -> None:
         exporter = ConcreteExporter()
         artifacts = exporter.get_artifacts()
         assert "code" in artifacts
         assert "score" in artifacts
 
-    def test_intermediate_dataframes_filters_df(self):
+    def test_intermediate_dataframes_filters_df(self) -> None:
         class DFExporter(ArtifactExporter):
             @property
             def generated_scripts(self) -> list[str]:
@@ -69,34 +84,34 @@ class TestArtifactExporterABC:
         assert "df2" in dfs
         assert "score" not in dfs
 
-    def test_feature_metadata_default_empty(self):
+    def test_feature_metadata_default_empty(self) -> None:
         exporter = ConcreteExporter()
         assert exporter.feature_metadata == []
 
 
 class TestBaselineArtifacts:
-    def test_baseline_has_artifact_config(self):
+    def test_baseline_has_artifact_config(self) -> None:
         from feature_forge.methods.llmfe import LLMFEMethod
 
         llm = FakeLLM("def generate_features(df): return df")
-        baseline = LLMFEMethod(llm_client=llm)
+        baseline = LLMFEMethod(llm_client=cast("LLMClient", llm))
         assert isinstance(baseline.artifact_config, ArtifactConfig)
 
-    def test_baseline_get_artifacts_empty_before_fit(self):
+    def test_baseline_get_artifacts_empty_before_fit(self) -> None:
         from feature_forge.methods.llmfe import LLMFEMethod
 
         llm = FakeLLM("def generate_features(df): return df")
-        baseline = LLMFEMethod(llm_client=llm)
+        baseline = LLMFEMethod(llm_client=cast("LLMClient", llm))
         assert baseline.get_artifacts() == {}
 
-    def test_baseline_inherits_artifact_exporter(self):
+    def test_baseline_inherits_artifact_exporter(self) -> None:
         from feature_forge.methods.llmfe import LLMFEMethod
 
         llm = FakeLLM("def generate_features(df): return df")
-        baseline = LLMFEMethod(llm_client=llm)
+        baseline = LLMFEMethod(llm_client=cast("LLMClient", llm))
         assert isinstance(baseline, ArtifactExporter)
 
-    def test_llmfe_single_shot_artifacts(self):
+    def test_llmfe_single_shot_artifacts(self) -> None:
         from feature_forge.methods.llmfe import LLMFEMethod
 
         code = """
@@ -108,7 +123,7 @@ def generate_features(df):
     return result
 """
         llm = FakeLLM(code)
-        baseline = LLMFEMethod(llm_client=llm, mode="single_shot")
+        baseline = LLMFEMethod(llm_client=cast("LLMClient", llm), mode="single_shot")
         X = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
         y = pd.Series([0, 1, 0])
         baseline.fit(X, y)
@@ -119,7 +134,7 @@ def generate_features(df):
         assert "generated_code" in artifacts
         assert "sum_ab" in artifacts["generated_code"]
 
-    def test_llmfe_generated_scripts_after_fit(self):
+    def test_llmfe_generated_scripts_after_fit(self) -> None:
         from feature_forge.methods.llmfe import LLMFEMethod
 
         code = """
@@ -129,7 +144,7 @@ def generate_features(df):
     return pd.DataFrame({'new': df['a'] * 2}, index=df.index)
 """
         llm = FakeLLM(code)
-        baseline = LLMFEMethod(llm_client=llm)
+        baseline = LLMFEMethod(llm_client=cast("LLMClient", llm))
         X = pd.DataFrame({"a": [1, 2, 3]})
         y = pd.Series([0, 1, 0])
         baseline.fit(X, y)

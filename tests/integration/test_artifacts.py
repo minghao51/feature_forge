@@ -2,28 +2,61 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
 import pandas as pd
 
-from feature_forge.config import Settings
+from feature_forge.api import FeatureForge
+from feature_forge.config import EvaluationConfig, Settings
 from feature_forge.evaluation.cv import CVEvaluator
-from feature_forge.llm.base import LLMResponse
+from feature_forge.llm.base import LLMClient, LLMResponse
 
 
-def _make_llm(code: str):
-    class FakeLLM:
-        async def complete(self, messages, temperature=0.2, max_tokens=4096, **kw):
+def _make_llm(code: str) -> LLMClient:
+    class FakeLLM(LLMClient):
+        def __init__(self) -> None:
+            super().__init__(model="fake", api_key="fake")
+
+        @property
+        def provider_name(self) -> str:
+            return "fake"
+
+        async def complete(
+            self,
+            messages: list[dict[str, str]],
+            temperature: float = 0.2,
+            max_tokens: int = 4096,
+            prompt_meta: Mapping[str, Any] | None = None,
+            **kw: Any,
+        ) -> LLMResponse:
             return LLMResponse(content=code, model="fake")
 
-        async def _do_complete(self, messages, temperature=0.2, max_tokens=4096, **kw):
+        async def _do_complete(
+            self,
+            messages: list[dict[str, str]],
+            temperature: float = 0.2,
+            max_tokens: int = 4096,
+            json_mode: bool = False,
+            prompt_meta: Mapping[str, Any] | None = None,
+            **kw: Any,
+        ) -> LLMResponse:
             return await self.complete(messages, temperature, max_tokens, **kw)
 
-        async def _do_complete_json(self, messages, schema_description, **kw):
+        async def _do_complete_json(
+            self,
+            messages: list[dict[str, str]],
+            schema_description: str,
+            temperature: float = 0.2,
+            max_tokens: int = 4096,
+            prompt_meta: Mapping[str, Any] | None = None,
+        ) -> dict[str, Any]:
             return {}
 
     return FakeLLM()
 
 
-def _make_df():
+def _make_df() -> tuple[pd.DataFrame, pd.Series]:
     X = pd.DataFrame(
         {
             "a": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
@@ -34,13 +67,13 @@ def _make_df():
     return X, y
 
 
-def _make_evaluator():
-    cfg = Settings(evaluation={"cv_folds": 2})
+def _make_evaluator() -> CVEvaluator:
+    cfg = Settings(evaluation=EvaluationConfig(cv_folds=2))
     return CVEvaluator(config=cfg)
 
 
 class TestLLMFESingleShotArtifacts:
-    def test_artifacts_populated(self):
+    def test_artifacts_populated(self) -> None:
         from feature_forge.methods.llmfe import LLMFEMethod
 
         code = """
@@ -63,7 +96,7 @@ def generate_features(df):
         assert "generated_code" in artifacts
         assert isinstance(artifacts["generated_code"], str)
 
-    def test_transform_after_fit(self):
+    def test_transform_after_fit(self) -> None:
         from feature_forge.methods.llmfe import LLMFEMethod
 
         code = """
@@ -83,7 +116,7 @@ def generate_features(df):
 
 
 class TestLLMFEIterativeArtifacts:
-    def test_iterations_list_populated(self):
+    def test_iterations_list_populated(self) -> None:
         from feature_forge.methods.llmfe import LLMFEMethod
 
         code = """
@@ -114,7 +147,7 @@ def generate_features(df):
 
 
 class TestCAAFEUnifiedArtifacts:
-    def test_unified_artifacts(self):
+    def test_unified_artifacts(self) -> None:
         from feature_forge.methods.caafe import CAAFEMethod
 
         code = """
@@ -141,7 +174,7 @@ def generate_features(df):
         assert "dataset_description" in artifacts
         assert len(artifacts["iterations"]) == 2
 
-    def test_unified_transform(self):
+    def test_unified_transform(self) -> None:
         from feature_forge.methods.caafe import CAAFEMethod
 
         code = """
@@ -166,26 +199,24 @@ def generate_features(df):
 
 
 class TestMALMASArtifacts:
-    def _make_fe(self):
-        from feature_forge.api import FeatureForge
-
+    def _make_fe(self) -> FeatureForge:
         return FeatureForge(llm_client=_make_llm("pass"))
 
-    def test_get_artifacts_empty_before_fit(self):
+    def test_get_artifacts_empty_before_fit(self) -> None:
         fe = self._make_fe()
         assert fe.get_artifacts() == {}
 
-    def test_generated_scripts_empty_before_fit(self):
+    def test_generated_scripts_empty_before_fit(self) -> None:
         fe = self._make_fe()
         assert fe.generated_scripts == []
 
-    def test_feature_metadata_empty_before_fit(self):
+    def test_feature_metadata_empty_before_fit(self) -> None:
         fe = self._make_fe()
         assert fe.feature_metadata == []
 
 
 class TestDiskModeArtifacts:
-    def test_llmfe_disk_mode_returns_lazy_ref(self):
+    def test_llmfe_disk_mode_returns_lazy_ref(self) -> None:
         from feature_forge.artifacts.base import ArtifactConfig
         from feature_forge.artifacts.storage import LazyDataFrameRef
         from feature_forge.methods.llmfe import LLMFEMethod

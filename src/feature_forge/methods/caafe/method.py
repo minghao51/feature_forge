@@ -80,7 +80,10 @@ class CAAFEMethod(BaseMethod):
         try:
             import caafe
         except ImportError as exc:
-            raise EvaluationError("caafe not installed. Run: uv pip install caafe") from exc
+            raise EvaluationError(
+                "caafe is an optional dependency; install it with: "
+                "pip install 'feature-forge[caafe]'"
+            ) from exc
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -122,7 +125,6 @@ class CAAFEMethod(BaseMethod):
         feedback_str = ""
 
         for i in range(self.iterations):
-            template = get_registry().get("unified").system
             params = CAAFEUnifiedParams(
                 description=description,
                 iterations=self.iterations,
@@ -130,17 +132,20 @@ class CAAFEMethod(BaseMethod):
                 existing=", ".join(cumulative_cols) if cumulative_cols else "none",
                 feedback=feedback_str,
             )
-            prompt = params.render(template)
+            prompt_meta = get_registry().provenance("unified").model_dump()
+            prompt = get_registry().render("unified", params)
             raw_response = await self.llm_client.complete(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
                 max_tokens=2048,
+                prompt_meta=prompt_meta,
             )
             code_block = strip_markdown_fences(raw_response.content.strip())
 
             iteration_record: dict[str, Any] = {
                 "iteration": i,
                 "prompt": prompt,
+                "prompt_meta": prompt_meta,
                 "raw_response": raw_response.content,
                 "generated_code": code_block,
             }

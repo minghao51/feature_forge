@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pandas as pd
 
-from feature_forge.llm.base import LLMResponse
+from feature_forge.llm.base import LLMClient, LLMResponse
 from feature_forge.methods.caafe.method import CAAFEMethod
 from feature_forge.methods.llmfe.method import LLMFEMethod
 from feature_forge.methods.malmus.method import MalmusMethod
@@ -22,7 +22,8 @@ class FakeLLM:
         return LLMResponse(content=self.content, model="fake")
 
     async def complete_json(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return json.loads(self.content)
+        parsed: dict[str, Any] = json.loads(self.content)
+        return parsed
 
 
 def test_llmfe_leakage_filtering_and_caching() -> None:
@@ -43,7 +44,7 @@ def generate_features(df):
     evaluator.evaluate_features_batch.return_value = {"feat_good": 0.1, "feat_bad": 0.0}
 
     method = LLMFEMethod(
-        llm_client=llm,
+        llm_client=cast("LLMClient", llm),  # FakeLLM duck-types the client interface
         mode="iterative",
         n_features=1,
         evaluator=evaluator,
@@ -84,7 +85,7 @@ def generate_features(df):
     evaluator.evaluate_features_batch.return_value = {"feat_good": 0.1, "feat_bad": 0.0}
 
     method = CAAFEMethod(
-        llm_client=llm,
+        llm_client=cast("LLMClient", llm),  # FakeLLM duck-types the client interface
         iterations=1,
         variant="unified",
         evaluator=evaluator,
@@ -129,7 +130,7 @@ def test_malmus_leakage_filtering_and_caching() -> None:
     evaluator.evaluate_features_batch.return_value = {"feat_good": 0.1, "feat_bad": 0.0}
 
     method = MalmusMethod(
-        llm_client=llm,
+        llm_client=cast("LLMClient", llm),  # FakeLLM duck-types the client interface
         mode="iterative",
         n_features=1,
         evaluator=evaluator,

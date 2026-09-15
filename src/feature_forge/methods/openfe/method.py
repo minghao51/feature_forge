@@ -23,7 +23,8 @@ logger = get_logger(__name__)
 class OpenFEMethod(BaseMethod):
     """OpenFE baseline for automated feature engineering.
 
-    Requires: pip install openfe
+    Requires the optional ``openfe`` extra:
+    ``pip install 'feature-forge[openfe]'``
     """
 
     def __init__(
@@ -42,7 +43,10 @@ class OpenFEMethod(BaseMethod):
         try:
             from openfe import OpenFE, transform
         except ImportError as exc:
-            raise EvaluationError("openfe not installed. Run: uv pip install openfe") from exc
+            raise EvaluationError(
+                "openfe is an optional dependency; install it with: "
+                "pip install 'feature-forge[openfe]'"
+            ) from exc
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -61,7 +65,10 @@ class OpenFEMethod(BaseMethod):
         try:
             from openfe import transform
         except ImportError as exc:
-            raise EvaluationError("openfe not installed") from exc
+            raise EvaluationError(
+                "openfe is an optional dependency; install it with: "
+                "pip install 'feature-forge[openfe]'"
+            ) from exc
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")

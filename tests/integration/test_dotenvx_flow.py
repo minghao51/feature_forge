@@ -13,6 +13,8 @@ Tests the configuration priority chain:
 from __future__ import annotations
 
 import os
+import pathlib
+from collections.abc import Iterator
 
 import pytest
 import yaml
@@ -24,7 +26,7 @@ class TestDotenvxFlow:
     """Test the full config loading flow with dotenvx-injected environment variables."""
 
     @pytest.fixture
-    def clean_env(self):
+    def clean_env(self) -> Iterator[None]:
         """Save and restore environment variables around each test."""
         import feature_forge.config as _cfg
 
@@ -55,7 +57,7 @@ class TestDotenvxFlow:
                 os.environ[key] = value
 
     @pytest.fixture
-    def settings_yaml_path(self, tmp_path):
+    def settings_yaml_path(self, tmp_path: pathlib.Path) -> pathlib.Path:
         """Create a temporary settings.yaml file for testing."""
         settings_content = {
             "task": "classification",
@@ -86,7 +88,12 @@ class TestDotenvxFlow:
             yaml.dump(settings_content, f)
         return yaml_path
 
-    def test_env_var_override_yaml(self, clean_env, settings_yaml_path, monkeypatch):
+    def test_env_var_override_yaml(
+        self,
+        clean_env: None,
+        settings_yaml_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Test that environment variables override YAML defaults."""
         # Simulate dotenvx injection
         monkeypatch.setenv("FF_TASK", "regression")
@@ -112,7 +119,9 @@ class TestDotenvxFlow:
             # Restore original YAML file path
             Settings.model_config["yaml_file"] = original_yaml_file
 
-    def test_constructor_override_env(self, clean_env, monkeypatch):
+    def test_constructor_override_env(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test that constructor arguments override environment variables."""
         # Simulate dotenvx injection
         monkeypatch.setenv("FF_TASK", "regression")
@@ -128,7 +137,7 @@ class TestDotenvxFlow:
         assert settings.llm.api_key is not None
         assert settings.llm.api_key.get_secret_value() == "sk-env-key"
 
-    def test_ff_llm_api_key_loading(self, clean_env, monkeypatch):
+    def test_ff_llm_api_key_loading(self, clean_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that FF_LLM__API_KEY is correctly loaded via env var."""
         # Simulate dotenvx injection of API key
         monkeypatch.setenv("FF_LLM__API_KEY", "sk-test-secret-key")
@@ -139,7 +148,9 @@ class TestDotenvxFlow:
         secret_value = settings.llm.api_key.get_secret_value()
         assert secret_value == "sk-test-secret-key"
 
-    def test_nested_llm_config_from_env(self, clean_env, monkeypatch):
+    def test_nested_llm_config_from_env(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test that nested LLM config (model, temperature, etc.) loads from env."""
         # Simulate dotenvx injection
         monkeypatch.setenv("FF_LLM__MODEL", "gpt-4")
@@ -154,7 +165,9 @@ class TestDotenvxFlow:
         assert settings.llm.max_tokens == 8192
         assert settings.llm.base_url == "https://api.openai.com/v1"
 
-    def test_evaluation_config_from_env(self, clean_env, monkeypatch):
+    def test_evaluation_config_from_env(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test that evaluation config loads from environment variables."""
         monkeypatch.setenv("FF_EVALUATION__CV_FOLDS", "10")
         monkeypatch.setenv("FF_EVALUATION__SANDBOX_TIMEOUT_SECONDS", "10.0")
@@ -164,7 +177,7 @@ class TestDotenvxFlow:
         assert settings.evaluation.cv_folds == 10
         assert settings.evaluation.sandbox_timeout_seconds == 10.0
 
-    def test_router_config_from_env(self, clean_env, monkeypatch):
+    def test_router_config_from_env(self, clean_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that router config loads from environment variables."""
         monkeypatch.setenv("FF_ROUTER__STRATEGY", "data_driven")
         monkeypatch.setenv("FF_ROUTER__MIN_AGENTS", "2")
@@ -174,7 +187,9 @@ class TestDotenvxFlow:
         assert settings.router.strategy == "data_driven"
         assert settings.router.min_agents == 2
 
-    def test_tracker_config_from_env(self, clean_env, monkeypatch):
+    def test_tracker_config_from_env(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test that tracker config loads from environment variables."""
         monkeypatch.setenv("FF_TRACKER__BACKEND", "mlflow")
         monkeypatch.setenv("FF_TRACKER__PROJECT", "my-experiment")
@@ -184,7 +199,9 @@ class TestDotenvxFlow:
         assert settings.tracker.backend == "mlflow"
         assert settings.tracker.project == "my-experiment"
 
-    def test_empty_api_key_becomes_none(self, clean_env, monkeypatch):
+    def test_empty_api_key_becomes_none(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test that empty string API key is converted to None."""
         monkeypatch.setenv("FF_LLM__API_KEY", "")
 
@@ -192,7 +209,12 @@ class TestDotenvxFlow:
 
         assert settings.llm.api_key is None
 
-    def test_priority_chain_full(self, clean_env, settings_yaml_path, monkeypatch):
+    def test_priority_chain_full(
+        self,
+        clean_env: None,
+        settings_yaml_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Test the full priority chain: constructor > env > YAML."""
         # YAML has: task=classification, metric=auc, llm.model=deepseek-chat
         # Env sets: task=regression, metric=rmse, llm.model=gpt-4
@@ -222,7 +244,9 @@ class TestDotenvxFlow:
             # Restore original YAML file path
             Settings.model_config["yaml_file"] = original_yaml_file
 
-    def test_provider_specific_keys_fallback(self, clean_env, monkeypatch):
+    def test_provider_specific_keys_fallback(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test that provider-specific API keys are not auto-propagated.
 
         This test verifies that when FF_LLM__API_KEY is set, it does NOT
@@ -251,7 +275,9 @@ class TestDotenvxFlow:
         assert os.environ.get("ANTHROPIC_API_KEY") is None
         assert os.environ.get("GEMINI_API_KEY") is None
 
-    def test_secret_str_not_logged(self, clean_env, monkeypatch, caplog):
+    def test_secret_str_not_logged(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Test that SecretStr values are not accidentally logged."""
         monkeypatch.setenv("FF_LLM__API_KEY", "sk-secret-key")
 
@@ -266,7 +292,9 @@ class TestDotenvxFlow:
         secret_value = settings.llm.api_key.get_secret_value()
         assert secret_value == "sk-secret-key"
 
-    def test_get_settings_with_overrides(self, clean_env, monkeypatch):
+    def test_get_settings_with_overrides(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test the get_settings() helper function with overrides."""
         monkeypatch.setenv("FF_TASK", "regression")
         monkeypatch.setenv("FF_LLM__API_KEY", "sk-env-key")

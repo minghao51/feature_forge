@@ -1,6 +1,6 @@
-from pydantic import BaseModel, Field, model_validator
+from pydantic import Field, model_validator
 
-from feature_forge.methods._prompting import PromptRegistry, prompts_dir
+from feature_forge.methods._prompting import PromptParams, PromptRegistry, prompts_dir
 
 _registry: PromptRegistry | None = None
 
@@ -12,7 +12,7 @@ def get_registry() -> PromptRegistry:
     return _registry
 
 
-class CAAFEUnifiedParams(BaseModel):
+class CAAFEUnifiedParams(PromptParams):
     description: str
     iterations: int = Field(default=2, ge=1)
     iteration: int = Field(default=1, ge=1)
@@ -25,11 +25,8 @@ class CAAFEUnifiedParams(BaseModel):
             raise ValueError("iteration must be <= iterations")
         return self
 
-    def render(self, template: str) -> str:
-        return template.format(
-            description=self.description,
-            iterations=self.iterations,
-            iteration=self.iteration,
-            existing=self.existing,
-            feedback=self.feedback,
-        )
+
+__all__ = [
+    "CAAFEUnifiedParams",
+    "get_registry",
+]

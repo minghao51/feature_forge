@@ -15,10 +15,10 @@ Feature Forge is a production-ready refactoring of the MALMAS (Memory-Augmented 
 - **Dynamic Router**: Data-driven, performance-driven, hybrid, and LLM-based agent selection
 - **Enforced LLM Caching**: DiskCache with SHA-256 keys prevents accidental API costs
 - **Sandboxed Execution**: AST-validated code execution for LLM-generated features
-- **Experiment Matrix**: Cartesian product of datasets × methods × seeds × models × rounds
+- **ExperimentalPlatform**: One-line experiment matrix — cartesian expansion of datasets × methods × seeds × models through the Hamilton-default engine; rounds remain settings-driven
 - **Methods**: OpenFE [[2]](#ref-2), CAAFE [[3]](#ref-3), LLM-FE [[4]](#ref-4), Malmus, MALMAS (structured JSON, plugin arch)
 - **Observability**: structlog + Langfuse + OpenTelemetry
-- **Tracking**: WandB (default) + MLflow (optional)
+- **Tracking**: Opt-in — defaults to `none` (no external tracker); WandB and MLflow available
 - **Sklearn Compatible**: `FeatureForge` inherits `BaseEstimator` + `TransformerMixin`
 
 ## Installation
@@ -32,8 +32,52 @@ cd feature-forge
 uv sync
 
 # Or with pip
-pip install -e ".[base,docs,opinion]"
+pip install -e .
 ```
+
+The core install ships the standard default model (`random_forest`) and the
+first-party LLM methods. Heavyweight third-party methods/models are extras:
+
+```bash
+pip install 'feature-forge[openfe]'    # OpenFE baseline method
+pip install 'feature-forge[caafe]'     # CAAFE fidelity variant
+pip install 'feature-forge[xgboost]'   # XGBoost evaluation model
+pip install 'feature-forge[lightgbm]'  # LightGBM evaluation model
+pip install 'feature-forge[catboost]'  # CatBoost evaluation model
+```
+
+The standard installation includes Apache Hamilton, the sole case execution
+engine. It publishes verified Bronze, Silver, Gold, and Platinum evidence and
+keeps Hamilton caching independent of the mandatory LLM response cache. The
+legacy imperative engine was removed per ADR 0016: stale `engine=legacy`
+configuration fails fast with actionable migration guidance (see the
+[migration guide](docs/migration_guide.md)), and operational rollback is a
+downgrade to the prior compatibility release. Inspect a source-independent plan with, for example:
+
+```bash
+uv run feature-forge run plan --format json \
+  --dataset titanic --method malmus --model random_forest
+```
+
+## Intel Acceleration (OpenMP)
+
+On Intel hardware you can enable Intel Extension for Scikit-learn (`sklearnex`)
+for DAAL-accelerated estimators. It is opt-in behind the `intel` extra and the
+`intel_acceleration` setting (default on):
+
+```bash
+uv sync --extra intel            # installs scikit-learn-intelex
+FF_INTEL_ACCELERATION=true uv run ...
+```
+
+`sklearnex` loads the Intel OpenMP runtime (`libiomp5`) while the XGBoost/
+LightGBM wheels use `libgomp`. If you install the optional `xgboost` or
+`lightgbm` extras alongside `intel`, the package patches sklearn **first** on
+import, sets `KMP_DUPLICATE_LIB_OK=TRUE`, pins boosting estimators to
+`n_jobs=1`, and keeps evaluation in the same process with the `threading`
+backend (avoiding fork-after-OpenMP deadlocks) when acceleration is on. See
+`docs/decisions/0010-intel-openmp-bootstrap.md`. Disable with
+`FF_INTEL_ACCELERATION=false`.
 
 ## Quick Start
 
@@ -48,11 +92,11 @@ X_test_enhanced = fe.transform(X_test)
 
 # Use in a sklearn Pipeline
 from sklearn.pipeline import Pipeline
-from xgboost import XGBClassifier
+from sklearn.ensemble import RandomForestClassifier
 
 pipeline = Pipeline([
     ("fe", FeatureForge()),
-    ("clf", XGBClassifier()),
+    ("clf", RandomForestClassifier()),
 ])
 pipeline.fit(X_train, y_train)
 ```
@@ -66,19 +110,19 @@ platform = ExperimentalPlatform()
 
 results = platform.run(
     datasets=["titanic", "house_prices"],
-    methods=["malmus", "caafe", "openfe", "llmfe"],
-    models=["xgboost"],
+    methods=["malmus", "caafe", "openfe", "llmfe"],  # openfe needs the `openfe` extra
+    models=["random_forest"],  # core default; xgboost needs the `xgboost` extra
     mode="single_shot",
     cv_folds=5,
 )
 
 print(platform.report(results))
-# ┌──────────┬──────────┬──────────┬──────────┬──────────┐
-# │ dataset  │ method   │ model    │ cv_score │ gain     │
-# ├──────────┼──────────┼──────────┼──────────┼──────────┤
-# │ titanic  │ malmus   │ xgboost  │ 0.8523   │ +0.0312  │
-# │ ...      │ ...      │ ...      │ ...      │ ...      │
-# └──────────┴──────────┴──────────┴──────────┴──────────┘
+# ┌──────────┬──────────┬───────────────┬──────────┬──────────┐
+# │ dataset  │ method   │ model         │ cv_score │ gain     │
+# ├──────────┼──────────┼───────────────┼──────────┼──────────┤
+# │ titanic  │ malmus   │ random_forest │ 0.8523   │ +0.0312  │
+# │ ...      │ ...      │ ...           │ ...      │ ...      │
+# └──────────┴──────────┴───────────────┴──────────┴──────────┘
 
 platform.report_best(results)     # best per dataset
 df = platform.to_dataframe(results)  # raw pandas DataFrame
@@ -88,27 +132,15 @@ Notes:
 - `parallel=True` uses a process-pool seam and supports registry-discovered methods.
 - Instance-local methods added via `platform.register_method(...)` are not process-serializable and must run with `parallel=False`.
 - Results are normalized to an `ExperimentResult`-like shape with a nullable `error` field.
+- Scheduling supports continue (default) / `fail_fast` failure policies and cooperative case-boundary cancellation via `run(failure_policy=..., cancellation_token=...)`; cancellation is not hard termination — running cases finish. See [Operations](docs/operations.md).
 
-### Experiment Matrix (Advanced)
+### Experiment matrix
 
-```python
-from feature_forge.experiment import ExperimentMatrix, ExperimentRunner, Reporter
-
-matrix = (
-    ExperimentMatrix()
-    .datasets(["titanic", "house-prices"])
-    .methods({"malmas": ["full"], "openfe": ["openfe"]})
-    .seeds([0, 1, 2])
-    .models(["xgboost", "lightgbm"])
-    .rounds([1, 2, 4])
-)
-
-runner = ExperimentRunner()
-results = runner.run(matrix.generate(), run_experiment)
-
-reporter = Reporter(results)
-print(reporter.to_markdown())
-```
+`ExperimentalPlatform.run()` expands the cartesian product of
+`datasets × methods × seeds × models` internally and executes
+each case through the Hamilton-default engine. No separate matrix/runner
+classes are needed. See [Operations](docs/operations.md) for cache status,
+garbage collection, and artifact list/verify commands.
 
 ### Custom Agent
 
@@ -131,7 +163,7 @@ domain = "my_package:DomainAgent"
 Configuration priority (highest to lowest):
 1. Constructor arguments
 2. Environment variables (`FF_*` prefix)
-3. `.env` file (dotenvx encrypted)
+3. `.env` file (local, gitignored, plaintext — never committed)
 4. YAML files (`config/settings.yaml`)
 
 ```bash
@@ -144,7 +176,7 @@ export FF_TRACKER__PROJECT=my-project
 ## Architecture
 
 ```
-Experiment Layer    → ExperimentMatrix, ExperimentRunner, Tracker, Reporter
+Experiment Layer    → ExperimentalPlatform, HamiltonLayerExecutor, Tracker, Reporter
 Methods Layer       → MethodRegistry, BaseMethod, 5 method packages (malmas, caafe, llmfe, malmus, openfe)
 Pipeline Layer      → FeatureForge, CorePipeline, IterativePipeline
 Agent Layer         → 6 Agents + Router + Registry (MALMAS-specific)
@@ -185,6 +217,8 @@ pre-commit run --all-files
 - [Implementation Plan](docs/plan/)
 - [API Reference](docs/api_reference.md)
 - [Migration Guide](docs/migration_guide.md)
+- [Operations](docs/operations.md)
+- [Generated Stage DAGs](docs/generated/stage_dags.md)
 - [Quick Start](docs/quick_start.md)
 - [MALMAS Technical Roadmap](docs/MALMAS_Technical_Roadmap.md)
 

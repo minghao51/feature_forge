@@ -28,7 +28,26 @@ from feature_forge.utils import run_coro_sync
 
 logger = get_logger(__name__)
 
-_SINGLE_AGENT_MODES = frozenset(AgentRegistry.builtin_agent_names())
+_PIPELINE_SPEC: dict[str, tuple[str, str]] = {
+    "full": ("feature_forge.methods.malmas.pipeline.iterative", "IterativePipeline"),
+    "no_memory": ("feature_forge.methods.malmas.pipeline.ablations", "NoMemoryPipeline"),
+    "no_memory_static_router": (
+        "feature_forge.methods.malmas.pipeline.ablations",
+        "NoMemoryStaticRouterPipeline",
+    ),
+    "no_router": ("feature_forge.methods.malmas.pipeline.ablations", "NoRouterPipeline"),
+}
+
+
+def validate_mode(mode: str) -> str:
+    """Fail closed on unknown pipeline modes before provider construction."""
+    if mode in _PIPELINE_SPEC:
+        return mode
+    try:
+        AgentRegistry.get_agent(mode)
+    except ValueError as exc:
+        raise ValueError(f"Unknown MALMAS mode {mode!r}") from exc
+    return mode
 
 
 class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: ignore[misc]
@@ -45,6 +64,9 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
         mode: Pipeline mode — 'full', 'no_memory', 'no_memory_static_router',
             'no_router', or agent name.
         artifact_config: Configuration for artifact storage.
+        warm_start: Reuse persisted MALMAS memory across fits. Disabled by
+            default so normal fits start with fresh memory and router state.
+        evaluation_kit: Optional injected evaluation services.
     """
 
     def __init__(
@@ -53,11 +75,15 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
         llm_client: LLMClient | None = None,
         mode: str = "full",
         artifact_config: ArtifactConfig | None = None,
+        warm_start: bool = False,
+        evaluation_kit: EvaluationKit | None = None,
     ) -> None:
         if isinstance(config, dict):
             config = Settings(**config)
         self.config = config or get_settings()
-        self.mode = mode
+        self.mode = validate_mode(mode)
+        self.warm_start = warm_start
+        self.evaluation_kit = evaluation_kit
         # Defer LLM client creation: allow None so notebooks can
         # explore the API without an API key.  fit() will raise if
         # no client is available.
@@ -73,7 +99,7 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
                 )
         self.selected_features: list[str] = []
         self.feature_codes: list[str] = []
-        self._eval_kit = EvaluationKit.from_settings(self.config)
+        self._eval_kit = evaluation_kit or EvaluationKit.from_settings(self.config)
         self.sandbox = self._eval_kit.sandbox
         self.pipeline_result: dict[str, Any] | None = None
         self.transform_failures: list[dict[str, str]] = []
@@ -102,8 +128,7 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
 
     def _default_llm_client(self) -> LLMClient:
         """Create default LLM client from settings using the provider factory."""
-        cfg = self.config or get_settings()
-        return create_llm_client(cfg.llm, retry_config=cfg.retry)
+        return create_llm_client(self.config.llm, retry_config=self.config.retry)
 
     def _get_pipeline(self) -> Any:
         """Get the appropriate pipeline based on mode.
@@ -112,38 +137,28 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
         """
         import importlib
 
-        _PIPELINE_SPEC: dict[str, tuple[str, str]] = {
-            "full": ("feature_forge.methods.malmas.pipeline.iterative", "IterativePipeline"),
-            "no_memory": ("feature_forge.methods.malmas.pipeline.ablations", "NoMemoryPipeline"),
-            "no_memory_static_router": (
-                "feature_forge.methods.malmas.pipeline.ablations",
-                "NoMemoryStaticRouterPipeline",
-            ),
-            "no_router": ("feature_forge.methods.malmas.pipeline.ablations", "NoRouterPipeline"),
-        }
-
         spec = _PIPELINE_SPEC.get(self.mode)
         if spec is not None:
             module_path, class_name = spec
             mod = importlib.import_module(module_path)
             cls = getattr(mod, class_name)
-            return cls(self.config, self.llm_client, eval_kit=self._eval_kit)
-
-        if self.mode in _SINGLE_AGENT_MODES:
-            from feature_forge.methods.malmas.pipeline.ablations import SingleAgentPipeline
-
-            assert self.llm_client is not None
-            return SingleAgentPipeline(
-                self.mode,
+            return cls(
                 self.config,
                 self.llm_client,
                 eval_kit=self._eval_kit,
+                warm_start=self.warm_start,
             )
 
-        from feature_forge.methods.malmas.pipeline.iterative import IterativePipeline
+        from feature_forge.methods.malmas.pipeline.ablations import SingleAgentPipeline
 
         assert self.llm_client is not None
-        return IterativePipeline(self.config, self.llm_client, eval_kit=self._eval_kit)
+        return SingleAgentPipeline(
+            self.mode,
+            self.config,
+            self.llm_client,
+            eval_kit=self._eval_kit,
+            warm_start=self.warm_start,
+        )
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> FeatureForge:
         if self.llm_client is None:
@@ -171,6 +186,7 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
 
     async def async_fit(self, X: pd.DataFrame, y: pd.Series) -> dict[str, Any]:
         """Async variant of fit() for notebook/service environments."""
+        self.input_features_ = [str(column) for column in X.columns]
         pipeline = self._get_pipeline()
         self.pipeline_result = await pipeline.run(X, y)
         self.selected_features = self.pipeline_result["selected_features"]
@@ -182,17 +198,29 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
         logger.info("transform_start", input_shape=X.shape, num_codes=len(self.feature_codes))
         X_out = X.copy()
         self.transform_failures = []
+        expected_inputs = getattr(self, "input_features_", [])
+        missing_inputs = [name for name in expected_inputs if name not in X.columns]
+        if missing_inputs:
+            raise ValueError(f"Transform input schema is missing fitted columns: {missing_inputs}")
         selected_by_code: list[set[str]] = []
         if self.pipeline_result:
             for ra in self.pipeline_result.get("round_artifacts", []):
-                code = ra.get("generated_code", "")
-                if not code:
-                    continue
                 selected_train = ra.get("selected_features_train")
-                if isinstance(selected_train, pd.DataFrame):
-                    selected_by_code.append(set(selected_train.columns))
-                else:
-                    selected_by_code.append(set())
+                selected = (
+                    set(selected_train.columns)
+                    if isinstance(selected_train, pd.DataFrame)
+                    else set()
+                )
+                generated_codes = ra.get("generated_codes") or []
+                code_features = ra.get("code_features") or []
+                if generated_codes:
+                    for index, _code in enumerate(generated_codes):
+                        produced = (
+                            set(code_features[index]) if index < len(code_features) else selected
+                        )
+                        selected_by_code.append(selected & produced)
+                elif ra.get("generated_code"):
+                    selected_by_code.append(selected)
 
         for idx, code in enumerate(self.feature_codes):
             if not code:
@@ -202,15 +230,29 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
                 if idx < len(selected_by_code)
                 else set(self.selected_features)
             )
+            if idx < len(selected_by_code) and not selected_cols:
+                continue
             try:
                 features = self.sandbox.execute(code, X_out)
                 if selected_cols:
                     missing = sorted(col for col in selected_cols if col not in features.columns)
                     if missing:
+                        self.transform_failures.extend(
+                            {
+                                "feature": name,
+                                "phase": "transform",
+                                "reason_code": "missing_output",
+                            }
+                            for name in missing
+                        )
                         logger.warning(
                             "transform_selected_features_missing",
                             missing_features=missing,
                         )
+                        if self.config.evaluation.fail_on_feature_error:
+                            raise ValueError(
+                                f"Generated features missing from transform: {missing}"
+                            )
                 for col in features.columns:
                     if selected_cols and col not in selected_cols:
                         continue
@@ -218,7 +260,15 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
                         X_out[col] = features[col].values
             except Exception as exc:
                 error_msg = str(exc)
-                self.transform_failures.append({"code": code[:200], "error": error_msg})
+                failed_features = sorted(selected_cols) or ["<batch>"]
+                self.transform_failures.extend(
+                    {
+                        "feature": name,
+                        "phase": "transform",
+                        "reason_code": type(exc).__name__,
+                    }
+                    for name in failed_features
+                )
                 logger.warning("transform_feature_generation_failed", error=error_msg)
                 if self.config.evaluation.fail_on_feature_error:
                     raise
@@ -252,10 +302,28 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
         """Aggregate feature specs across all rounds."""
         if not self.pipeline_result:
             return []
-        all_specs: list[dict[str, Any]] = []
-        for ra in self.pipeline_result.get("round_artifacts", []):
-            all_specs.extend(ra.get("specs", []))
-        return all_specs
+        metadata: list[dict[str, Any]] = []
+        for round_artifact in self.pipeline_result.get("round_artifacts", []):
+            generated_codes = round_artifact.get("generated_codes") or []
+            code_features = round_artifact.get("code_features") or []
+            specs = round_artifact.get("specs", [])
+            if generated_codes:
+                for index, _code in enumerate(generated_codes):
+                    names = list(code_features[index]) if index < len(code_features) else []
+                    matched_specs = [
+                        spec.model_dump(mode="json") if hasattr(spec, "model_dump") else dict(spec)
+                        for spec in specs
+                        if (
+                            spec.get("name")
+                            if isinstance(spec, dict)
+                            else getattr(spec, "name", None)
+                        )
+                        in names
+                    ]
+                    metadata.append({"names": names, "specifications": matched_specs})
+            else:
+                metadata.extend(specs)
+        return metadata
 
     @property
     def provenance_records(self) -> list[dict[str, Any]]:
@@ -321,6 +389,11 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
             artifacts[f"{prefix}agents"] = ra.get("agents", [])
         artifacts["selected_features"] = self.selected_features
         artifacts["feature_codes"] = self.feature_codes
+        artifacts["feature_failures"] = [
+            failure
+            for round_artifact in self.pipeline_result.get("round_artifacts", [])
+            for failure in round_artifact.get("feature_failures", [])
+        ]
         artifacts["provenance"] = self.provenance_records
         artifacts["transform_failures"] = self.transform_failures
         return artifacts

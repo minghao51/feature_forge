@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pandas as pd
 import pytest
 
-from feature_forge.config import Settings
+from feature_forge.config import EvaluationConfig, Settings
 from feature_forge.evaluation.cv import CVEvaluator
 from feature_forge.evaluation.kit import EvaluationKit
 from feature_forge.evaluation.sandbox import SandboxedExecutor
@@ -20,6 +20,11 @@ from feature_forge.types import FeatureSpec
 class _ConcreteMethod(BaseMethod):
     """Minimal concrete subclass for testing BaseMethod helpers."""
 
+    # BaseMethod attaches these dynamically (checked via hasattr/getattr in
+    # src); declare them here so attribute assignment in tests type-checks.
+    sandbox: SandboxedExecutor | None
+    evaluator: CVEvaluator | None
+
     def __init__(self, name: str = "test_method") -> None:
         super().__init__(name=name)
 
@@ -31,39 +36,39 @@ class _ConcreteMethod(BaseMethod):
 
 
 class TestEvaluationKit:
-    def test_from_settings_defaults(self):
+    def test_from_settings_defaults(self) -> None:
         kit = EvaluationKit.from_settings()
         assert isinstance(kit.sandbox, SandboxedExecutor)
         assert isinstance(kit.evaluator, CVEvaluator)
         assert kit.sandbox.limits.timeout_seconds == 5.0
-        assert kit.sandbox.limits.max_memory_mb == 512
+        assert kit.sandbox.limits.max_memory_mb == 2048
 
-    def test_from_settings_custom_config(self):
+    def test_from_settings_custom_config(self) -> None:
         config = Settings(
             task="classification",
             metric="auc",
-            evaluation={"sandbox_timeout_seconds": 10.0, "sandbox_max_memory_mb": 256},
+            evaluation=EvaluationConfig(sandbox_timeout_seconds=10.0, sandbox_max_memory_mb=256),
         )
         kit = EvaluationKit.from_settings(config)
         assert kit.sandbox.limits.timeout_seconds == 10.0
         assert kit.sandbox.limits.max_memory_mb == 256
 
-    def test_from_settings_returns_evaluation_kit(self):
+    def test_from_settings_returns_evaluation_kit(self) -> None:
         kit = EvaluationKit.from_settings()
         assert isinstance(kit, EvaluationKit)
 
-    def test_evaluator_uses_config_random_state(self):
+    def test_evaluator_uses_config_random_state(self) -> None:
         config = Settings(random_state=123)
         kit = EvaluationKit.from_settings(config)
         assert kit.model_factory.random_state == 123
 
 
 class TestIterativeFeatureMetadata:
-    def test_empty_artifacts_returns_empty(self):
+    def test_empty_artifacts_returns_empty(self) -> None:
         method = _ConcreteMethod()
         assert method._iterative_feature_metadata("test") == []
 
-    def test_single_iteration(self):
+    def test_single_iteration(self) -> None:
         method = _ConcreteMethod()
         method._artifacts["iterations"] = [
             {
@@ -81,7 +86,7 @@ class TestIterativeFeatureMetadata:
         assert meta[1]["name"] == "feat_b"
         assert meta[1]["gain"] == -0.02
 
-    def test_multiple_iterations(self):
+    def test_multiple_iterations(self) -> None:
         method = _ConcreteMethod()
         method._artifacts["iterations"] = [
             {"iteration": 0, "gains": {"a": 0.1}, "generated_code": "code0"},
@@ -92,7 +97,7 @@ class TestIterativeFeatureMetadata:
         assert meta[0]["iteration"] == 0
         assert meta[1]["iteration"] == 1
 
-    def test_kept_is_derived_per_feature_gain(self):
+    def test_kept_is_derived_per_feature_gain(self) -> None:
         method = _ConcreteMethod()
         method._artifacts["iterations"] = [
             {
@@ -107,7 +112,7 @@ class TestIterativeFeatureMetadata:
         assert by_name["feat_good"]["kept"] is True
         assert by_name["feat_bad"]["kept"] is False
 
-    def test_missing_gains_key(self):
+    def test_missing_gains_key(self) -> None:
         method = _ConcreteMethod()
         method._artifacts["iterations"] = [{"iteration": 0}]
         meta = method._iterative_feature_metadata("test")
@@ -115,11 +120,11 @@ class TestIterativeFeatureMetadata:
 
 
 class TestIterativeProvenanceRecords:
-    def test_empty_artifacts_returns_empty(self):
+    def test_empty_artifacts_returns_empty(self) -> None:
         method = _ConcreteMethod()
         assert method._iterative_provenance_records("test") == []
 
-    def test_single_iteration(self):
+    def test_single_iteration(self) -> None:
         method = _ConcreteMethod()
         method._artifacts["iterations"] = [
             {
@@ -135,7 +140,7 @@ class TestIterativeProvenanceRecords:
         assert records[0]["cv_gain"] == 0.05
         assert records[0]["generated_code"] == "df['feat_a'] = df['x'] * 2"
 
-    def test_provenance_includes_iteration_index(self):
+    def test_provenance_includes_iteration_index(self) -> None:
         method = _ConcreteMethod()
         method._artifacts["iterations"] = [
             {"iteration": 3, "gains": {"x": 0.1}, "generated_code": ""},
@@ -145,18 +150,18 @@ class TestIterativeProvenanceRecords:
 
 
 class TestTransformViaIterationCodes:
-    def test_raises_when_not_fitted(self):
+    def test_raises_when_not_fitted(self) -> None:
         method = _ConcreteMethod()
         with pytest.raises(RuntimeError, match="not fitted yet"):
             method._transform_via_iteration_codes(pd.DataFrame({"a": [1, 2]}))
 
-    def test_raises_when_empty_codes(self):
+    def test_raises_when_empty_codes(self) -> None:
         method = _ConcreteMethod()
         method._iteration_codes = []
         with pytest.raises(RuntimeError, match="not fitted yet"):
             method._transform_via_iteration_codes(pd.DataFrame({"a": [1, 2]}))
 
-    def test_applies_codes_and_returns_new_cols(self):
+    def test_applies_codes_and_returns_new_cols(self) -> None:
         method = _ConcreteMethod()
         method._iteration_codes = [
             "import pandas as pd\ndef generate_features(df):\n    return pd.DataFrame({'double_a': df['a'] * 2}, index=df.index)"
@@ -168,7 +173,7 @@ class TestTransformViaIterationCodes:
         assert "double_a" in result.columns
         assert result["double_a"].tolist() == [2, 4, 6]
 
-    def test_skips_bad_code_and_returns_good_results(self):
+    def test_skips_bad_code_and_returns_good_results(self) -> None:
         method = _ConcreteMethod()
         method._iteration_codes = [
             "bad syntax {{{",
@@ -180,7 +185,7 @@ class TestTransformViaIterationCodes:
         assert "b" in result.columns
         assert result["b"].tolist() == [2, 3, 4]
 
-    def test_raises_on_bad_code_when_fail_on_error(self):
+    def test_raises_on_bad_code_when_fail_on_error(self) -> None:
         method = _ConcreteMethod()
         method._iteration_codes = ["bad syntax {{{"]
         method.sandbox = SandboxedExecutor(timeout_seconds=5.0)
@@ -193,23 +198,23 @@ class TestTransformViaIterationCodes:
 
 
 class TestShouldRaiseOnFeatureError:
-    def test_returns_false_when_no_evaluator(self):
+    def test_returns_false_when_no_evaluator(self) -> None:
         method = _ConcreteMethod()
         assert method._should_raise_on_feature_error() is False
 
-    def test_returns_false_when_evaluator_is_none(self):
+    def test_returns_false_when_evaluator_is_none(self) -> None:
         method = _ConcreteMethod()
         method.evaluator = None
         assert method._should_raise_on_feature_error() is False
 
-    def test_returns_false_when_fail_on_error_is_false(self):
+    def test_returns_false_when_fail_on_error_is_false(self) -> None:
         method = _ConcreteMethod()
         mock_evaluator = MagicMock()
         mock_evaluator.config.evaluation.fail_on_feature_error = False
         method.evaluator = mock_evaluator
         assert method._should_raise_on_feature_error() is False
 
-    def test_returns_true_when_fail_on_error_is_true(self):
+    def test_returns_true_when_fail_on_error_is_true(self) -> None:
         method = _ConcreteMethod()
         mock_evaluator = MagicMock()
         mock_evaluator.config.evaluation.fail_on_feature_error = True
@@ -218,7 +223,7 @@ class TestShouldRaiseOnFeatureError:
 
 
 class TestRecordFeatureInMemory:
-    def test_records_effective_feature(self):
+    def test_records_effective_feature(self) -> None:
         memory = MagicMock()
         spec = FeatureSpec(
             name="feat_a",
@@ -250,7 +255,7 @@ class TestRecordFeatureInMemory:
         )
         memory.record_unused_procedure.assert_not_called()
 
-    def test_records_ineffective_feature_with_unused(self):
+    def test_records_minimize_metric_improvement_as_effective(self) -> None:
         memory = MagicMock()
         spec = FeatureSpec(
             name="feat_b",
@@ -268,21 +273,14 @@ class TestRecordFeatureInMemory:
             feature_name="feat_b",
             metric="rmse",
             value=-0.03,
-            effective=False,
+            effective=True,
             round_idx=1,
             base=["y"],
             ty="numerical",
         )
-        memory.record_unused_procedure.assert_called_once_with(
-            base_columns=["y"],
-            transform="df['y'] + 1",
-            feature_name="feat_b",
-            ty="numerical",
-            description="increment y",
-            round_idx=1,
-        )
+        memory.record_unused_procedure.assert_not_called()
 
-    def test_zero_gain_is_ineffective(self):
+    def test_zero_gain_is_ineffective(self) -> None:
         memory = MagicMock()
         spec = FeatureSpec(name="zero_feat", base_columns=["a"])
         IterativePipeline._record_feature_in_memory(

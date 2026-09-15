@@ -7,6 +7,8 @@ contracts that must remain stable across refactors.
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -30,26 +32,26 @@ pytestmark = pytest.mark.contract
 
 
 class TestFeatureForgeContract:
-    def test_has_sklearn_methods(self):
+    def test_has_sklearn_methods(self) -> None:
         for method in ("fit", "transform", "fit_transform", "get_params", "set_params"):
             assert hasattr(FeatureForge, method), f"Missing {method}"
 
-    def test_has_get_feature_names_out(self):
+    def test_has_get_feature_names_out(self) -> None:
         assert hasattr(FeatureForge, "get_feature_names_out")
 
-    def test_has_generated_scripts(self):
+    def test_has_generated_scripts(self) -> None:
         ff = FeatureForge()
         assert isinstance(ff.generated_scripts, list)
 
-    def test_has_feature_metadata(self):
+    def test_has_feature_metadata(self) -> None:
         ff = FeatureForge()
         assert isinstance(ff.feature_metadata, list)
 
-    def test_fit_returns_self(self, fake_llm):
+    def test_fit_returns_self(self, fake_llm: LLMClient) -> None:
         ff = FeatureForge(llm_client=fake_llm, config={"n_rounds": 1})
         assert hasattr(ff, "fit")
 
-    def test_get_feature_names_out_returns_list(self, fake_llm):
+    def test_get_feature_names_out_returns_list(self, fake_llm: LLMClient) -> None:
         ff = FeatureForge(llm_client=fake_llm)
         result = ff.get_feature_names_out()
         assert isinstance(result, list)
@@ -60,30 +62,32 @@ class TestFeatureForgeContract:
 
 
 class TestLLMClientContract:
-    def test_has_complete(self):
+    def test_has_complete(self) -> None:
         assert hasattr(LLMClient, "complete")
 
-    def test_has_complete_json(self):
+    def test_has_complete_json(self) -> None:
         assert hasattr(LLMClient, "complete_json")
 
-    def test_has_provider_name(self):
+    def test_has_provider_name(self) -> None:
         assert "provider_name" in dir(LLMClient)
 
-    def test_is_abstract(self):
+    def test_is_abstract(self) -> None:
         with pytest.raises(TypeError):
-            LLMClient(model="test", api_key="test")
+            # Abstract on purpose: the test asserts that instantiating the
+            # ABC without a provider_name implementation raises TypeError.
+            LLMClient(model="test", api_key="test")  # type: ignore[abstract]
 
 
 # ── BaseMethod protocol contract ─────────────────────────────────────────
 
 
 class TestBaselineContract:
-    def test_has_required_members(self):
+    def test_has_required_members(self) -> None:
         required = ("fit", "transform", "fit_transform", "generated_scripts", "feature_metadata")
         for member in required:
             assert hasattr(BaseMethod, member), f"BaseMethod missing {member}"
 
-    def test_get_artifacts_method(self):
+    def test_get_artifacts_method(self) -> None:
         assert hasattr(BaseMethod, "get_artifacts")
 
 
@@ -92,17 +96,17 @@ class TestBaselineContract:
 
 class TestMetricContract:
     @pytest.mark.parametrize(("name", "fn"), list(METRIC_REGISTRY.items()))
-    def test_all_builtins_callable(self, name, fn):
+    def test_all_builtins_callable(self, name: str, fn: Callable[..., object]) -> None:
         assert callable(fn), f"Metric {name} is not callable"
 
     @pytest.mark.parametrize(("name", "fn"), list(METRIC_REGISTRY.items()))
-    def test_signature_two_arrays(self, name, fn):
+    def test_signature_two_arrays(self, name: str, fn: Callable[..., object]) -> None:
         sig = inspect.signature(fn)
         params = list(sig.parameters.keys())
         assert len(params) == 2, f"{name} should take (y_true, y_pred), got {params}"
 
     @pytest.mark.parametrize(("name", "fn"), list(METRIC_REGISTRY.items()))
-    def test_returns_float(self, name, fn):
+    def test_returns_float(self, name: str, fn: Callable[..., object]) -> None:
         y_true = np.array([0, 1, 0, 1])
         if name in ("auc",):
             y_pred = np.array([0.1, 0.9, 0.2, 0.8])
@@ -113,7 +117,7 @@ class TestMetricContract:
         result = fn(y_true, y_pred)
         assert isinstance(result, float), f"{name} returned {type(result)}"
 
-    def test_all_builtins_registered(self):
+    def test_all_builtins_registered(self) -> None:
         expected = {"auc", "acc", "f1", "rmse", "mae", "r2", "nrmse"}
         assert expected == set(MetricRegistry.get_builtin().keys())
 
@@ -122,24 +126,32 @@ class TestMetricContract:
 
 
 class TestModelFactoryContract:
-    @pytest.mark.parametrize("name", ["xgboost", "random_forest"])
-    def test_returns_sklearn_estimator(self, name):
+    def test_returns_sklearn_estimator(self) -> None:
         factory = ModelFactory(random_state=42)
-        model = factory.get_model(name, "classification")
+        model = factory.get_model("random_forest", "classification")
         for method in ("fit", "predict", "get_params"):
-            assert hasattr(model, method), f"{name} missing {method}"
+            assert hasattr(model, method), f"random_forest missing {method}"
 
-    def test_default_model_is_xgboost(self):
+    def test_optional_xgboost_returns_sklearn_estimator(self) -> None:
+        pytest.importorskip("xgboost")
         factory = ModelFactory(random_state=42)
         model = factory.get_model("xgboost", "classification")
-        assert model is not None
+        for method in ("fit", "predict", "get_params"):
+            assert hasattr(model, method), f"xgboost missing {method}"
+
+    def test_default_model_is_random_forest(self) -> None:
+        from sklearn.ensemble import RandomForestClassifier
+
+        factory = ModelFactory(random_state=42)
+        model = factory.get_model(None, "classification")
+        assert isinstance(model, RandomForestClassifier)
 
 
 # ── Settings contract ──────────────────────────────────────────────────
 
 
 class TestSettingsContract:
-    def test_nested_config_access(self):
+    def test_nested_config_access(self) -> None:
         s = Settings()
         assert hasattr(s, "llm")
         assert hasattr(s, "router")
@@ -148,12 +160,12 @@ class TestSettingsContract:
         assert hasattr(s, "retry")
         assert hasattr(s, "evaluation")
 
-    def test_llm_config_fields(self):
+    def test_llm_config_fields(self) -> None:
         s = Settings()
         for field in ("model", "provider", "temperature", "max_tokens", "cache_responses"):
             assert hasattr(s.llm, field)
 
-    def test_get_settings_returns_settings(self):
+    def test_get_settings_returns_settings(self) -> None:
         from feature_forge.config import get_settings
 
         s = get_settings()
@@ -164,12 +176,12 @@ class TestSettingsContract:
 
 
 class TestTrackerContract:
-    def test_has_required_methods(self):
+    def test_has_required_methods(self) -> None:
         required = ("init_run", "log_metrics", "log_params", "log_artifact", "finish")
         for method in required:
             assert hasattr(ExperimentTracker, method), f"Tracker missing {method}"
 
-    def test_noop_tracker_implements_all(self):
+    def test_noop_tracker_implements_all(self) -> None:
         tracker = NoOpTracker(project="test")
         tracker.init_run("test", {})
         tracker.log_metrics({"a": 1})
@@ -182,13 +194,13 @@ class TestTrackerContract:
 
 
 class TestAgentContract:
-    def test_has_generate(self):
+    def test_has_generate(self) -> None:
         assert hasattr(Agent, "generate")
 
-    def test_has_system_prompt(self):
+    def test_has_system_prompt(self) -> None:
         assert hasattr(Agent, "system_prompt")
 
-    def test_registry_has_builtin_agents(self):
+    def test_registry_has_builtin_agents(self) -> None:
         builtins = AgentRegistry.get_builtin_agents()
         assert len(builtins) >= 6
         assert "unary" in builtins
@@ -198,12 +210,12 @@ class TestAgentContract:
 
 
 class TestDiskCacheContract:
-    def test_context_manager(self, tmp_path):
+    def test_context_manager(self, tmp_path: Path) -> None:
         with DiskCache(cache_dir=str(tmp_path / "cache")) as cache:
             assert cache is not None
             assert cache.enabled
 
-    def test_has_get_set_clear(self):
+    def test_has_get_set_clear(self) -> None:
         for method in ("get", "set", "clear", "close"):
             assert hasattr(DiskCache, method)
 
@@ -212,17 +224,17 @@ class TestDiskCacheContract:
 
 
 class TestSandboxContract:
-    def test_forbidden_names_non_empty(self):
+    def test_forbidden_names_non_empty(self) -> None:
         assert len(SandboxedExecutor.FORBIDDEN_NAMES) > 0
 
-    def test_allowed_imports_limited(self):
+    def test_allowed_imports_limited(self) -> None:
         assert SandboxedExecutor.ALLOWED_IMPORTS == {"pandas", "numpy", "math"}
 
-    def test_allowed_builtins_excludes_dangerous(self):
+    def test_allowed_builtins_excludes_dangerous(self) -> None:
         dangerous = {"eval", "exec", "compile", "open", "__import__", "input"}
         assert dangerous.isdisjoint(SandboxedExecutor.ALLOWED_BUILTINS)
 
-    def test_execute_has_correct_signature(self):
+    def test_execute_has_correct_signature(self) -> None:
         sig = inspect.signature(SandboxedExecutor.execute)
         params = list(sig.parameters.keys())
         assert "code" in params
@@ -233,11 +245,11 @@ class TestSandboxContract:
 
 
 class TestAgentMemoryContract:
-    def test_has_record_methods(self, tmp_path):
+    def test_has_record_methods(self, tmp_path: Path) -> None:
         mem = AgentMemory("test", str(tmp_path / "m.json"))
         for method in ("record_procedure", "record_feedback", "record_conceptual", "save"):
             assert hasattr(mem, method)
 
-    def test_generate_prompt_section_returns_str(self, tmp_path):
+    def test_generate_prompt_section_returns_str(self, tmp_path: Path) -> None:
         mem = AgentMemory("test", str(tmp_path / "m.json"))
         assert isinstance(mem.generate_prompt_section(), str)

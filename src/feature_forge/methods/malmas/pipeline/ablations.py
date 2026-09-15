@@ -37,8 +37,11 @@ class NoMemoryPipeline(IterativePipeline):
         for agent in agents:
             agent_gain_df = core_results.agent_gains.get(agent.name, pd.DataFrame())
             if not agent_gain_df.empty:
-                avg_gain = agent_gain_df["gain"].mean()
-                self.router.update_performance(agent.name, avg_gain)
+                avg_gain = float(agent_gain_df["gain"].mean())
+                self.router.update_performance(
+                    agent.name,
+                    self.core._improvement_value(avg_gain),
+                )
 
 
 class NoMemoryStaticRouterPipeline(NoMemoryPipeline):

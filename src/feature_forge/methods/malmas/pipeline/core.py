@@ -10,6 +10,7 @@ import asyncio
 import os
 import time
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import Any
 
 import pandas as pd
@@ -18,6 +19,7 @@ from joblib import Parallel, delayed  # type: ignore[import-untyped]
 from feature_forge.config import Settings
 from feature_forge.evaluation.cv import CVEvaluator
 from feature_forge.evaluation.kit import EvaluationKit
+from feature_forge.evaluation.metrics import MetricDirection, get_metric_direction
 from feature_forge.evaluation.prefilter import prefilter_candidate_columns
 from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.exceptions import CodeExecutionError, PipelineError
@@ -26,6 +28,8 @@ from feature_forge.methods.malmas.agents.base import Agent
 from feature_forge.methods.malmas.pipeline.codegen import CodeGenerator
 from feature_forge.methods.malmas.pipeline.result import PipelineResult
 from feature_forge.observability.structlog_config import get_logger
+from feature_forge.runtime.intel_bootstrap import is_intel_active
+from feature_forge.storage.hashing import fingerprint
 from feature_forge.types import FeatureSpec
 
 logger = get_logger(__name__)
@@ -82,6 +86,16 @@ async def _exec_sandbox(
         return None
 
 
+@dataclass(frozen=True)
+class _SuccessfulCode:
+    """One unique code batch that succeeded on training data."""
+
+    agent_name: str
+    code: str
+    feature_names: tuple[str, ...]
+    dtypes: tuple[str, ...]
+
+
 class CorePipeline:
     """Single-round feature engineering pipeline.
 
@@ -117,13 +131,55 @@ class CorePipeline:
         self.code_generator = code_generator or CodeGenerator(
             llm_client, max_tokens=config.llm.codegen_max_tokens
         )
-        self._baseline_cache: dict[tuple[frozenset[str], int, int], float] = {}
+        self._baseline_cache: dict[str, float] = {}
 
-    @staticmethod
-    def _baseline_cache_key(
-        X_train: pd.DataFrame, y_train: pd.Series
-    ) -> tuple[frozenset[str], int, int]:
-        return (frozenset(X_train.columns), len(X_train), id(y_train))
+    def _baseline_cache_key(self, X_train: pd.DataFrame, y_train: pd.Series) -> str:
+        """Return canonical data, fold, metric, and model identity."""
+        return fingerprint(
+            {
+                "kind": "malmas-baseline",
+                "features": {
+                    "columns": [str(column) for column in X_train.columns],
+                    "dtypes": [str(dtype) for dtype in X_train.dtypes],
+                    "values": [
+                        int(value)
+                        for value in pd.util.hash_pandas_object(X_train, index=True).array
+                    ],
+                },
+                "target": {
+                    "name": str(y_train.name),
+                    "dtype": str(y_train.dtype),
+                    "values": [
+                        int(value)
+                        for value in pd.util.hash_pandas_object(y_train, index=True).array
+                    ],
+                },
+                "evaluation": {
+                    "task": self.config.task,
+                    "metric": self.config.metric,
+                    "cv_folds": getattr(
+                        self.evaluator, "cv_folds", self.config.evaluation.cv_folds
+                    ),
+                    "random_state": self.config.random_state,
+                    "model": getattr(self.evaluator, "default_model_name", "random_forest"),
+                },
+            }
+        )
+
+    def _is_improvement(self, gain: float) -> bool:
+        check = getattr(self.evaluator, "is_improvement", None)
+        if callable(check):
+            return bool(check(gain))
+        direction = get_metric_direction(self.config.metric)
+        return gain < 0 if direction is MetricDirection.MINIMIZE else gain > 0
+
+    def _improvement_value(self, gain: float) -> float:
+        normalize = getattr(self.evaluator, "improvement_value", None)
+        if callable(normalize):
+            return float(normalize(gain))
+        return (
+            -gain if get_metric_direction(self.config.metric) is MetricDirection.MINIMIZE else gain
+        )
 
     async def run(
         self,
@@ -167,11 +223,13 @@ class CorePipeline:
             return self._empty_result(X_train, X_test)
 
         schema = self._build_schema(X_train)
-        features_train, code, all_code_parts = await self._execute_train(
+        features_train, successful_code, feature_failures = await self._execute_train(
             all_specs, X_train, schema, semaphore
         )
 
-        features_test = await self._execute_test(all_code_parts, X_test)
+        features_test, test_failures = await self._execute_test(successful_code, X_test)
+        feature_failures.extend(test_failures)
+        code = "\n\n".join(batch.code for batch in successful_code)
 
         features_train = features_train.reindex(X_train.index)
         if X_test is not None:
@@ -186,6 +244,8 @@ class CorePipeline:
             all_specs,
             agents,
             code,
+            successful_code,
+            feature_failures,
         )
         pipeline_latency_ms = round((time.perf_counter() - pipeline_t0) * 1000, 1)
         logger.info(
@@ -194,7 +254,7 @@ class CorePipeline:
             num_selected=len(result.selected_features_train.columns)
             if not result.selected_features_train.empty
             else 0,
-            num_effective=len([g for g in result.gains.values() if g > 0]),
+            num_effective=len([g for g in result.gains.values() if self._is_improvement(g)]),
             baseline_score=round(result.baseline_score, 6),
             latency_ms=pipeline_latency_ms,
         )
@@ -218,6 +278,9 @@ class CorePipeline:
             baseline_score=0.0,
             gains={},
             generated_code="",
+            generated_codes=[],
+            code_features=[],
+            feature_failures=[],
         )
 
     @staticmethod
@@ -281,7 +344,7 @@ class CorePipeline:
         X_train: pd.DataFrame,
         schema: dict[str, Any],
         semaphore: asyncio.Semaphore,
-    ) -> tuple[pd.DataFrame, str, list[tuple[str, str]]]:
+    ) -> tuple[pd.DataFrame, list[_SuccessfulCode], list[dict[str, str]]]:
         specs_by_agent: dict[str, list[FeatureSpec]] = defaultdict(list)
         for spec in all_specs:
             specs_by_agent[spec.agent_name].append(spec)
@@ -315,17 +378,23 @@ class CorePipeline:
         code_gen_results = await asyncio.gather(
             *[_gen_for_agent(name, specs) for name, specs in specs_by_agent.items()]
         )
-        all_code_parts: list[tuple[str, str]] = [r for r in code_gen_results if r is not None]
+        generated = [result for result in code_gen_results if result is not None]
 
-        # Deduplicate identical generated code so repeated agents do not
-        # pay the sandbox spawn/import cost multiple times in the same round.
-        unique_code_parts: list[tuple[str, str]] = []
-        seen_code: set[str] = set()
-        for agent_name, code in all_code_parts:
-            if code in seen_code:
-                continue
-            seen_code.add(code)
-            unique_code_parts.append((agent_name, code))
+        # Group identical code before execution. Expected feature names are
+        # unioned so duplicate batches execute exactly once without losing
+        # schema accountability for either agent.
+        grouped: dict[str, dict[str, Any]] = {}
+        for agent_name, code in generated:
+            batch = grouped.setdefault(code, {"agent": agent_name, "features": []})
+            known = set(batch["features"])
+            for spec in specs_by_agent[agent_name]:
+                if spec.name not in known:
+                    batch["features"].append(spec.name)
+                    known.add(spec.name)
+        unique_code_parts = [
+            (str(batch["agent"]), code, tuple(str(name) for name in batch["features"]))
+            for code, batch in grouped.items()
+        ]
 
         sandbox_timeout = self.config.evaluation.sandbox_timeout_seconds
 
@@ -334,21 +403,73 @@ class CorePipeline:
                 _exec_sandbox(
                     self.sandbox, name, code, X_train, "malmas_core_train", sandbox_timeout
                 )
-                for name, code in unique_code_parts
+                for name, code, _feature_names in unique_code_parts
             ]
         )
 
         features_train_parts: list[pd.DataFrame] = []
-        combined_code_parts: list[str] = []
-        for (_name, code), result in zip(unique_code_parts, exec_results, strict=True):
-            if result is not None:
-                features_train_parts.append(result[1])
-                combined_code_parts.append(code)
-
-        code = "\n\n".join(combined_code_parts)
+        successful: list[_SuccessfulCode] = []
+        failures: list[dict[str, str]] = []
+        for (_name, code, expected_names), result in zip(
+            unique_code_parts, exec_results, strict=True
+        ):
+            if result is None:
+                failures.extend(
+                    {
+                        "feature": name,
+                        "phase": "train",
+                        "reason_code": "execution_failed",
+                    }
+                    for name in expected_names
+                )
+                continue
+            output = result[1]
+            if not output.index.equals(X_train.index):
+                failures.extend(
+                    {
+                        "feature": name,
+                        "phase": "train",
+                        "reason_code": "index_mismatch",
+                    }
+                    for name in expected_names
+                )
+                continue
+            valid_names: list[str] = []
+            for name in expected_names:
+                if name not in output.columns:
+                    failures.append(
+                        {
+                            "feature": name,
+                            "phase": "train",
+                            "reason_code": "missing_output",
+                        }
+                    )
+                else:
+                    valid_names.append(name)
+            for name in output.columns:
+                if name not in expected_names:
+                    failures.append(
+                        {
+                            "feature": str(name),
+                            "phase": "train",
+                            "reason_code": "unexpected_output",
+                        }
+                    )
+            if not valid_names:
+                continue
+            valid_output = output[valid_names]
+            features_train_parts.append(valid_output)
+            successful.append(
+                _SuccessfulCode(
+                    agent_name=_name,
+                    code=code,
+                    feature_names=tuple(valid_names),
+                    dtypes=tuple(str(valid_output[name].dtype) for name in valid_names),
+                )
+            )
 
         if not features_train_parts:
-            raise PipelineError("All agent code executions failed — no features generated")
+            raise PipelineError("All agent code executions failed schema validation")
 
         features_train = self._concat_dedup(features_train_parts)
 
@@ -356,37 +477,83 @@ class CorePipeline:
             "code_generation_complete",
             num_specs=len(all_specs),
             num_agents=len(specs_by_agent),
-            code_length=len(code),
+            code_length=sum(len(batch.code) for batch in successful),
+            num_failures=len(failures),
             latency_ms=round((time.perf_counter() - code_gen_t0) * 1000, 1),
         )
-        return features_train, code, all_code_parts
+        return features_train, successful, failures
 
     async def _execute_test(
         self,
-        all_code_parts: list[tuple[str, str]],
+        successful_code: list[_SuccessfulCode],
         X_test: pd.DataFrame | None,
-    ) -> pd.DataFrame:
+    ) -> tuple[pd.DataFrame, list[dict[str, str]]]:
         if X_test is None:
-            return pd.DataFrame()
+            return pd.DataFrame(), []
 
         sandbox_timeout = self.config.evaluation.sandbox_timeout_seconds
         test_exec_results = await asyncio.gather(
             *[
-                _exec_sandbox(self.sandbox, name, code, X_test, "malmas_core_test", sandbox_timeout)
-                for name, code in all_code_parts
+                _exec_sandbox(
+                    self.sandbox,
+                    batch.agent_name,
+                    batch.code,
+                    X_test,
+                    "malmas_core_test",
+                    sandbox_timeout,
+                )
+                for batch in successful_code
             ],
             return_exceptions=True,
         )
 
         features_test_parts: list[pd.DataFrame] = []
-        for test_result in test_exec_results:
-            if isinstance(test_result, BaseException):
-                logger.warning("agent_test_execution_task_failed", error=str(test_result)[:200])
+        failures: list[dict[str, str]] = []
+        for batch, test_result in zip(successful_code, test_exec_results, strict=True):
+            if isinstance(test_result, BaseException) or test_result is None:
+                failures.extend(
+                    {
+                        "feature": name,
+                        "phase": "test",
+                        "reason_code": "execution_failed",
+                    }
+                    for name in batch.feature_names
+                )
                 continue
-            if test_result is not None:
-                features_test_parts.append(test_result[1])
-        features_test = self._concat_dedup(features_test_parts, index=X_test.index)
-        return features_test
+            output = test_result[1]
+            if not output.index.equals(X_test.index):
+                failures.extend(
+                    {
+                        "feature": name,
+                        "phase": "test",
+                        "reason_code": "index_mismatch",
+                    }
+                    for name in batch.feature_names
+                )
+                continue
+            valid_names: list[str] = []
+            for name, train_dtype in zip(batch.feature_names, batch.dtypes, strict=True):
+                if name not in output.columns:
+                    failures.append(
+                        {
+                            "feature": name,
+                            "phase": "test",
+                            "reason_code": "missing_output",
+                        }
+                    )
+                elif str(output[name].dtype) != train_dtype:
+                    failures.append(
+                        {
+                            "feature": name,
+                            "phase": "test",
+                            "reason_code": "dtype_mismatch",
+                        }
+                    )
+                else:
+                    valid_names.append(name)
+            if valid_names:
+                features_test_parts.append(output[valid_names])
+        return self._concat_dedup(features_test_parts, index=X_test.index), failures
 
     def _evaluate_and_select(
         self,
@@ -398,6 +565,8 @@ class CorePipeline:
         all_specs: list[FeatureSpec],
         agents: list[Agent],
         code: str,
+        successful_code: list[_SuccessfulCode] | None = None,
+        feature_failures: list[dict[str, str]] | None = None,
     ) -> PipelineResult:
         _cache_key = self._baseline_cache_key(X_train, y_train)
         baseline_score = self._baseline_cache.get(_cache_key)
@@ -417,9 +586,24 @@ class CorePipeline:
             else 1
         )
         backend = self.config.evaluation.feature_eval_backend
+        # When Intel acceleration is actually engaged, sklearnex loads libiomp5
+        # while the XGBoost/LightGBM wheels use libgomp. Forking after OpenMP is
+        # initialized (the loky/multiprocessing backends) can deadlock in the
+        # child process, so we keep evaluation in the *same* process (threading)
+        # and rely on the model factory pinning boosters to n_jobs=1 (libgomp
+        # stays idle). This avoids the fork-after-OpenMP hazard entirely. See
+        # docs/decisions/0010-intel-openmp-bootstrap.md.
+        if is_intel_active() and backend != "threading":
+            logger.warning(
+                "feature_eval_backend_forced_threading",
+                configured_backend=backend,
+                reason="Intel acceleration active: fork-after-OpenMP (loky) can deadlock; see ADR 0010",
+            )
+            backend = "threading"
         if (
             len(candidate_columns) > 1
             and backend == "loky"
+            and not is_intel_active()
             and X_train.shape[0] * X_train.shape[1] > 2_000_000
         ):
             logger.warning(
@@ -444,19 +628,29 @@ class CorePipeline:
                     raise PipelineError(
                         f"Feature evaluation failed for '{col}': {result}"
                     ) from result
-                gains[col] = float("-inf")
+                gains[col] = (
+                    float("inf")
+                    if get_metric_direction(self.config.metric) is MetricDirection.MINIMIZE
+                    else float("-inf")
+                )
             else:
                 gains[col] = result
                 logger.debug(
                     "feature_evaluated",
                     feature=col,
                     gain=round(result, 6),
-                    effective=result > 0,
+                    effective=self._is_improvement(result),
                 )
 
-        effective = {k: v for k, v in gains.items() if v > 0}
-        top_k = sorted(effective.items(), key=lambda x: x[1], reverse=True)
-        top_k_names = [name for name, _ in top_k[: self.config.min_effective]]
+        effective = {k: v for k, v in gains.items() if self._is_improvement(v)}
+        top_k = sorted(
+            effective.items(),
+            key=lambda item: self._improvement_value(item[1]),
+            reverse=True,
+        )
+        top_k_names = [name for name, _ in top_k[: self.config.max_selected_features]]
+        if X_test is not None:
+            top_k_names = [name for name in top_k_names if name in features_test.columns]
 
         top_features_train = (
             features_train[top_k_names] if top_k_names else pd.DataFrame(index=X_train.index)
@@ -489,6 +683,9 @@ class CorePipeline:
             baseline_score=baseline_score,
             gains=gains,
             generated_code=code,
+            generated_codes=[batch.code for batch in successful_code or []],
+            code_features=[list(batch.feature_names) for batch in successful_code or []],
+            feature_failures=list(feature_failures or []),
         )
 
     @staticmethod

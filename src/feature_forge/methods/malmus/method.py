@@ -151,21 +151,23 @@ class MalmusMethod(BaseMethod):
             await self._fit_single_shot(X_train, y_train)
 
     async def _fit_single_shot(self, X: pd.DataFrame, y: pd.Series) -> None:
-        template = get_registry().get("single_shot").system
         params = MalmusSingleShotParams(
             columns=", ".join(X.columns),
             task="classification" if y.nunique() <= 10 else "regression",
             n_features=self.n_features,
         )
-        prompt = params.render(template)
+        prompt_meta = get_registry().provenance("single_shot").model_dump()
+        prompt = get_registry().render("single_shot", params)
         raw_json = await self.llm_client.complete_json(
             messages=[{"role": "user", "content": prompt}],
             schema_description=FEATURE_SCHEMA_DESCRIPTION,
             temperature=0.3,
             max_tokens=4096,
+            prompt_meta=prompt_meta,
         )
         self._artifacts["raw_json"] = raw_json
         self._artifacts["prompt"] = prompt
+        self._artifacts["prompt_meta"] = prompt_meta
 
         parsed = self._parse_response(_ensure_json_object(raw_json))
         self._feature_defs = parsed.features
@@ -187,7 +189,6 @@ class MalmusMethod(BaseMethod):
         cols = ", ".join(X.columns)
 
         for i in range(self.n_features):
-            template = get_registry().get("iterative").system
             params = MalmusIterativeParams(
                 columns=cols,
                 task=task,
@@ -196,17 +197,20 @@ class MalmusMethod(BaseMethod):
                 existing_features=", ".join(cumulative_cols) if cumulative_cols else "none",
                 feedback=feedback_str,
             )
-            prompt = params.render(template)
+            prompt_meta = get_registry().provenance("iterative").model_dump()
+            prompt = get_registry().render("iterative", params)
             raw_json = await self.llm_client.complete_json(
                 messages=[{"role": "user", "content": prompt}],
                 schema_description=ITERATIVE_FEATURE_SCHEMA_DESCRIPTION,
                 temperature=0.3,
                 max_tokens=4096,
+                prompt_meta=prompt_meta,
             )
 
             iteration_record: dict[str, Any] = {
                 "iteration": i,
                 "prompt": prompt,
+                "prompt_meta": prompt_meta,
                 "raw_json": raw_json,
             }
 

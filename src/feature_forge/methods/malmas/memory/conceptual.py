@@ -13,6 +13,7 @@ from feature_forge.methods.malmas.memory.prompts import (
     SummarizeAgentParams,
     SummarizeGlobalParams,
 )
+from feature_forge.methods.malmas.prompts import get_registry
 from feature_forge.observability.structlog_config import get_logger
 
 logger = get_logger(__name__)
@@ -78,17 +79,15 @@ class ConceptualMemory:
             examples_text=examples_text,
             stats_text=stats_text,
         )
-        system_prompt = params.render_system()
-        user_prompt = params.render_user()
+        messages = get_registry().render_messages("summarize_agent", params)
+        prompt_meta = get_registry().provenance("summarize_agent").model_dump()
 
         try:
             response = await self.llm_client.complete(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
+                messages=messages,
                 temperature=0.6,
                 max_tokens=1024,
+                prompt_meta=prompt_meta,
             )
             memory.conceptual_summary = response.content
         except (LLMError, TimeoutError, ConnectionError) as exc:
@@ -139,17 +138,15 @@ class ConceptualMemory:
             combined_prompt=combined_prompt,
             task_description=task_description,
         )
-        system_prompt = params.render_system()
-        user_prompt = params.render_user()
+        messages = get_registry().render_messages("summarize_global", params)
+        prompt_meta = get_registry().provenance("summarize_global").model_dump()
 
         try:
             response = await self.llm_client.complete(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
+                messages=messages,
                 temperature=0.6,
                 max_tokens=1024,
+                prompt_meta=prompt_meta,
             )
             global_summary = response.content
         except (LLMError, TimeoutError, ConnectionError) as exc:

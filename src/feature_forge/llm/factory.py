@@ -51,15 +51,26 @@ def create_llm_client(
     inferred from the model name. Otherwise the explicit provider is used.
 
     When ``cache`` is not explicitly provided and ``config.cache_responses``
-    is true, a :class:`DiskCache` is instantiated automatically so that
-    repeated requests are served from cache.
+    is true, a :class:`DiskCache` is instantiated at ``config.cache_dir``
+    automatically so that repeated requests are served from cache.
 
     Only the required provider module is imported.
     """
+    from feature_forge.llm.replay import ensure_provider_allowed
+
+    ensure_provider_allowed()
     if cache is None and getattr(config, "cache_responses", False):
         from feature_forge.llm.cache import DiskCache
 
-        cache = DiskCache()
+        cache = DiskCache(
+            cache_dir=config.cache_dir,
+            ttl_seconds=(config.cache_ttl_days * 86400.0)
+            if config.cache_ttl_days is not None
+            else None,
+            size_limit_bytes=(int(config.cache_size_limit_mb * 1024 * 1024))
+            if config.cache_size_limit_mb is not None
+            else None,
+        )
 
     import importlib
 
