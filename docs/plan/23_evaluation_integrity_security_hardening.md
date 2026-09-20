@@ -1,10 +1,10 @@
 # Evaluation Integrity and Sandbox Hardening
 
-**Date:** 2026-09-15  
-**Status:** Proposed; ADRs 0018–0020 must be accepted before runtime changes  
-**Decision owner:** Maintainer  
-**Prerequisite:** Plan 22 implementation remains intact  
-**Related:** ADR 0001, ADR 0009, ADR 0013, ADR 0017,
+**Date:** 2026-09-16
+**Status:** Active — PRs 1–5 complete; ADRs 0018–0020 accepted 2026-09-15, PRs 6–7 remaining
+**Decision owner:** Maintainer
+**Prerequisite:** Plan 22 implementation remains intact; plan 23 PR 1 characterization landed
+**Related:** ADR 0001, ADR 0009, ADR 0013, ADR 0017, ADR 0018, ADR 0019, ADR 0020,
 `REPORT_LOG.md`, `.planning/STATE.md`
 
 ## 0. Continuation checkpoint

@@ -72,6 +72,18 @@ class ExperimentResult:
     # unset. CANCELLED is only ever set explicitly, for cases that never ran
     # (or ran before the stop condition) — it is never derived.
     state: RunState | None = None
+    # Directional evaluation fields (ADR 0018 decisions 6-7, plan 23 PR 4).
+    # ``directional_gain`` is the headline effect (sign-aligned with the
+    # metric direction); ``gain_lower_bound``/``gain_upper_bound`` are its
+    # paired Student-t confidence interval. ``evaluation_protocol`` records
+    # the protocol ("holdout" or "compatibility"); compatibility results are
+    # selection-biased by construction. ``gain`` above stays the legacy raw
+    # gain (compat-only, not the headline). All default to ``None`` so legacy
+    # and cancelled results keep the previous shape.
+    directional_gain: float | None = None
+    gain_lower_bound: float | None = None
+    gain_upper_bound: float | None = None
+    evaluation_protocol: str | None = None
 
     @property
     def resolved_state(self) -> RunState:

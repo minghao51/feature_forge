@@ -1,6 +1,6 @@
 # Feature Forge — Current State
 
-Last updated: 2026-09-14
+Last updated: 2026-09-18
 
 ## What's Implemented
 
@@ -50,8 +50,46 @@ preprocessing, selection/reporting on shared evidence, dormant selection policy
 fields, incorrect configurable/directional uncertainty, host-filesystem access
 through allowed sandbox libraries, unbounded sandbox timeout cleanup, and an
 incomplete LLM cache identity. See
-`docs/plan/23_evaluation_integrity_security_hardening.md`. Runtime changes are
-gated on proposed ADRs 0018–0020.
+`docs/plan/23_evaluation_integrity_security_hardening.md`. **PR 1 landed
+2026-09-15**: every finding now has a deterministic characterization test
+(37 `xfail(strict=True)` + 3 pins across the three `tests/unit/test_plan23_*`
+modules), the OS-isolation spike proved Landlock ABI 7 containment on this
+Linux host (WSL2, kernel 6.18 — see
+`docs/spikes/2026-09-15-sandbox-os-isolation.md`), and ADRs 0018–0020 were
+**accepted by the maintainer on 2026-09-15**, unlocking runtime fixes (PRs
+2–7). **PR 2 landed 2026-09-16** (partition-aware discovery per ADR 0018
+decisions 1–3): typed evaluation-protocol settings, fail-closed holdout
+partitioning, discovery-only method fitting, the row-local scope contract,
+and protocol-aware reuse fingerprints. **PR 3 landed 2026-09-16** (fold-local
+preprocessing and selection per ADR 0018 decisions 4–6): per-fold train-only
+imputation/encoding with the documented -1 unknown-category sentinel
+(`evaluation/preprocessing.py`), discovery-fold candidate and selection
+evidence, greedy forward selection enforcing `minimum_practical_gain`,
+`require_positive_lower_bound` (1.96 normal margin until PR 4 swaps in
+Student-t), `max_selected_features`, and the stable name tie-break, two-arm
+evaluation-fold reporting where rejected winners mirror baseline, and
+`PlatinumRequest` selection-partition/profile validation. The remaining
+Platinum-side gap is directional Student-t intervals plus evidence schema v2
+(PR 4); sandbox containment is PR 5 and LLM cache identity is PR 6. **PR 4
+landed 2026-09-18** (Platinum v2 evidence and uncertainty per ADR 0018
+decisions 7–8): directional Student-t intervals with scipy as a direct
+dependency (`_t_critical` owns the margin in `uncertainty_summary` and the
+greedy gate), the 12-artifact evidence schema v2 (`evidence.json`
+`PlatinumEvidenceIndex` marker, `discovery_fold_metrics.parquet`,
+`selection_steps.json`, `preprocessing.json`) with offline reconstruction
+and tamper detection in `load_platinum_package`, Platinum-only
+`PLATINUM_IDENTITY_SCHEMA_VERSION="2"` reuse rejection (v1 packages stay
+readable and integrity-verified but never reusable), and directional
+gain/bounds + `evaluation_protocol`/`selection_biased` labeling in results
+and tracker output. PR 5 landed 2026-09-18 (sandbox containment and bounded
+worker lifecycle per ADR 0019): expanded AST I/O policy blocking direct and
+aliased NumPy/Pandas file APIs, raw-ctypes Landlock strict containment
+(exact inode grants, empty-allow TCP at ABI >= 4, seccomp fallback,
+fail-closed when unavailable) with an explicit recorded
+`degraded_development` profile, and a bounded sync/async worker lifecycle
+(event-loop-owned spawn, single monotonic deadline, process-group kill,
+leak-free cleanup); reviewer pass incorporated. Next change: PR 6 (LLM
+cache identity v2, ADR 0020).
 
 | Ref | Issue | Resolution |
 |-----|-------|------------|

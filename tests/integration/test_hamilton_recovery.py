@@ -35,7 +35,7 @@ from feature_forge.contracts import (
     ManifestRef,
 )
 from feature_forge.data import DatasetRegistry
-from feature_forge.dataflows._io import load_silver_package, replay_gold_package
+from feature_forge.dataflows._io import load_gold_package, load_silver_package, replay_gold_package
 from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.experiment.execution import ExperimentCase, ExperimentResult
 from feature_forge.experiment.hamilton_executor import HamiltonLayerExecutor
@@ -97,8 +97,14 @@ class InlineReplaySandbox(SandboxedExecutor):
 
 
 def _local_numeric_dataset(tmp_path: pathlib.Path) -> dict[str, Any]:
-    """Write the deterministic XOR-style dataset and return its registry info."""
-    frame = pd.DataFrame(
+    """Write the deterministic XOR-style dataset and return its registry info.
+
+    The block is tiled 3x (24 rows) so the default holdout protocol (ADR 0018,
+    0.25 fraction, cv_folds=2) can independently host stratified folds inside
+    both the discovery and the evaluation partition; smaller fixtures fail
+    closed by design (plan 23 §7.5).
+    """
+    block = pd.DataFrame(
         {
             "a": [0.0, 0.0, 1.0, 1.0, 0.1, 0.2, 0.9, 0.8],
             "b": [0.0, 1.0, 0.0, 1.0, 0.9, 0.8, 0.1, 0.2],
@@ -106,6 +112,7 @@ def _local_numeric_dataset(tmp_path: pathlib.Path) -> dict[str, Any]:
             "target": [0, 1, 1, 0, 1, 1, 1, 1],
         }
     )
+    frame = pd.concat([block] * 3, ignore_index=True)
     sample_dir = tmp_path / "recovery-xor-data"
     sample_dir.mkdir(parents=True, exist_ok=True)
     frame.to_csv(sample_dir / "train.csv", index=False)
@@ -354,3 +361,70 @@ class TestGoldReplayAfterRecovery:
         assert again.accepted_features.to_dict("list") == committed.to_dict("list")
         assert replayed.counts.accepted_output_columns == 1
         assert replayed.accepted_features.columns.tolist() == ["row_id", "diag_sq"]
+
+
+class TestHoldoutProtocolWiring:
+    """Executor call-site wiring for the default holdout protocol (plan 23 PR 2).
+
+    The unit tests in ``tests/unit/test_plan23_evaluation_integrity.py`` cover
+    the extracted ``_dataset_request`` / ``_fit_method_on_discovery`` helpers
+    behaviorally; these drills pin the ``execute_case`` call sites themselves.
+    """
+
+    def test_default_run_partitions_silver_and_labels_gold(self, tmp_path: pathlib.Path) -> None:
+        dataset_info = _local_numeric_dataset(tmp_path)
+        result = _run_attempt(tmp_path, dataset_info, ATTEMPT_ID)
+        assert result.error is None
+
+        store = LocalArtifactStore(_settings(tmp_path).dataflow.artifact_root)
+        stages = _stage_map(result)
+        silver_ref = stages[Layer.SILVER].manifest_ref
+        gold_ref = stages[Layer.GOLD].manifest_ref
+        assert isinstance(silver_ref, ManifestRef)
+        assert isinstance(gold_ref, ManifestRef)
+
+        silver = load_silver_package(store, silver_ref)
+        # The executor threaded the default holdout protocol into the
+        # DatasetRequest: the manifest labels it and Silver actually reserved
+        # a deterministic evaluation partition (ceil(0.25 * 24) = 6 rows).
+        assert silver.manifest.request.options["evaluation_protocol"] == "holdout"
+        partitions = silver.fold_assignments["partition"]
+        assert set(partitions.unique()) == {"discovery", "evaluation"}
+        assert int((partitions == "evaluation").sum()) == 6
+        # Partition provenance reaches the Gold request (ADR 0018 reuse chains).
+        gold = load_gold_package(store, gold_ref)
+        assert gold.request.evaluation_protocol == "holdout"
+
+    def test_executor_fits_method_on_discovery_rows_only(self, tmp_path: pathlib.Path) -> None:
+        dataset_info = _local_numeric_dataset(tmp_path)
+        settings = _settings(tmp_path)
+        registry = DatasetRegistry()
+        registry.register(DATASET_NAME, dataset_info)
+        fit_shapes: list[tuple[int, int]] = []
+
+        class _RecordingMethod(RecoveryDeterministicMethod):
+            def fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> RecoveryDeterministicMethod:
+                fit_shapes.append((len(X_train), len(y_train)))
+                return super().fit(X_train, y_train)
+
+        executor = HamiltonLayerExecutor(
+            settings=settings,
+            artifact_store=LocalArtifactStore(settings.dataflow.artifact_root),
+            dataset_registry=registry,
+            method_classes={METHOD_NAME: _RecordingMethod},
+        )
+        result = executor.execute_case(
+            ExperimentCase(
+                dataset=DATASET_NAME,
+                method=METHOD_NAME,
+                model="random_forest",
+                seed=42,
+                cv_folds=2,
+                run_id=ATTEMPT_ID,
+                attempt_id=ATTEMPT_ID,
+            )
+        )
+        assert result.error is None
+        # The method is fit exactly once, on the 18 discovery rows only — the
+        # 6 evaluation rows and their targets never reach method fitting.
+        assert fit_shapes == [(18, 18)]

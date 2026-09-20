@@ -22,7 +22,7 @@ from feature_forge.evaluation.kit import EvaluationKit
 from feature_forge.evaluation.metrics import MetricDirection, get_metric_direction
 from feature_forge.evaluation.prefilter import prefilter_candidate_columns
 from feature_forge.evaluation.sandbox import SandboxedExecutor
-from feature_forge.exceptions import CodeExecutionError, PipelineError
+from feature_forge.exceptions import CodeExecutionError, PipelineError, SandboxTimeoutError
 from feature_forge.llm.base import LLMClient
 from feature_forge.methods.malmas.agents.base import Agent
 from feature_forge.methods.malmas.pipeline.codegen import CodeGenerator
@@ -45,16 +45,20 @@ async def _exec_sandbox(
 ) -> tuple[str, pd.DataFrame] | None:
     t0 = time.perf_counter()
     try:
-        part = await asyncio.wait_for(
-            asyncio.to_thread(
-                sandbox.execute,
+        execute_async = getattr(sandbox, "execute_async", None)
+        if callable(execute_async):
+            # SandboxedExecutor owns the authoritative worker deadline and
+            # cancellation cleanup; do not add a competing outer deadline.
+            part = await execute_async(
                 code,
                 X,
                 source=source,
                 agent_name=agent_name,
-            ),
-            timeout=max(sandbox_timeout * 2, 30.0),
-        )
+            )
+        else:
+            # Keep lightweight synchronous test doubles/source-compatible
+            # while production SandboxedExecutor always takes the async path.
+            part = sandbox.execute(code, X, source=source, agent_name=agent_name)
         event = "agent_sandbox_complete" if "test" not in source else "agent_sandbox_complete_test"
         logger.info(
             event,
@@ -63,11 +67,11 @@ async def _exec_sandbox(
             latency_ms=round((time.perf_counter() - t0) * 1000, 1),
         )
         return (agent_name, part)
-    except TimeoutError:
+    except (SandboxTimeoutError, TimeoutError):
         logger.warning(
             "agent_sandbox_timeout",
             agent=agent_name,
-            timeout=sandbox_timeout * 2,
+            timeout=sandbox_timeout,
         )
         return None
     except CodeExecutionError as exc:
@@ -127,6 +131,7 @@ class CorePipeline:
             self.sandbox = sandbox or SandboxedExecutor(
                 timeout_seconds=config.evaluation.sandbox_timeout_seconds,
                 max_memory_mb=config.evaluation.sandbox_max_memory_mb,
+                profile=config.evaluation.sandbox_profile,
             )
         self.code_generator = code_generator or CodeGenerator(
             llm_client, max_tokens=config.llm.codegen_max_tokens

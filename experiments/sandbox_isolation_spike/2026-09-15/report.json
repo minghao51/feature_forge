@@ -1,0 +1,49 @@
+{
+  "schema": "ff.sandbox_isolation_spike.v1",
+  "generated_at_utc": "2026-09-15T06:48:46Z",
+  "platform": {
+    "system": "Linux",
+    "release": "6.18.33.2-microsoft-standard-WSL2",
+    "version": "#1 SMP PREEMPT_DYNAMIC Thu Jun 18 21:54:43 UTC 2026",
+    "machine": "x86_64",
+    "python": "3.13.14"
+  },
+  "kernel": "6.18.33.2-microsoft-standard-WSL2",
+  "arch": "x86_64",
+  "landlock": {
+    "available": true,
+    "abi_version": 7,
+    "errno": null,
+    "notes": "landlock_create_ruleset(VERSION) succeeded (kernel < 5.19 needs CONFIG_SECURITY_LANDLOCK=y and landlock LSM enabled)"
+  },
+  "userns": {
+    "available": true,
+    "errno": null,
+    "notes": "unshare(CLONE_NEWUSER|CLONE_NEWNS) succeeded"
+  },
+  "seccomp": {
+    "available": true,
+    "errno": null,
+    "libseccomp": "libseccomp.so.2",
+    "notes": "PR_GET_SECCOMP returned mode 0 (seccomp active in this process)"
+  },
+  "bubblewrap": "/usr/bin/bwrap",
+  "firejail": null,
+  "containment_demo": {
+    "sentinel_read_denied": true,
+    "errno": 13,
+    "socket_connect_result": "permitted (ECONNREFUSED; socket syscall allowed)",
+    "performed": true,
+    "notes": "child restricted via landlock_restrict_self with runtime reads (usr/lib/lib64/etc/sys.prefix/stdlib) + two temp roots; sentinel outside roots"
+  },
+  "provenance": {
+    "script": "scripts/spike_sandbox_isolation.py",
+    "plan": "docs/plan/23_evaluation_integrity_security_hardening.md \u00a75.2 (PR 1 spike)",
+    "sentinel_timeout_s": 10.0,
+    "landlock_syscalls": {
+      "create_ruleset": 444,
+      "add_rule": 445,
+      "restrict_self": 446
+    }
+  }
+}

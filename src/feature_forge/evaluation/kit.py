@@ -25,5 +25,6 @@ class EvaluationKit:
         sandbox = SandboxedExecutor(
             timeout_seconds=settings.evaluation.sandbox_timeout_seconds,
             max_memory_mb=settings.evaluation.sandbox_max_memory_mb,
+            profile=settings.evaluation.sandbox_profile,
         )
         return cls(sandbox=sandbox, evaluator=evaluator, model_factory=model_factory)

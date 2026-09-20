@@ -11,16 +11,20 @@ from dataclasses import replace
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
+import pandas as pd
+
 from feature_forge.config import Settings
 from feature_forge.contracts import (
     CaseExecutionPlan,
     DatasetRequest,
     EnvironmentSnapshot,
+    EvaluationPolicy,
     FailureClass,
     GoldRequest,
     Layer,
     MethodIdentity,
     ResumePolicy,
+    SilverPackage,
     StageDisposition,
     StageExecution,
     gold_input_fingerprint,
@@ -51,7 +55,12 @@ from feature_forge.evaluation import CVEvaluator, ModelFactory
 from feature_forge.evaluation.metrics import MetricRegistry
 from feature_forge.evaluation.model_factory import ModelRegistry
 from feature_forge.evaluation.sandbox import SandboxedExecutor
-from feature_forge.exceptions import LLMError, SandboxTimeoutError, SandboxValidationError
+from feature_forge.exceptions import (
+    DatasetError,
+    LLMError,
+    SandboxTimeoutError,
+    SandboxValidationError,
+)
 from feature_forge.experiment.execution import (
     CaseComputationInput,
     ExperimentCase,
@@ -76,12 +85,18 @@ def _package_version() -> str:
         return "0+unknown"
 
 
-def _environment() -> EnvironmentSnapshot:
+def _environment(settings: Settings | None = None) -> EnvironmentSnapshot:
+    evaluation = settings.evaluation if settings is not None else None
+    # ``unknown`` (not a fabricated profile) when no settings are supplied:
+    # provenance must never claim a containment level it did not observe.
+    profile = evaluation.sandbox_profile.value if evaluation is not None else "unknown"
     return EnvironmentSnapshot(
         python_version=runtime_platform.python_version(),
         operating_system=runtime_platform.system().lower() or sys.platform,
         architecture=runtime_platform.machine() or "unknown",
         feature_forge_version=_package_version(),
+        sandbox_profile=profile,
+        sandbox_degraded=profile == "degraded_development",
     )
 
 
@@ -156,6 +171,67 @@ def _classify_failure(error: Exception) -> FailureClass:
     if isinstance(error, (LLMError, SandboxTimeoutError, TimeoutError)):
         return FailureClass.TRANSIENT
     return FailureClass.DETERMINISTIC
+
+
+def _dataset_request(
+    settings: Settings,
+    *,
+    dataset: str,
+    target: str | None,
+    task: str,
+    run_id: str,
+    case_fingerprint: str,
+    split_seed: int,
+    cv_folds: int,
+) -> DatasetRequest:
+    """Build the attempt's DatasetRequest, threading the configured evaluation protocol.
+
+    Under ``holdout`` the configured fraction reserves a deterministic evaluation
+    partition; ``compatibility`` reproduces legacy all-row evaluation with a zero
+    fraction (ADR 0018 decisions 1-2).
+    """
+    evaluation = settings.evaluation
+    protocol = evaluation.protocol
+    fraction = evaluation.evaluation_holdout_fraction if protocol == "holdout" else 0.0
+    return DatasetRequest(
+        name=dataset,
+        target=target,
+        task=task,
+        run_id=run_id,
+        case_fingerprint=case_fingerprint,
+        split_seed=split_seed,
+        cv_folds=cv_folds,
+        evaluation_protocol=protocol,
+        evaluation_holdout_fraction=fraction,
+        source_policy="snapshot",
+    )
+
+
+def _fit_method_on_discovery(method: BaseMethod, silver: SilverPackage) -> None:
+    """Fit the method on discovery-partition rows only (ADR 0018 decision 3).
+
+    Evaluation-partition rows and targets never reach method fitting or the
+    method-internal candidate trials/selection that run inside ``fit``.
+    Generated code may still execute on the complete feature frame after
+    fitting, but never receives evaluation targets. (Platinum-side
+    selection/reporting partition enforcement lands in plan 23 PR 3.)
+    """
+    partitions = silver.fold_assignments.get("partition")
+    if not isinstance(partitions, pd.Series):
+        raise DatasetError(
+            "Silver fold_assignments lacks a 'partition' column; regenerate the "
+            "Silver package under a partition-aware evaluation protocol (ADR 0018) "
+            "before fitting methods"
+        )
+    mask = (partitions == "discovery").to_numpy()
+    if not mask.any():
+        raise DatasetError(
+            "Silver package contains no discovery-partition rows; methods cannot "
+            "be fit without an independent discovery partition (ADR 0018)"
+        )
+    features = silver.canonical_features.loc[mask].reset_index(drop=True)
+    target_series = silver.canonical_target.loc[mask, silver.bronze.target].reset_index(drop=True)
+    method.fit(features, target_series)
 
 
 class HamiltonLayerExecutor:
@@ -240,18 +316,17 @@ class HamiltonLayerExecutor:
             task = metadata.get("task", self.settings.task)
             if task not in {"classification", "regression"}:
                 raise ValueError(f"Dataset '{case.dataset}' has invalid task '{task}'")
-            request = DatasetRequest(
-                name=case.dataset,
+            request = _dataset_request(
+                self.settings,
+                dataset=case.dataset,
                 target=str(target) if target else None,
                 task=task,
                 run_id=plan.attempt_id,
                 case_fingerprint=plan.case_key,
                 split_seed=case.seed,
                 cv_folds=case.cv_folds or self.settings.evaluation.cv_folds,
-                evaluation_holdout_fraction=0.0,
-                source_policy="snapshot",
             )
-            environment = _environment()
+            environment = _environment(self.settings)
             cache_dir = resolve_cache_path(settings=self.settings)
 
             bronze_result = build_bronze_driver(
@@ -330,6 +405,7 @@ class HamiltonLayerExecutor:
                 method_config=identity.configuration,
                 prompt_bundle_fingerprint=prompt_fingerprint,
                 generated_contract_version="1",
+                evaluation_protocol=self.settings.evaluation.protocol,
                 selection_policy={"policy": "validation"},
             )
             gold_request = GoldRequest(
@@ -342,15 +418,16 @@ class HamiltonLayerExecutor:
                 method_version=method_version,
                 method_config=identity.configuration,
                 prompt_bundle_fingerprint=prompt_fingerprint,
+                evaluation_protocol=self.settings.evaluation.protocol,
             )
             gold_ref = self._find_reusable(gold_reuse, Layer.GOLD, [silver_ref], plan.attempt_id)
             if gold_ref is None:
                 method = self._build_method(method_class, case)
-                target_series = silver.canonical_target[silver.bronze.target]
-                method.fit(silver.canonical_features, target_series)
+                _fit_method_on_discovery(method, silver)
                 sandbox = SandboxedExecutor(
                     timeout_seconds=self.settings.evaluation.sandbox_timeout_seconds,
                     max_memory_mb=self.settings.evaluation.sandbox_max_memory_mb,
+                    profile=self.settings.evaluation.sandbox_profile,
                 )
                 gold_result = build_gold_driver(
                     profile=self.profile,
@@ -398,6 +475,9 @@ class HamiltonLayerExecutor:
                 model_name=case.model,
                 metric=self.settings.metric,
                 seed=case.seed,
+                evaluation_policy=EvaluationPolicy(
+                    evaluation_protocol=self.settings.evaluation.protocol
+                ),
             )
             platinum_reuse = platinum_request.platinum_input_fingerprint
             platinum_ref = self._find_reusable(
@@ -448,9 +528,17 @@ class HamiltonLayerExecutor:
                 method=case.method,
                 model=case.model,
                 seed=case.seed,
+                # Legacy compat fields: ``gain`` is the raw (non-directional)
+                # gain and ``cv_score`` the enhanced score. The headline is
+                # the directional gain plus its paired Student-t interval
+                # (ADR 0018 decisions 6-7, plan 23 PR 4).
                 cv_score=platinum.aggregate.enhanced_score,
                 gain=platinum.aggregate.legacy_gain,
                 baseline_score=platinum.aggregate.baseline_score,
+                directional_gain=platinum.aggregate.directional_gain,
+                gain_lower_bound=platinum.uncertainty.lower_bound,
+                gain_upper_bound=platinum.uncertainty.upper_bound,
+                evaluation_protocol=platinum.request.evaluation_policy.evaluation_protocol,
                 num_features_generated=len(gold.candidates),
                 run_id=plan.attempt_id,
                 case_fingerprint=plan.case_key,

@@ -227,6 +227,12 @@ class TestResultRowSerialization:
             "stages",
             "failure",
             "state",
+            # Directional interval fields (ADR 0018 decisions 6-7, plan 23
+            # PR 4): additive alongside the legacy ``gain`` key.
+            "directional_gain",
+            "gain_lower_bound",
+            "gain_upper_bound",
+            "evaluation_protocol",
         }
         assert row["cv_score"] == 0.9
         assert row["gain"] == 0.1

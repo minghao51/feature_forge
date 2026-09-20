@@ -114,7 +114,39 @@ documentation/completion audit are in place; see `docs/operations.md`
     references, stage-DAG freshness, mkdocs strict, `uv lock --check`, and
     `git diff --check` all green. Then use
     `20_long_term_roadmap.md` for later research themes.
-12. Draft and accept ADRs 0018–0020, then implement
-    `23_evaluation_integrity_security_hardening.md` in seven isolated changes.
+12. In progress: `23_evaluation_integrity_security_hardening.md` — PR 1 landed
+    2026-09-15 (40 characterization tests for all nine confirmed findings —
+    37 `xfail(strict=True)` + 3 pins; OS-isolation spike proving Landlock
+    ABI 7 containment on this Linux host (WSL2, kernel 6.18); ADRs 0018–0020
+    drafted and **accepted by the maintainer on 2026-09-15**). PR 2
+    (partition-aware discovery) landed 2026-09-16 per ADR 0018 decisions
+    1–3: typed `protocol`/`evaluation_holdout_fraction` settings, fail-closed
+    holdout partitioning, executor-threaded protocol, discovery-only method
+    fitting, the row-local scope contract, and protocol-aware Silver/Gold/
+    Platinum fingerprints. PR 3 (fold-local preprocessing and selection)
+    landed 2026-09-16 per ADR 0018 decisions 4–6: fold-local
+    preprocessing with the documented -1 unknown-category sentinel and
+    retained specifications, discovery-fold candidate/selection evidence,
+    greedy forward selection enforcing every selection-policy field,
+    evaluation-fold two-arm reporting with rejected winners mirroring
+    baseline, and PlatinumRequest partition/profile validation. PR 4
+    (Platinum v2 evidence and uncertainty) landed 2026-09-18 per ADR 0018
+    decisions 7–8: directional Student-t intervals (scipy direct dep), the
+    12-artifact evidence schema v2 (evidence.json marker, discovery fold
+    metrics, selection steps, preprocessing identity) with offline
+    reconstruction and tamper detection in the loader, Platinum-only
+    `PLATINUM_IDENTITY_SCHEMA_VERSION="2"` reuse rejection (v1 stays
+    readable, never reusable), and directional gain/bounds + protocol
+    labeling in results and tracker output. PR 5 (sandbox containment and
+    bounded worker lifecycle) landed 2026-09-18 per ADR 0019: expanded AST
+    I/O policy (direct + aliased NumPy/Pandas file APIs via normalized-path
+    and terminal-name matching), raw-ctypes Landlock strict enforcement
+    with exact input/output inode grants and an empty-allow TCP policy
+    (seccomp fallback below ABI 4, fail-closed when unavailable), an
+    explicit `degraded_development` profile with provenance, and a bounded
+    sync/async worker lifecycle (event-loop-owned spawn, one monotonic
+    deadline, process-group kill, leak-free cleanup). **Next: PR 6 (LLM
+    cache identity v2, ADR 0020), then PR 7** in isolated
+    changes per the plan sequence.
     Evaluation correctness precedes new benchmark claims; strict sandbox
     containment precedes restoring unqualified production-readiness claims.

@@ -221,10 +221,16 @@ class ExperimentalPlatform:
 
         Returns:
             List of result dicts with keys: dataset, method, model, seed,
-            cv_score, gain, baseline_score, num_features_generated. Every
-            requested case yields exactly one row in original matrix order,
-            including cancelled never-started cases (additive ``state``
-            field, ADR 0017).
+            cv_score, gain, baseline_score, num_features_generated, plus the
+            additive directional evaluation fields ``directional_gain``,
+            ``gain_lower_bound``, ``gain_upper_bound``, and
+            ``evaluation_protocol`` (ADR 0018, plan 23 PR 4). ``gain`` is the
+            legacy raw gain (compat-only, not the headline);
+            ``directional_gain`` together with ``gain_lower_bound`` /
+            ``gain_upper_bound`` carries the headline directional Student-t
+            interval. Every requested case yields exactly one row in original
+            matrix order, including cancelled never-started cases (additive
+            ``state`` field, ADR 0017).
 
         Raises:
             KeyboardInterrupt: Propagated unchanged from either path after
@@ -602,24 +608,34 @@ class ExperimentalPlatform:
     ) -> None:
         """Apply tracker side effects exactly once for a finished Hamilton case."""
         run_name = result.run_id or case.effective_attempt_id
-        run_tracker.init_run(
-            run_name=run_name,
-            config={
-                "dataset": case.dataset,
-                "method": case.method,
-                "model": case.model,
-                "seed": case.seed,
-                "mode": case.mode,
-                "cv_folds": case.cv_folds,
-                # Effective failure policy for this run (ADR 0017): the
-                # run-scoped snapshot, not the cached global settings value.
-                "failure_policy": run_settings.execution.failure_policy.value,
-                # Runtime provenance (ADR 0010): actual Intel/sklearnex state,
-                # not just the config flag — records which numeric backend
-                # produced the scores.
-                "runtime": runtime_info(),
-            },
-        )
+        config: dict[str, Any] = {
+            "dataset": case.dataset,
+            "method": case.method,
+            "model": case.model,
+            "seed": case.seed,
+            "mode": case.mode,
+            "cv_folds": case.cv_folds,
+            # Effective failure policy for this run (ADR 0017): the
+            # run-scoped snapshot, not the cached global settings value.
+            "failure_policy": run_settings.execution.failure_policy.value,
+            # Runtime provenance (ADR 0010): actual Intel/sklearnex state,
+            # not just the config flag — records which numeric backend
+            # produced the scores.
+            "runtime": runtime_info(),
+            # Resolved evaluation settings are retained with tracker output;
+            # sandbox profile/degradation is never inferred from the host.
+            "evaluation": run_settings.evaluation.model_dump(mode="json"),
+            "sandbox_profile": run_settings.evaluation.sandbox_profile.value,
+            "sandbox_degraded": run_settings.evaluation.sandbox_profile.value
+            == "degraded_development",
+        }
+        if result.evaluation_protocol is not None:
+            # Evaluation protocol provenance (ADR 0018, plan 23 PR 4):
+            # compatibility-protocol results are selection-biased by
+            # construction and must stay labelable downstream.
+            config["evaluation_protocol"] = result.evaluation_protocol
+            config["selection_biased"] = result.evaluation_protocol == "compatibility"
+        run_tracker.init_run(run_name=run_name, config=config)
         try:
             if result.error is None:
                 metrics = {
@@ -627,6 +643,17 @@ class ExperimentalPlatform:
                     "gain": float(result.gain or 0.0),
                     "baseline_score": float(result.baseline_score or 0.0),
                 }
+                # Directional headline fields (ADR 0018 decisions 6-7): the
+                # directional gain and its paired Student-t interval. Logged
+                # only when present so legacy rows keep the key set stable;
+                # bounds are never coerced through ``float(x or 0.0)`` — the
+                # 0.0-vs-``None`` distinction matters.
+                if result.directional_gain is not None:
+                    metrics["directional_gain"] = result.directional_gain
+                if result.gain_lower_bound is not None:
+                    metrics["gain_lower_bound"] = result.gain_lower_bound
+                if result.gain_upper_bound is not None:
+                    metrics["gain_upper_bound"] = result.gain_upper_bound
                 run_tracker.log_metrics(metrics)
         finally:
             run_tracker.finish()

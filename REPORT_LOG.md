@@ -24,6 +24,196 @@ One entry per event, newest first:
 
 ## Entries
 
+### 2026-09-18 — Post-audit fix batch: leakage fail-closed, typed worker-death errors, portability and provenance pins
+
+- Verified three-way audit findings (src/tests/docs-meta reviewers, then an
+  independent verification pass over every must-fix claim with quoted
+  evidence): 12 confirmed/partial, 1 refuted. The refuted carry-forward is
+  closed: `LocalArtifactStore.commit` does NOT replace committed namespaces —
+  `atomic_publish_directory` fails closed with `FileExistsError` under a
+  per-namespace mkdir lock (`storage/atomic.py:60-63`); only `.tmp-` staging
+  dirs and stale locks are ever removed. Overwrite risk does not exist.
+- `dataflows/platinum.py::_partition_scope` now fails closed: under the
+  default holdout protocol a Silver package whose `fold_assignments` lacks a
+  `partition` column raises `DatasetError` (mirroring the executor's
+  fit-time guard) instead of silently evaluating discovery AND reported
+  evidence on all rows — the exact leakage ADR 0018 bans, reachable via
+  reused pre-ADR-0018 Silver packages. All-rows fallback remains only for
+  `compatibility`. Negative test added; fixtures updated mechanically
+  (including a maintainer redesign of the plan-23 marker fixtures so every
+  scope hosts two non-degenerate folds — the preprocessing pins got
+  STRONGER: the train-median pin now discriminates whole-frame leakage
+  (3.5), discovery-inclusive leakage (2.5), and correct train-only stats
+  (2.0)).
+- `evaluation/sandbox.py`: worker death without posting (e.g. RLIMIT_AS
+  killing the queue feeder thread) surfaced as raw `EOFError`, bypassing the
+  `CodeExecutionError` hierarchy the pipeline handles; both queue-read
+  paths (`_wait_for_response`, `_poll_response`) now translate `EOFError` →
+  `CodeExecutionError`. Pinned by a deterministic closed-write-end test
+  (both paths) plus an end-to-end typed-error/leak-freedom test. Also
+  blocked `socket.socketpair` in the worker runtime shim (was left usable
+  next to the `_BlockedSocket` socket shim).
+- Test-infrastructure integrity: the async leak pin in
+  `test_sandbox_lifecycle.py` no longer hardcodes `/tmp` (was vacuous under
+  `TMPDIR != /tmp`); the two strict-profile lifecycle pins gained the
+  `_require_landlock()` guard (previously FAIL, not skip, on non-Landlock
+  hosts); new pins for the production default being strict (Settings +
+  CorePipeline wiring) and the worker-side `containment_unavailable` →
+  `SandboxContainmentError` path (in-process `_sandbox_worker_main`, no
+  production seam added).
+- Two new §7-item-13 strict xfails in `test_plan23_llm_cache_identity.py`
+  (PR-6 backlog pointers): v2 `cache_identity()` must vary with provider
+  request kwargs independently, and persisted cache entries must carry a
+  versioned, secret-free `cache_provenance` record scannable off disk
+  (verified to go through the real cache write path). xfail count 6 → 8.
+- Honesty fixes: bare `assert`s under `python -O` replaced by explicit
+  raises (`platinum.py` artifact-set check, `api.py` manifest check);
+  `EnvironmentSnapshot`'s dead `None`-settings fallback now reports
+  `"unknown"` instead of fabricating `"strict"`; ADR 0019 network-denial
+  wording corrected (ABI ≥ 4 Landlock denies TCP bind/connect only;
+  AF_UNIX/NETLINK remain kernel-permitted, Python-level construction blocked
+  by the runtime shim incl. socketpair; below ABI 4 seccomp denies
+  `socket(2)` outright). PR-6 ADR pointer corrected to ADR 0020 (was
+  misattributed to ADR 0018 decision 6) in `.planning/STATE.md` and
+  `docs/plan/00_index.md`; plan-23 status bumped to PRs 1–5 complete.
+- Full suite: 1106 passed / 9 expected skips / 8 xfailed, zero XPASS; all
+  AGENTS.md gates green (ruff, format, mypy src, hygiene, docs refs,
+  mkdocs --strict, uv lock, git diff --check).
+- Handoff: `.claude/handoffs/2026-09-18-post-audit-fix-batch.md`.
+- AI assistance: implementation by a worker subagent (DeepSeek V4.1 Flash
+  via opencode-go), review by a reviewer subagent (GLM-5.3-Flash),
+  marker-module edits, verification passes, coordination, and commits by the
+  session agent (pi) at the maintainer's request; no dependency or
+  supplied-data changes.
+
+### 2026-09-18 — Plan 23 PR 5: sandbox containment and bounded worker lifecycle (ADR 0019)
+
+- Landed plan 23 PR 5, implementing ADR 0019 literally across three
+  sequenced slices. **AST I/O defense first** (decision 4): the canonical
+  static policy now rejects file-capable NumPy/Pandas APIs —
+  `np.load/save/savez/fromfile/memmap/loadtxt/genfromtxt/fromregex/
+  DataSource/open_memmap` and the full pandas `read_*`/`to_*` families —
+  matching normalized attribute paths **and** terminal names so
+  `import numpy as n2; n2.fromfile(...)` and `np.lib.format.open_memmap`
+  cannot alias past the rule; `from numpy import load` imports are rejected
+  too. Ordinary numeric/stringframe operations (`str.find`, `to_numpy`)
+  stay allowed. Worker runtime guards monkeypatch the blocked surfaces as
+  defense in depth (never described as isolation).
+- **Strict OS enforcement** (decisions 2–3): raw-ctypes Landlock (no new
+  dependency — the pre-sanctioned python-landlock comparison was moot since
+  the proven ctypes path from the spike worked unmodified). The worker loads
+  trusted runtime modules and the input frame **before** restriction, then
+  applies an ABI-masked ruleset (ABI 7 on this host) granting read on exactly
+  the predeclared input inode + narrowly required runtime roots
+  (`sys.prefix`, stdlib, numpy/pandas trees — not broad `/usr`/`/etc`),
+  write/truncate on the predeclared output inode, an **empty-allow TCP
+  bind/connect policy** (ABI ≥ 4) so the "strict" label is never granted
+  without socket denial, `no_new_privs` before `landlock_restrict_self`,
+  and a raw classic-BPF seccomp socket-denial filter for ABI < 4.
+  `test_execute_cannot_read_external_sentinel` passes via AST rejection,
+  while `tests/unit/test_sandbox_containment.py` proves the kernel boundary
+  directly (forked child under the real ruleset: sentinel read EACCES,
+  127.0.0.1:9 connect EACCES, granted output still writable).
+- **Profiles fail closed**: `SandboxProfile` (`strict` default |
+  `degraded_development`) is a typed evaluation setting threaded through all
+  production constructors (`kit.py`, `core.py`, `hamilton_executor.py`);
+  strict re-probes at runtime in parent and worker and raises
+  `SandboxContainmentError` when Landlock/seccomp is unavailable (explicit
+  fail-closed production test); degraded execution records itself in
+  `EnvironmentSnapshot.sandbox_profile/sandbox_degraded`, tracker config,
+  and every sandbox log event (`sandbox_execute_start/complete` carry
+  `sandbox_profile/degraded/mechanism/landlock_abi`). Worker env scrubbing
+  uses an explicit allowlist (locale + thread-cap vars only) so provider
+  secrets never reach generated code.
+- **Bounded lifecycle** (decision 5): `SandboxedExecutor.execute_async` starts
+  the child with `Process.start()` directly on the event-loop thread (pinned
+  by a thread-identity spy test) and polls the response queue nonblockingly;
+  sync `execute` and async share one `_WorkerHandle` cleanup helper; one
+  monotonic deadline per execution, logged with its effective timeout;
+  timeout/cancellation kills the worker's own process group (worker calls
+  `setpgid(0,0)`; parent verifies group identity before `killpg` SIGKILL),
+  joins boundedly, escalates, closes queues, and unlinks both temp files.
+  `methods/malmas/pipeline/core._exec_sandbox` awaits `execute_async`
+  directly — no `asyncio.to_thread`, no competing outer `wait_for`.
+- **Worker-feed regression found and fixed during multi-version
+  qualification**: under single-thread BLAS/OpenMP env the worker initially
+  deadlocked — two independent causes, both diagnosed from `/proc` VSZ
+  sampling: (1) the worker's structlog INFO event lazily imported
+  OpenTelemetry inside the RLIMIT_AS-capped child, exhausting address space
+  so the response queue's feeder thread died with `RuntimeError: can't start
+  new thread`; the worker now never emits structlog events — containment is
+  reported in the response tuple and logged by the parent. (2) the env scrub
+  cleared thread-cap vars, making BLAS/OpenMP default to one pool per core
+  (+0.5–1.3 GB VSZ) and pinning the worker at the 2048 MB RLIMIT_AS ceiling;
+  the allowlist scrub above preserves the caps. Both fixes verified with and
+  without the single-thread env on Python 3.11/3.12/3.13.
+- Tests: removed exactly the six PR-5 `xfail(strict=True)` markers (which
+  parametrize to 17 test instances — hence the suite moves from 23 to **6**
+  xfailed, not the 17 the handoff projected; the remaining six all belong to
+  the PR-6 LLM-cache module, zero XPASS). Two same-change fixture
+  adjustments, both preserving pinned intent (PR-4 precedent):
+  `test_to_thread_cancellation_cannot_stop_sandbox_thread` became
+  `test_exec_sandbox_cancellation_stops_sandbox_work` with an
+  `execute_async`-blocking double (post-fix `_exec_sandbox` never uses a
+  thread; the test still proves outer-`wait_for` cancellation stops sandbox
+  work promptly), and the async-entry test scopes `mp.active_children()` to
+  children started during the call (process-global assertion collided with
+  joblib/Loky workers from earlier tests in full-suite runs). New suites:
+  `tests/unit/test_sandbox_io_defense.py` (11),
+  `tests/unit/test_sandbox_containment.py` (4),
+  `tests/unit/test_sandbox_lifecycle.py` (5). Suite: **1101 passed /
+  9 expected skips / 6 xfailed, zero XPASS**; all AGENTS.md + plan §8 gates
+  green (ruff, format, mypy src+tests, hygiene, docs refs, stage DAGs
+  unchanged, mkdocs strict, uv lock, git diff --check). Multi-version
+  evidence: sandbox modules + the full integration directory
+  (155 tests, 0 failures, 1 optional-xgboost skip) on Python 3.11, 3.12,
+  and 3.13 with single-thread BLAS/OpenMP (OMP/OPENBLAS/MKL/NUMEXPR = 1),
+  junit XML kept at `/tmp/junit-3.{11,12,13}.xml` during the session.
+- Reviewer pass (independent read-only subagent over the full PR-5 diff)
+  returned REQUEST-CHANGES with design confirmed ADR-aligned; findings fixed
+  in this change: worker env allowlist narrowed to locale + thread/allocation
+  caps exactly (HOME/PATH/TMPDIR/PYTHONDONTWRITEBYTECODE dropped; exact-key
+  test asserts the retained set); every `_start_worker` phase boundary
+  (including post-spawn) is now deadline-checkpointed with the unbounded
+  fork/exec limitation documented in place; cleanup provably terminates the
+  worker (post-SIGKILL bounded reap loop, `sandbox_worker_terminate_failed`
+  error if still alive) and retries/warns on temp-file unlink failures instead
+  of swallowing them; an `_ACTIVE_HANDLES` registry makes queue/process cleanup
+  observably complete (leak tests assert it empties); error payloads are
+  truncated to 300 chars and worker log fields to 100 so exception text and
+  caller-controlled `source`/`agent_name` cannot flood logs; strict provenance
+  reports mechanism `unavailable` (never a mechanism it cannot install) while
+  degraded honestly reports `process_only_ast`; and the Landlock path-beneath
+  attr now packs the exact 12-byte `__attribute__((packed))` UAPI layout
+  (`u64 allowed_access; s32 parent_fd`) instead of relying on two u64s. The
+  sync `core._exec_sandbox` fallback and the classic-BPF program were
+  confirmed correct as-is.
+- **Shared-/tmp flake found during multi-version validation**: running two
+  pytest processes concurrently (full suite + version matrix) made the leak
+  pins intermittently fail because the scan of the shared temp directory
+  caught the *other* run's transient `ff_sandbox_*`/`feature_forge_input_*`
+  files inside the before→after window. The leak assertions in
+  `test_plan23_sandbox_hardening.py` and `test_sandbox_lifecycle.py` now
+  settle within a bounded 3 s window (genuine leaks persist and still fail;
+  concurrent-run transients vanish); verified with three deliberately
+  concurrent pytest rounds plus sequential 3.11/3.12/3.13 runs.
+- Carry-forward for the maintainer (reported, not changed — decision point 3
+  of the PR-5 handoff): Platinum materialization still lacks an
+  `existing_package` guard and `LocalArtifactStore.commit` atomically
+  replaces a namespace directory, so recomputation at the same run_id can
+  overwrite a previously committed package.
+- AI assistance: three sequenced implementation slices delegated to
+  glm-5.3-flash/gpt-5.6-luna worker subagents (AST I/O policy; Landlock
+  strict enforcement + profiles; bounded async lifecycle), integrated by
+  the session agent (which owns marker removals, the two fixture
+  adjustments, the worker-feed regression diagnosis/fix, and the gates);
+  independent reviewer pass recorded above (REQUEST-CHANGES findings fixed,
+  re-reviewed by the session agent). Pending maintainer review.
+  Links:
+  `docs/plan/23_evaluation_integrity_security_hardening.md` §5–§6 PR 5,
+  `docs/decisions/0019-sandbox-containment-bounded-lifecycle.md`,
+  `.claude/handoffs/2026-09-18-plan23-pr5-sandbox-containment.md`.
+
 ### 2026-09-18 — Plan 23 PR 4: Platinum v2 evidence and uncertainty (ADR 0018 decisions 7–8)
 
 - Landed plan 23 PR 4. Directional Student-t intervals

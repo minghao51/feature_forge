@@ -480,6 +480,11 @@ class TestBackwardCompatibility:
         "stages",
         "failure",
         "state",
+        # Directional interval fields (ADR 0018 decisions 6-7, plan 23 PR 4).
+        "directional_gain",
+        "gain_lower_bound",
+        "gain_upper_bound",
+        "evaluation_protocol",
     }
 
     def test_omitted_policy_matches_previous_behavior(

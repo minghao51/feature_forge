@@ -30,6 +30,10 @@ class SandboxTimeoutError(CodeExecutionError):
     """Sandbox worker exceeded execution time budget."""
 
 
+class SandboxContainmentError(CodeExecutionError):
+    """Strict sandbox containment was unavailable or could not be installed."""
+
+
 class AgentError(FeatureForgeError):
     """Agent operation failed (e.g., router, memory update)."""
 

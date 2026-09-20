@@ -498,9 +498,13 @@ class TestPlatformHamiltonFullCase:
         sample_dir.mkdir()
         pd.DataFrame(
             {
-                "a": list(range(8)),
-                "b": list(range(10, 18)),
-                "target": [0, 1] * 4,
+                # 24 balanced rows: the default holdout protocol (ADR 0018,
+                # 0.25 fraction, cv_folds=2) needs each class to independently
+                # host stratified folds inside both partitions; smaller
+                # fixtures fail closed by design (plan 23 §7.5).
+                "a": list(range(24)),
+                "b": list(range(10, 34)),
+                "target": [0, 1] * 12,
             }
         ).to_csv(sample_dir / "train.csv", index=False)
         (sample_dir / "metadata.json").write_text('{"target":"target","task":"classification"}')
@@ -607,9 +611,13 @@ class TestFailFastResumeTruthfulness:
         sample_dir.mkdir()
         pd.DataFrame(
             {
-                "a": list(range(8)),
-                "b": list(range(10, 18)),
-                "target": [0, 1] * 4,
+                # 24 balanced rows: the default holdout protocol (ADR 0018,
+                # 0.25 fraction, cv_folds=2) needs each class to independently
+                # host stratified folds inside both partitions; smaller
+                # fixtures fail closed by design (plan 23 §7.5).
+                "a": list(range(24)),
+                "b": list(range(10, 34)),
+                "target": [0, 1] * 12,
             }
         ).to_csv(sample_dir / "train.csv", index=False)
         (sample_dir / "metadata.json").write_text('{"target":"target","task":"classification"}')
