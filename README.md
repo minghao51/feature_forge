@@ -193,7 +193,10 @@ Observability Layer → structlog, Langfuse, OpenTelemetry
 # Run all tests
 uv run pytest
 
-# With coverage report
+# Fast inner loop: unit tests only (~2 minutes)
+uv run pytest tests/unit
+
+# With coverage report (opt-in)
 uv run pytest --cov=feature_forge --cov-report=html
 
 # Linting (required gate)

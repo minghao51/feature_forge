@@ -228,10 +228,10 @@ addopts = [
     "-ra",
     "-q",
     "--strict-markers",
-    "--cov=feature_forge",
-    "--cov-report=term-missing",
-    "--cov-report=html",
 ]
+# Coverage is opt-in (`--cov=feature_forge --cov-report=...`, as CI does) so the
+# development loop is not taxed with instrumentation and htmlcov churn on
+# every invocation; the fast inner loop is `uv run pytest tests/unit`.
 markers = [
     "slow: marks tests as slow (deselect with '-m not slow')",
     "llm: marks tests that call LLM APIs (expensive)",

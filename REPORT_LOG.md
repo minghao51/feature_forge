@@ -86,6 +86,39 @@ One entry per event, newest first:
   session agent (pi) at the maintainer's request; no dependency or
   supplied-data changes.
 
+### 2026-09-18 — Two-tier test workflow: coverage opt-in, timing-flake fix, xdist spike
+
+- Made suite coverage opt-in: removed `--cov=feature_forge` and both report
+  flags from pytest `addopts` (CI already passes `--cov --cov-report=xml`
+  explicitly, so it is unaffected; no `fail_under` gate exists). Every dev
+  invocation previously paid instrumentation plus a 7.2 MB htmlcov rewrite;
+  opt-in is `--cov=feature_forge --cov-report=term-missing`.
+- Formalized the tier split procedurally instead of via markers: the declared
+  marker taxonomy (`slow`/`integration`/`llm`/…) carries zero tests, and the
+  directory boundary already is the tier. Measured on this host: unit tier
+  `uv run pytest tests/unit` = 1020 tests / 0 failures / ~2¾ min (quiet
+  machine: ~2 min); the 87 integration tests are ~55% of suite time and pin
+  Hamilton reuse/recovery/integrity, so the full `uv run pytest` stays the
+  pre-handoff gate (AGENTS.md and README now document both tiers).
+- Fixed a flaky-by-construction pre-existing test surfaced while measuring:
+  `TestSandboxedExecutor::test_valid_code` allowed 2.0 s for a fresh spawn
+  worker whose `import feature_forge` alone costs 1.4–2.1 s on this host —
+  it failed 4/5 standalone. Budget raised to 10 s with a comment; timeout
+  mechanics remain pinned by hanging-code tests (`test_sandbox_lifecycle.py`,
+  plan-23 §7.11 module), so no acceptance coverage is lost.
+- xdist spike (via `uv run --with pytest-xdist`, no dependency added):
+  `-n 4` gives 1.9× (2m52s vs 5m30s sequential) but 3 leak-pin failures —
+  cross-worker `/tmp` transients from other xdist processes outlive the 3 s
+  settle window once concurrent sandbox workers may hold files for up to 10 s.
+  Conclusion: not drop-in; adoption later would require serialized sandbox
+  tests or per-test temp dirs. Not adopted now.
+- Full suite after the changes: 1101 passed / 9 expected skips / 6 xfailed,
+  zero XPASS; all AGENTS.md gates green (ruff, format, mypy src+tests,
+  hygiene, docs refs, uv lock).
+- AI assistance: investigation, timing analysis, and changes by the session
+  agent (pi) at the maintainer's request; no dependency or supplied-data
+  changes.
+
 ### 2026-09-18 — Plan 23 PR 5: sandbox containment and bounded worker lifecycle (ADR 0019)
 
 - Landed plan 23 PR 5, implementing ADR 0019 literally across three

@@ -69,6 +69,13 @@ uv run python scripts/check_repo_hygiene.py
 uv run python scripts/check_docs_references.py
 ```
 
+Test workflow tiers: the inner loop uses focused selections or
+`uv run pytest tests/unit` (roughly 2 minutes); coverage is opt-in
+(`--cov=feature_forge --cov-report=term-missing`). The full `uv run pytest`
+above runs before every handoff — the integration tests are half the suite
+time and pin Hamilton reuse/recovery/integrity, so they are never deferred
+past a handoff.
+
 Reliably capturing the pytest summary from piped output (worker-process
 stderr can interleave after it): `uv run pytest 2>&1 | grep -E "[0-9]+ (passed|failed)"`;
 use `--junitxml=<path>` when machine-readable results are needed.

@@ -127,8 +127,12 @@ class TestModelFactory:
 
 class TestSandboxedExecutor:
     def test_valid_code(self) -> None:
-        # 2048: caps below ~1 GB break pandas/pyarrow's VSZ in the worker
-        executor = SandboxedExecutor(timeout_seconds=2.0, max_memory_mb=2048)
+        # 2048: caps below ~1 GB break pandas/pyarrow's VSZ in the worker.
+        # 10 s: a fresh spawn worker spends 1.4-2.1 s just importing the
+        # package before generated code runs, so a tight budget tests
+        # machine speed, not the round trip; timeout mechanics are pinned
+        # separately by hanging-code tests (test_sandbox_lifecycle.py).
+        executor = SandboxedExecutor(timeout_seconds=10.0, max_memory_mb=2048)
         code = """
 import pandas as pd
 import numpy as np
