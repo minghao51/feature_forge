@@ -47,6 +47,7 @@ dependencies = [
     "seaborn>=0.13.2",
     "jinja2>=3.1.6",
     "apache-hamilton>=1.90,<2",
+    "scipy>=1.17.1",
 ]
 
 [project.scripts]
@@ -209,6 +210,7 @@ module = [
     "diskcache",
     "sklearn.*",
     "sklearnex",
+    "scipy.stats",
     "lightgbm",
     "catboost",
     "kaggle",

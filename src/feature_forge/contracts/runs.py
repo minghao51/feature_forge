@@ -35,6 +35,10 @@ class EnvironmentSnapshot(ContractModel):
     feature_forge_version: str
     artifact_schema_versions: dict[str, str] = Field(default_factory=dict)
     random_seeds: dict[str, int] = Field(default_factory=dict)
+    # Sandbox containment provenance (ADR 0019). Defaults preserve v1 fixture
+    # compatibility; production runs populate these from resolved settings.
+    sandbox_profile: str = "strict"
+    sandbox_degraded: bool = False
 
 
 class RunManifest(ContractModel):

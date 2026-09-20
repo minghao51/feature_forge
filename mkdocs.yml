@@ -71,6 +71,7 @@ nav:
   - API Reference: api_reference.md
   - Migration Guide: migration_guide.md
   - Operations: operations.md
+  - Sandbox Isolation Spike: spikes/2026-09-15-sandbox-os-isolation.md
   - Generated Stage DAGs: generated/stage_dags.md
   - Implementation Plan:
       - Overview: plan/00_index.md

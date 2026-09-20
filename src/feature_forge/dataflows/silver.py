@@ -106,11 +106,13 @@ def fold_assignments(
 
     Rows are first split into a ``discovery`` partition (seen by feature
     selection) and an ``evaluation`` partition (used only for the reported CV
-    score) when ``dataset_computation_request.evaluation_holdout_fraction > 0``. Folds are
-    then generated *within each partition*, so each partition independently
-    covers folds ``0..cv_folds-1``. When the data is too small to host the
-    holdout, every row lands in the ``discovery`` partition (and selection runs
-    on all rows, matching the pre-holdout behavior).
+    score) when the holdout protocol applies
+    (``dataset_computation_request.evaluation_protocol == "holdout"``). Folds
+    are then generated *within each partition*, so each partition
+    independently covers folds ``0..cv_folds-1``. Under the holdout protocol
+    an undersized dataset raises :class:`DatasetError` (fail closed, ADR
+    0018); the compatibility protocol keeps every row in the ``discovery``
+    partition (all-row evaluation, matching the pre-holdout behavior).
     """
     if len(canonical_features) != len(canonical_target) or len(row_ids) != len(canonical_features):
         raise DatasetError("Silver features, target, and row IDs are misaligned")
@@ -192,6 +194,9 @@ def dataset_fingerprint_value(
             "evaluation_holdout_fraction": (
                 dataset_computation_request.evaluation_holdout_fraction
             ),
+            # Protocol is part of the split identity: reuse across protocols
+            # is intentionally invalidated (ADR 0018).
+            "protocol": dataset_computation_request.evaluation_protocol,
         },
         split_seed=dataset_computation_request.split_seed,
     )
@@ -266,10 +271,11 @@ def silver_checks(
         and not (fold_assignments["fold"] < 0).any()
     )
     # Discovery/evaluation partition: every row must carry a partition label,
-    # and when the holdout is enabled both partitions must be non-empty and
-    # each must independently cover all cv_folds so candidate selection
-    # (discovery) and the reported aggregate (evaluation) never share a fold.
-    holdout_enabled = dataset_computation_request.evaluation_holdout_fraction > 0.0
+    # and when the holdout protocol is selected both partitions must be
+    # non-empty and each must independently cover all cv_folds so candidate
+    # selection (discovery) and the reported aggregate (evaluation) never
+    # share a fold.
+    holdout_enabled = dataset_computation_request.evaluation_protocol == "holdout"
     partition_col = fold_assignments.get("partition")
     if isinstance(partition_col, pd.Series):
         partitions_present = set(partition_col.unique().tolist())
@@ -385,6 +391,7 @@ def silver_manifest(
             cv_folds=dataset_request.cv_folds,
             options={
                 "dataset_fingerprint": dataset_fingerprint_value,
+                "evaluation_protocol": dataset_request.evaluation_protocol,
                 "source": normalize_secret_free(source_metadata),
                 "bronze": normalize_secret_free(bronze_snapshot.model_dump(mode="json")),
             },

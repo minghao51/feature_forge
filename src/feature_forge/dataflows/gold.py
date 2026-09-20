@@ -43,6 +43,7 @@ from feature_forge.dataflows._io import (
 from feature_forge.dataflows.hamilton_compat import cache, tag
 from feature_forge.dataflows.profile import ExecutionProfile, get_profile_policy
 from feature_forge.evaluation.sandbox import SandboxedExecutor
+from feature_forge.evaluation.scope import row_local_violations
 from feature_forge.exceptions import DatasetError
 from feature_forge.storage.hashing import sha256_bytes
 from feature_forge.storage.local import LocalArtifactStore
@@ -127,6 +128,23 @@ def candidate_feature_specs(
 def candidate_execution_batches(
     candidate_feature_specs: dict[str, Any], sandbox: SandboxedExecutor
 ) -> dict[str, Any]:
+    """Execute generated batches and enforce the row-local scope contract.
+
+    Each generated script runs in the sandbox over the working feature frame.
+    After structural validation (missing columns, missing values), the
+    row-local scope contract (plan 23 §4.2, ADR 0018) applies: under the
+    ``holdout`` evaluation protocol every candidate must pass deterministic
+    row-subset/row-permutation metamorphic probes
+    (:func:`~feature_forge.evaluation.scope.row_local_violations`); candidates
+    whose probes reveal companion-row or frame-position dependence are
+    rejected with reason code ``not_row_local` — their columns never enter
+    the working frame, so later batches cannot depend on them. The probes are
+    a verification barrier, not a proof of row-locality: a candidate is
+    accepted only when no probe can distinguish its output from a row-local
+    computation. Under the ``compatibility`` protocol probes are skipped and
+    legacy whole-frame scripts replay unchanged. The frame passed to the
+    sandbox never contains evaluation targets.
+    """
     silver: SilverPackage = candidate_feature_specs["silver"]
     working = silver.canonical_features.copy()
     outputs: list[pd.DataFrame] = []
@@ -146,17 +164,40 @@ def candidate_execution_batches(
             batch = output[names].reset_index(drop=True)
             if batch.isna().any().any():
                 raise DatasetError("generated feature contains missing values")
-            outputs.append(batch)
+            request: GoldRequest = candidate_feature_specs["request"]
+            violations = (
+                row_local_violations(sandbox, code, working, output, names)
+                if request.evaluation_protocol == "holdout"
+                else {}
+            )
+            accepted_names = [name for name in names if name not in violations]
+            if accepted_names:
+                accepted_frame = output[accepted_names].reset_index(drop=True)
+                outputs.append(accepted_frame)
+                working = pd.concat([working, accepted_frame], axis=1)
             for item in candidates:
-                decisions.append(
-                    FeatureDecision(
-                        candidate_id=item.candidate_id,
-                        state=FeatureDecisionState.ACCEPTED,
-                        reason_code="accepted",
-                        reason="feature passed structural validation",
+                if item.name in violations:
+                    decisions.append(
+                        FeatureDecision(
+                            candidate_id=item.candidate_id,
+                            state=FeatureDecisionState.REJECTED,
+                            reason_code="not_row_local",
+                            reason=(
+                                f"{violations[item.name]} (row-local scope contract, ADR 0018; "
+                                "whole-frame/fitted transformations are not accepted under the "
+                                "holdout protocol)"
+                            ),
+                        )
                     )
-                )
-            working = pd.concat([working, batch], axis=1)
+                else:
+                    decisions.append(
+                        FeatureDecision(
+                            candidate_id=item.candidate_id,
+                            state=FeatureDecisionState.ACCEPTED,
+                            reason_code="accepted",
+                            reason="feature passed structural validation",
+                        )
+                    )
         except Exception as exc:
             for item in candidates:
                 decisions.append(

@@ -151,7 +151,13 @@ class FeatureForge(BaseEstimator, TransformerMixin, ArtifactExporter):  # type: 
 
         from feature_forge.methods.malmas.pipeline.ablations import SingleAgentPipeline
 
-        assert self.llm_client is not None
+        if self.llm_client is None:
+            # Explicit raise (not a bare assert): stays fail-closed under `python -O`.
+            raise RuntimeError(
+                "FeatureForge.fit() requires an LLM client. "
+                "Set DEEPSEEK_API_KEY (or your provider's key) "
+                "or pass llm_client= explicitly."
+            )
         return SingleAgentPipeline(
             self.mode,
             self.config,

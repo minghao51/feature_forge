@@ -585,6 +585,7 @@ def _execute_bronze_stage(cache_dir: Path) -> None:
                 split_seed=42,
                 cv_folds=2,
                 evaluation_holdout_fraction=0.0,
+                evaluation_protocol="compatibility",
             ),
             "dataset_registry": _Registry(),
             "artifact_store": None,

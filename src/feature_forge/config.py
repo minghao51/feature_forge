@@ -315,10 +315,33 @@ class RetryConfig(BaseModel):
         return v
 
 
+class SandboxProfile(StrEnum):
+    """Operating-system sandbox profile.
+
+    ``STRICT`` is the production profile and requires kernel containment.
+    ``DEGRADED_DEVELOPMENT`` is an explicit development-only escape hatch for
+    hosts without a qualified containment mechanism; it retains AST and
+    process isolation but is never presented as filesystem isolation.
+    """
+
+    STRICT = "strict"
+    DEGRADED_DEVELOPMENT = "degraded_development"
+
+
 class EvaluationConfig(BaseModel):
     """Feature evaluation configuration.
 
     Attributes:
+        protocol: Evaluation protocol (ADR 0018). ``holdout`` (default) uses
+            deterministic discovery/evaluation partitions so method fitting
+            sees discovery rows only; ``compatibility`` reproduces the legacy
+            all-row behavior and is only selected explicitly — its results are
+            selection-biased and must not be presented as held-out
+            performance. (Full selection/reporting partition enforcement
+            lands with plan 23 PR 3.)
+        evaluation_holdout_fraction: Evaluation-partition fraction under the
+            holdout protocol (strictly between 0 and 0.5). Ignored under the
+            compatibility protocol.
         cv_folds: Number of cross-validation folds.
         fail_on_feature_error: Raise on feature evaluation failure instead of logging.
         fail_on_agent_error: Raise on agent generation failure instead of skipping.
@@ -326,6 +349,10 @@ class EvaluationConfig(BaseModel):
         sandbox_max_memory_mb: Max address-space (MB) for the sandbox worker.
             Must exceed the pandas/pyarrow/OpenBLAS runtime footprint (~1 GB
             VSZ); 2048 keeps headroom for loaded libraries plus user data.
+        sandbox_profile: ``strict`` (the production default) requires Linux
+            Landlock containment and fails closed when unavailable;
+            ``degraded_development`` must be selected explicitly and is
+            recorded as degraded provenance.
         max_candidate_features: Cap on candidate features sent to CV scoring.
         booster_n_jobs: n_jobs for OpenMP-backed estimators (xgboost,
             lightgbm, random_forest) when Intel acceleration is inactive.
@@ -335,11 +362,14 @@ class EvaluationConfig(BaseModel):
             Forced to 1 whenever Intel acceleration is active (ADR 0010).
     """
 
+    protocol: Literal["holdout", "compatibility"] = "holdout"
+    evaluation_holdout_fraction: float = Field(default=0.25, gt=0.0, lt=0.5)
     cv_folds: int = 5
     fail_on_feature_error: bool = False
     fail_on_agent_error: bool = False
     sandbox_timeout_seconds: float = 5.0
     sandbox_max_memory_mb: int = 2048
+    sandbox_profile: SandboxProfile = SandboxProfile.STRICT
     max_candidate_features: int = 50
     max_cv_workers: int | None = None
     feature_eval_backend: Literal["threading", "loky"] = "threading"

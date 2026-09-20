@@ -9,7 +9,7 @@ import pandas as pd
 from pydantic import ConfigDict, Field, model_validator
 
 from feature_forge.contracts.artifacts import ManifestRef, RunId
-from feature_forge.contracts.base import ContractModel
+from feature_forge.contracts.base import ContractModel, EvaluationProtocol
 from feature_forge.contracts.materialization import Materialization
 from feature_forge.contracts.runs import RunManifest
 from feature_forge.contracts.stages import CheckResult
@@ -63,6 +63,11 @@ class GoldRequest(ContractModel):
     prompt_bundle_fingerprint: str = Field(min_length=1)
     generated_contract_version: str = "1"
     selection_policy: dict[str, Any] = Field(default_factory=lambda: {"policy": "validation"})
+    # Partition provenance (ADR 0018). The default only fills the field for
+    # packages persisted before ADR 0018; a stored pre-ADR fingerprint fails
+    # fingerprint validation on load, which intentionally invalidates offline
+    # reuse/replay of old packages (nothing is deleted; run paths recompute).
+    evaluation_protocol: EvaluationProtocol = "holdout"
     persist_candidates: bool = True
     value_rtol: float = Field(default=1e-9, ge=0)
     value_atol: float = Field(default=1e-12, ge=0)
@@ -78,6 +83,7 @@ class GoldRequest(ContractModel):
             method_config=self.method_config,
             prompt_bundle_fingerprint=self.prompt_bundle_fingerprint,
             generated_contract_version=self.generated_contract_version,
+            evaluation_protocol=self.evaluation_protocol,
             selection_policy=self.selection_policy,
         )
         if self.gold_input_fingerprint != expected:

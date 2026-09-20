@@ -11,6 +11,11 @@ from feature_forge.storage.hashing import fingerprint
 
 IDENTITY_SCHEMA_VERSION = "1"
 
+# Platinum-only identity schema bump (plan 23 PR 4 / ADR 0018 decision 8):
+# enters the Platinum input fingerprint so pre-ADR v1 packages can never
+# satisfy v2 reuse fingerprints while remaining readable.
+PLATINUM_IDENTITY_SCHEMA_VERSION = "2"
+
 
 class MethodIdentity(ContractModel):
     """Provider-free description of behavior that can change generated features."""
@@ -80,9 +85,14 @@ def gold_input_fingerprint(
     method_config: Any,
     prompt_bundle_fingerprint: str,
     generated_contract_version: str,
+    evaluation_protocol: str = "holdout",
     selection_policy: Any,
 ) -> str:
-    """Identify all inputs capable of changing accepted generated features."""
+    """Identify all inputs capable of changing accepted generated features.
+
+    Includes the evaluation protocol (ADR 0018) so reuse chains distinguish
+    holdout-partitioned discovery from legacy all-row compatibility runs.
+    """
     return fingerprint(
         {
             "kind": "gold-input",
@@ -93,6 +103,7 @@ def gold_input_fingerprint(
             "method_config": method_config,
             "prompt_bundle_fingerprint": prompt_bundle_fingerprint,
             "generated_contract_version": generated_contract_version,
+            "evaluation_protocol": evaluation_protocol,
             "selection_policy": selection_policy,
         }
     )
@@ -128,12 +139,22 @@ def platinum_input_fingerprint(
     fold_fingerprint: str,
     evaluation_policy: Any,
     uncertainty_policy: Any,
+    identity_schema_version: str = PLATINUM_IDENTITY_SCHEMA_VERSION,
 ) -> str:
-    """Identify evaluation inputs without presentation or tracker settings."""
+    """Identify evaluation inputs without presentation or tracker settings.
+
+    The Platinum identity schema version is itself an input (ADR 0018
+    decision 8, plan 23 PR 4): fingerprints key reuse on the v2 identity, so
+    v1 packages — fingerprints computed without it — stay integrity-verified
+    and loadable but can never satisfy a v2 reuse fingerprint (no recompute,
+    no in-place rewrite; ADR 0014). Bronze/Silver/Gold identities are
+    unchanged.
+    """
     return fingerprint(
         {
             "kind": "platinum-input",
             "identity_schema_version": IDENTITY_SCHEMA_VERSION,
+            "platinum_identity_schema_version": identity_schema_version,
             "gold_fingerprint": gold_fingerprint_value,
             "model_name": model_name,
             "model_version": model_version,

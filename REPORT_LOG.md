@@ -24,6 +24,232 @@ One entry per event, newest first:
 
 ## Entries
 
+### 2026-09-18 — Plan 23 PR 4: Platinum v2 evidence and uncertainty (ADR 0018 decisions 7–8)
+
+- Landed plan 23 PR 4. Directional Student-t intervals
+  (`dataflows/platinum.py::_t_critical`, scipy now a **direct dependency**
+  per ADR 0018 decision 7 and maintainer acceptance 2026-09-16):
+  `uncertainty_summary` sign-adjusts raw fold deltas by `metric_direction`,
+  and every statistic (`mean_directional_gain`, std, se, bounds) derives
+  from the directional deltas with the two-sided Student-t critical value
+  for `uncertainty_policy.confidence_level` and `pair_count - 1` df
+  (pinned `t* = 4.302652729911275` for 95%/df=2). The greedy gate's
+  `_directional_lower_bound` uses the same `_t_critical` margin (fail-closed
+  `-inf` below two paired folds), so the margin is owned in one place.
+- Evidence schema v2 (ADR 0018 decision 8): Platinum packages persist, next
+  to the eight v1 artifacts, `evidence.json` (typed `PlatinumEvidenceIndex`
+  with `evidence_schema_version: "2"` — per-artifact schema versions stay
+  `"1"`), `discovery_fold_metrics.parquet` (per-candidate + greedy-step +
+  discovery-baseline arms, arm-labeled), `selection_steps.json` (the frozen
+  greedy transcript incl. per-step rankings and lower bounds), and
+  `preprocessing.json` (per-arm per-fold `FoldPreprocessor.specification()`);
+  `PLATINUM_REQUIRED_ARTIFACTS` is the live 12-artifact contract. The v2
+  greedy transcript also documents that
+  `PlatinumSelectionDecision.lower_bound` carries the evaluation-aggregate
+  interval, while the discovery bounds that gated selection persist in the
+  steps (ADR 0018 decision-5 reconstruction is now offline-reproducible).
+- Offline reconstruction + tamper detection (plan §7.9): `load_platinum_package`
+  reconstructs from persisted evidence alone — discovery partition scoping,
+  selected-set membership (steps ⟷ evidence.json ⟷ decisions), the full
+  directional interval, aggregate directional/legacy gains, every greedy
+  step's ranking gains and chosen fold scores against the persisted discovery
+  arms, decision interval bounds, and preprocessing fold coverage — failing
+  closed with `DatasetError` on any mismatch (byte tampering already fails
+  per-artifact SHA-256 verification). v1 packages (no `evidence.json`) load
+  with unchanged v1 semantics.
+- v1 reuse rejection (maintainer decision 2026-09-16): `PLATINUM_IDENTITY_SCHEMA_VERSION
+  = "2"` enters `platinum_input_fingerprint` as a keyword input — every
+  Platinum fingerprint changes exactly once, so pre-ADR v1 packages stay
+  integrity-verified and loadable but can never satisfy a v2 reuse
+  fingerprint; nothing is recomputed or rewritten in place (ADR 0014), and
+  Bronze/Silver/Gold identities are untouched (Platinum-only charter). The
+  manifest options now record `platinum_identity_schema_version`.
+- Result/report fields: `ExperimentResult` gains additive
+  `directional_gain`/`gain_lower_bound`/`gain_upper_bound`/
+  `evaluation_protocol` (executor populates them from the loaded package;
+  `gain` stays as legacy raw gain, no longer the headline); tracker runs gain
+  `evaluation_protocol` + `selection_biased` config and the three directional
+  metrics — compatibility-protocol results stay explicitly labeled
+  selection-biased. `docs/operations.md` documents the v2 evidence set, the
+  reconstruction guarantees, and the v1 read-only stance.
+- Tests: removed exactly the three PR-4 `test_interval_*` xfail markers
+  (26 → 23 xfailed, zero XPASS). One fixture fix was required:
+  `test_interval_is_directional_for_minimizing_metrics` pinned
+  `[-3.0, -1.0, -2.0]` deltas whose 95%/df=2 Student-t lower bound is
+  negative (−0.484) — arithmetically unsatisfiable under the correct
+  interval — so the fixture moved to `[-3.0, -2.5, -2.0]` (lower ≈ 1.258)
+  preserving the test's directional intent. New suites:
+  `tests/unit/test_platinum_uncertainty.py` (6),
+  `tests/unit/test_platinum_evidence_v2.py` (9, incl. byte + hash-consistent
+  semantic tamper — uncertainty bounds, selected set, decision bounds — and
+  v1 read-compat),
+  `tests/unit/test_platinum_reuse_and_results.py` (7, incl. store-level v1
+  rejection + v2 acceptance, executor field population, tracker rendering).
+  Result-row key-set pins in `test_execution_policy.py` and
+  `test_fail_fast_sequential.py` extended with the four additive keys. Suite:
+  **1064 passed / 9 expected skips / 23 xfailed, zero XPASS**; all AGENTS.md
+  + plan §8 gates green (ruff, format, mypy src+tests, hygiene, docs refs,
+  stage DAGs unchanged (`--check` ok), mkdocs strict, uv lock, git diff
+  --check).
+- AI assistance: three sequenced implementation slices delegated to
+  glm-5.3-flash worker subagents (Student-t intervals + scipy dep; evidence
+  schema v2 persistence + offline reconstruction; identity version +
+  result/report fields), integrated by the session agent (which owns the
+  marker removals, the fixture arithmetic fix, the reviewer follow-ups, and
+  the gates), then an independent reviewer-subagent pass over the full diff
+  (verdict APPROVE; its two actionable findings — decision interval bounds
+  unverified in reconstruction, a misleading dead fixture override — were
+  fixed; its pre-existing write-once observation about Platinum lacking an
+  `existing_package` guard is carried into the PR-5 handoff). Pending
+  maintainer review. Links:
+  `docs/plan/23_evaluation_integrity_security_hardening.md` §6 PR 4,
+  `docs/decisions/0018-independent-discovery-evaluation-protocol.md`,
+  `.claude/handoffs/2026-09-16-plan23-pr4-platinum-v2-evidence-uncertainty.md`.
+
+### 2026-09-16 — Plan 23 PR 3: fold-local preprocessing and selection (ADR 0018 decisions 4–6)
+
+- Landed plan 23 PR 3. New
+  `evaluation/preprocessing.py::FoldPreprocessor` replaces Platinum's
+  whole-frame `_prepared`: per fold, numeric median imputation and
+  ordinal first-appearance categorical encoding are fitted on that fold's
+  training rows only; validation rows transform with train-only statistics
+  and unseen/missing categories map to the documented stable sentinel
+  `-1`; fitted specifications are retained per fold and flow into the
+  Platinum manifest's `evaluation_provenance` (durable persistence is PR
+  4's evidence schema v2).
+- Partition-aware Platinum evidence (ADR 0018 decisions 3/6):
+  `candidate_fold_evidence` scores candidates and runs greedy selection on
+  discovery-partition folds only (`CandidateFoldEvidence` carries the
+  frozen `GreedySelectionOutcome` plus the post-freeze selected arm, so
+  selection consumers can never read evaluation-fold scores before the
+  freeze — pinned by the plan §7.2 spy test); `baseline_fold_evidence` and
+  the combined selected arm are evaluated on evaluation-partition folds
+  only; when no candidate qualifies the enhanced arm mirrors baseline with
+  zero gain — a rejected numerical winner is never reported.
+- Greedy forward selection (ADR 0018 decision 5): each remaining candidate
+  is evaluated appended to the selected set, ranked by mean directional
+  gain with a stable feature-name tie-break; `minimum_practical_gain`,
+  `require_positive_lower_bound` (against the directional lower confidence
+  bound — the margin stays the existing 1.96 normal approximation; PR 4
+  swaps in Student-t, which only tightens it), and `max_selected_features`
+  are all enforced; `PlatinumRequest` validation rejects
+  `selection_partition="evaluation"` always and anything but `"discovery"`
+  under holdout. Fold metrics gain an additive `partition` column and stay
+  loadable by `load_platinum_package` (no schema v2 work). No fingerprint
+  inputs changed; the change is independently revertible.
+- Tests: removed exactly the eight PR-3 xfail markers in
+  `tests/unit/test_plan23_evaluation_integrity.py` (the three PR-4 interval
+  tests remain xfail-strict), extended the `max_selected_features` pin into
+  real greedy-cap coverage (cap=1/2/uncapped + determinism), and added the
+  stable-tie-break test and the §7.2 selection-freeze spy; new
+  `tests/unit/test_fold_preprocessing.py` (8). Suite: 1039 passed / 9
+  expected skips / 26 xfailed, zero XPASS; all AGENTS.md + plan §8 gates
+  green (ruff, format, mypy src+tests, hygiene, docs refs, stage DAGs
+  regenerated, mkdocs strict, uv lock, git diff --check).
+- AI assistance: three sequenced implementation slices delegated to
+  glm-5.3-flash worker subagents (fold-local preprocessing module;
+  partition-aware platinum evidence; greedy selection + policy validation),
+  integrated by the session agent (which owns the marker removals, the
+  spy/tie-break tests, and the gates), then an independent reviewer-
+  subagent pass over the full diff (its findings — datetime categories
+  breaking `specification()` JSON safety, imprecise ADR citation in
+  validator messages, and two undocumented latent fallback paths — were
+  all fixed or documented). Pending maintainer review. Links:
+  `docs/plan/23_evaluation_integrity_security_hardening.md` §6 PR 3,
+  `docs/decisions/0018-independent-discovery-evaluation-protocol.md`,
+  `.claude/handoffs/2026-09-16-plan23-pr4-platinum-v2-evidence-uncertainty.md`.
+
+### 2026-09-16 — Plan 23 PR 2: partition-aware discovery (ADR 0018 decisions 1–3)
+
+- Landed plan 23 PR 2. `Settings.evaluation` gains `protocol`
+  (`holdout`|`compatibility`, default `holdout`) and
+  `evaluation_holdout_fraction` (default `0.25`, `0 < f < 0.5`);
+  `DatasetComputationRequest` validates coherent protocol/fraction
+  combinations (compatibility ⟺ fraction 0.0), so the legacy all-row profile
+  is selectable only explicitly.
+- Fail-closed partitioning: `resolve_partition` raises an actionable
+  `DatasetError` when either partition cannot independently host `cv_folds`
+  rows; the executor no longer hard-codes `evaluation_holdout_fraction=0.0`
+  (`_dataset_request` threads the configured protocol/fraction). Silver
+  fingerprints/manifests, Gold requests/fingerprints, and Platinum evaluation
+  policies all carry the protocol, so reuse chains distinguish protocols and
+  old packages are invalidated by fingerprint, never deleted. Note: pre-ADR
+  Gold/Platinum packages now fail fingerprint validation on load (offline
+  replay of old packages requires recomputation) — intended reuse
+  invalidation per plan §9.
+- Discovery boundary: methods are fit only on discovery-partition rows
+  (`_fit_method_on_discovery`); evaluation rows/targets never reach method
+  fitting. New row-local scope contract (`evaluation/scope.py`): under
+  holdout, candidates must pass deterministic row-subset/permutation
+  metamorphic probes before acceptance; detected whole-frame/position-
+  dependent candidates are rejected (`not_row_local`) and never enter the
+  working frame; Gold replay mirrors generation (accepted-only columns).
+  Compatibility replays legacy whole-frame scripts unchanged.
+- Tests: removed exactly the three PR-2 markers (the executor source pin
+  became a behavioral test), added fail-closed/behavioral/spy/fingerprint
+  tests plus `tests/unit/test_scope_contract.py` (9) and two executor
+  call-site wiring drills; e2e fixtures grew to 24 rows so the default
+  holdout protocol can host stratified folds in both partitions (small data
+  fails closed by design). Suite: 1021 passed / 9 expected skips / 34
+  xfailed, zero XPASS; all AGENTS.md gates green (ruff, mypy src+tests,
+  hygiene, docs refs, stage DAGs, mkdocs strict, uv lock, git diff --check).
+- AI assistance: three disjoint implementation slices delegated to
+  glm-5.3-flash worker subagents (settings/fail-closed partitioning;
+  executor/contract fingerprint threading; scope contract), integrated by
+  the session agent, then an independent reviewer-subagent pass (its
+  findings — a broken legacy request construction in
+  `scripts/qualify_hamilton_cache.py`, inaccurate old-package-loadability
+  comments, PR-3-bound docstring overclaims, and missing executor wiring
+  tests — were all fixed). Pending maintainer review. Links:
+  `docs/plan/23_evaluation_integrity_security_hardening.md` §6 PR 2,
+  `docs/decisions/0018-independent-discovery-evaluation-protocol.md`,
+  `.claude/handoffs/2026-09-16-plan23-pr3-fold-local-preprocessing.md`.
+
+### 2026-09-15 — ADRs 0018–0020 accepted; plan 23 PR 2 unlocked
+
+- The maintainer accepted ADR 0018 (independent discovery/evaluation
+  protocol), ADR 0019 (sandbox containment and bounded lifecycle), and ADR
+  0020 (LLM cache identity v2); statuses and the ADR index were flipped to
+  Accepted and plan 23 is now Active.
+- PR-1 handoff closed and superseded by the PR-2 handoff
+  (`.claude/handoffs/2026-09-15-plan23-pr2-partition-aware-discovery.md`),
+  which assigns plan 23 PR 2 only (partition-aware discovery) and maps the
+  PR-1 xfail markers each later PR must remove.
+- AI assistance: bookkeeping by the session agent; no runtime changes.
+
+### 2026-09-15 — Plan 23 PR 1: characterization tests, isolation spike, proposed ADRs 0018–0020
+
+- Landed plan 23 PR 1 with **no runtime behavior changes**: 40
+  characterization tests across
+  `tests/unit/test_plan23_sandbox_hardening.py` (18),
+  `tests/unit/test_plan23_evaluation_integrity.py` (15), and
+  `tests/unit/test_plan23_llm_cache_identity.py` (7) encode all nine
+  confirmed audit findings — 37 `xfail(strict=True)` desired-behavior
+  tests plus 3 regression pins for currently-correct behavior (timeout
+  cleanup, key determinism, single-best capping); the markers are removed —
+  and the finding-9 seam tests rewritten against the new async entry point —
+  by the PR that fixes each finding. Notable nuance: in one observed run the
+  worker surfaced `np.fromfile(path)` as a `CodeExecutionError` (mechanism
+  unconfirmed — possibly numpy/python interaction under restricted
+  builtins); either way the AST-policy gap and the required
+  `SandboxValidationError` contract remain demonstrated. Re-confirm the
+  observed failure mode during PR 5.
+- Time-boxed OS-isolation spike (Linux 6.18/WSL2, this host): **Landlock
+  ABI 7**, unprivileged user namespaces, seccomp, and `bwrap` available; a
+  live Landlock ruleset denied an out-of-root sentinel read (`EACCES`) while
+  imports and temp-root writes kept working. Host/LSM variability remains an
+  open question for PR 5. Evidence:
+  `experiments/sandbox_isolation_spike/2026-09-15/report.json`; record:
+  `docs/spikes/2026-09-15-sandbox-os-isolation.md`.
+- Drafted **ADRs 0018–0020** (independent discovery/evaluation protocol,
+  sandbox containment and bounded lifecycle, LLM cache identity v2) as
+  Proposed and indexed them. PRs 2–7 are gated on maintainer acceptance.
+- AI assistance: implementation delegated to subagents (glm-5.3-flash
+  workers) for the three test modules and the spike; ADRs and integration
+  by the session agent; independent review pending. Links:
+  `docs/plan/23_evaluation_integrity_security_hardening.md`,
+  `docs/decisions/0018-…`, `0019-…`, `0020-…`.
+
 ### 2026-09-15 — Plan 23 evaluation-integrity and security-remediation handoff
 
 - Converted the independent audit findings into an agent-ready seven-change
@@ -937,6 +1163,11 @@ maintainer direction; ADR 0017 + plan 22 PR 3 scope.
   switch—were incorporated.
 
 ## AI assistance disclosure
+
+- 2026-09-16: Plan 23 PR 2 and PR 3 (partition-aware discovery; fold-local
+  preprocessing and selection) implemented by AI assistance (pi coding
+  agent with sequenced glm-5.3-flash worker subagents and an independent
+  reviewer pass); pending review and acceptance by the maintainer.
 
 - 2026-09-14: ADR 0016 legacy-engine removal (documentation/status slice:
   user docs, migration guidance, operations, plan/state status, and report

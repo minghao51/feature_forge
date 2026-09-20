@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import pytest
 
 from feature_forge.contracts import (
     AggregateMetric,
@@ -44,6 +45,7 @@ from feature_forge.dataflows.platinum import (
     uncertainty_summary,
 )
 from feature_forge.dataflows.profile import ExecutionProfile
+from feature_forge.exceptions import DatasetError
 from feature_forge.storage.local import LocalArtifactStore
 
 
@@ -88,7 +90,15 @@ def _packages(*, with_candidate: bool = True) -> tuple[SilverPackage, GoldPackag
         canonical_features=features,
         canonical_target=pd.DataFrame({"row_id": row_ids, "target": [0, 0, 0, 1, 1, 1]}),
         row_ids=pd.DataFrame({"row_id": row_ids}),
-        fold_assignments=pd.DataFrame({"row_id": row_ids, "fold": [0, 1, 2, 0, 1, 2]}),
+        fold_assignments=pd.DataFrame(
+            {
+                "row_id": row_ids,
+                "fold": [0, 1, 2, 0, 1, 2],
+                # Post-ADR-0018 Silver always labels partitions; holdout
+                # platinum scopes fail closed on a missing column.
+                "partition": ["discovery"] * 3 + ["evaluation"] * 3,
+            }
+        ),
         profile={},
         checks=[],
     )
@@ -330,3 +340,21 @@ def test_platinum_reconstructs_fold_evidence_offline() -> None:
     assert len(candidates["double_a"]["metrics"]) == 3
     assert aggregate["enhanced_score"] >= 0.0
     assert all(check.passed for check in checks)
+
+
+def test_holdout_scope_fails_closed_without_partition_column() -> None:
+    """Holdout platinum never silently evaluates all rows of a partition-less Silver."""
+    silver, gold, gold_ref = _packages()
+    silver.fold_assignments = silver.fold_assignments.drop(columns=["partition"])
+    request = build_platinum_request(
+        run_id="platinum-run",
+        case_fingerprint="case",
+        silver=silver,
+        gold=gold,
+        gold_ref=gold_ref,
+        model_name="random_forest",
+        metric="acc",
+        seed=42,
+    )
+    with pytest.raises(DatasetError, match="lacks a 'partition' column"):
+        baseline_fold_evidence(platinum_request(request), silver)

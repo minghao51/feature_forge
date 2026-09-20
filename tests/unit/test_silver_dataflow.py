@@ -45,6 +45,7 @@ def test_separate_stage_drivers_handoff_source_without_reloading(tmp_path: Path)
         split_seed=42,
         cv_folds=2,
         evaluation_holdout_fraction=0.0,
+        evaluation_protocol="compatibility",
     )
     environment = EnvironmentSnapshot(
         python_version="3.12",
@@ -98,6 +99,7 @@ def test_ci_driver_loads_source_once_and_produces_silver_materialization(tmp_pat
                 split_seed=42,
                 cv_folds=2,
                 evaluation_holdout_fraction=0.0,
+                evaluation_protocol="compatibility",
             ),
             "dataset_registry": registry,
             "artifact_store": None,

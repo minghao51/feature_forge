@@ -39,3 +39,6 @@ consequences. Accepted ADRs sit at level 2 of the decision order in
 | [0015](0015-hamilton-cache-policy.md) | Hamilton cache policy | Accepted |
 | [0016](0016-remove-legacy-execution-engine.md) | Remove the legacy execution engine after qualification | Accepted |
 | [0017](0017-failure-policy-and-cancellation-contract.md) | Failure policy and cooperative cancellation contract | Accepted |
+| [0018](0018-independent-discovery-evaluation-protocol.md) | Independent discovery and evaluation protocol | Accepted |
+| [0019](0019-sandbox-containment-bounded-lifecycle.md) | Sandbox containment and bounded worker lifecycle | Accepted |
+| [0020](0020-llm-cache-request-identity-v2.md) | LLM cache request identity v2 | Accepted |

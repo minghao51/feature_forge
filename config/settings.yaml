@@ -67,3 +67,6 @@ evaluation:
   feature_eval_backend: "threading"
   # RLIMIT_AS cap for the sandbox worker; must exceed pandas+pyarrow VSZ (~1 GB).
   sandbox_max_memory_mb: 2048
+  # Production default: fail closed if Linux Landlock containment is unavailable.
+  # Development-only fallback must be selected explicitly.
+  sandbox_profile: "strict"

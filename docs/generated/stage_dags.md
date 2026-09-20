@@ -225,8 +225,8 @@ graph TD
 | Node | Layer | Cost | Persistence | Sensitivity | Owner | Returns | Upstream deps |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `aggregate_metrics` | platinum | cheap | none | — | evaluation | `dict[str, Any]` | 3 (baseline_fold_evidence, candidate_fold_evidence, platinum_request) |
-| `baseline_fold_evidence` | platinum | expensive | recompute | — | evaluation | `dict[str, pd.DataFrame]` | 1 (platinum_request) |
-| `candidate_fold_evidence` | platinum | expensive | recompute | — | evaluation | `dict[str, dict[str, pd.DataFrame]]` | 1 (platinum_request) |
+| `baseline_fold_evidence` | platinum | expensive | recompute | — | evaluation | `dict[str, Any]` | 1 (platinum_request) |
+| `candidate_fold_evidence` | platinum | expensive | recompute | — | evaluation | `CandidateFoldEvidence` | 1 (platinum_request) |
 | `platinum_checks` | platinum | cheap | none | — | verification | `list[CheckResult]` | 3 (aggregate_metrics, baseline_fold_evidence, platinum_request) |
 | `platinum_manifest` | platinum | cheap | recompute | — | verification | `RunManifest` | 5 (aggregate_metrics, platinum_checks, platinum_request, selection_decisions, uncertainty_summary) |
 | `platinum_materialization` | platinum | io | boundary | — | storage | `PlatinumMaterialization` | 8 (aggregate_metrics, baseline_fold_evidence, candidate_fold_evidence, platinum_checks, platinum_manifest, platinum_request, selection_decisions, uncertainty_summary) |

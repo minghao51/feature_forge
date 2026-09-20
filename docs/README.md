@@ -97,6 +97,7 @@ in the nav.
 | API Reference (`docs/api_reference.md`) | Core classes (`FeatureForge`, platform, config) with parameters and examples |
 | Migration Guide (`docs/migration_guide.md`) | Porting from the MALMAS research codebase: config, imports, API mapping |
 | Operations (`docs/operations.md`) | Hamilton cache inspection/retention, artifact verification, and recovery guidance |
+| Sandbox Isolation Spike (`docs/spikes/2026-09-15-sandbox-os-isolation.md`) | Time-boxed OS-isolation spike record for plan 23 §5.2 / ADR 0019: probe results (Landlock ABI 7, userns, seccomp, bwrap), live sentinel-denial demo, and the strict-mode containment recommendation |
 | Generated Stage DAGs (`docs/generated/stage_dags.md`) | Freshness-tested Bronze/Silver/Gold/Platinum DAGs and durable stage boundaries |
 | Implementation Plan (`docs/plan/`) | `00_index.md`, `MALMAS_Technical_Roadmap.md` (founding vision, reclassified as provenance), plus `01_architecture.md` through `23_evaluation_integrity_security_hardening.md` published as separate nav entries |
 | Notebooks (`docs/notebooks/`) | `index.md` overview + five rendered tutorials: `01_getting_started.ipynb` (offline intro), `02_pipeline_deep_dive.ipynb` (MALMAS agents/router/memory), `03_benchmarks_and_artifacts.ipynb`, `04_custom_method.ipynb` (writing a custom method), `05_methods_deep_dive.ipynb` (CAAFE, LLM-FE, OpenFE, Malmus). The `index.md` table itself only describes 01–03 |

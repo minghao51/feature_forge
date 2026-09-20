@@ -144,8 +144,10 @@ with an additive `state` field (`succeeded` / `failed` / `cancelled`):
 - `cancelled`: the case never started (fail-fast tail, queued-future
   cancellation, pre-cancelled token, or post-interrupt remainder).
 
-Cancelled rows carry no scores (`cv_score`/`gain`/`baseline_score` are
-`None`) and no stage packages; their `error` holds a redacted cancellation
+Cancelled rows carry no scores (`cv_score`/`gain`/`baseline_score` and the
+additive directional evaluation fields `directional_gain`, `gain_lower_bound`,
+`gain_upper_bound`, `evaluation_protocol` are all `None`) and no stage
+packages; their `error` holds a redacted cancellation
 record (category, stable error type, and case identity only — no exception
 text, prompts, inputs, or secrets). One redacted `case_cancelled` lifecycle
 event is journaled per never-started case.
@@ -249,6 +251,19 @@ only when all required checks verify
 (plan §4). Corrupt or incompatible packages stop reuse at that layer; the
 remaining suffix recomputes when policy permits rather than skipping to a later
 layer.
+
+Platinum v2 packages (ADR 0018 decision 8, plan 23 PR 4) additionally carry the
+v2 evidence set: `evidence.json` (the evidence-schema v2 marker),
+`discovery_fold_metrics.parquet`, `selection_steps.json`, and
+`preprocessing.json`. Loading reconstructs the aggregates, the directional
+paired Student-t interval, selected-set membership, and greedy step gating from
+the persisted evidence alone; any mismatch or tampered artifact fails
+verification. Pre-v2 (v1) Platinum packages remain integrity-verified and
+loadable but can never satisfy v2 reuse fingerprints — the Platinum identity
+schema version enters the input fingerprint — and are never recomputed or
+rewritten in place (ADR 0014 forbids in-place refingerprinting); regenerate v1
+evidence by re-running the case. Compatibility-protocol results stay labeled
+selection-biased.
 
 ## Lifecycle journal
 

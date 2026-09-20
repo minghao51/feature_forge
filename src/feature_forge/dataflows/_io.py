@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any, cast
 
+import numpy as np
 import pandas as pd
 
 from feature_forge.contracts import (
@@ -36,6 +37,7 @@ from feature_forge.contracts import (
     Layer,
     ManifestRef,
     ModelSpecification,
+    PlatinumEvidenceIndex,
     PlatinumPackage,
     PlatinumRequest,
     PlatinumSelectionDecision,
@@ -46,7 +48,7 @@ from feature_forge.contracts import (
     UncertaintySummary,
     platinum_input_fingerprint,
 )
-from feature_forge.evaluation.metrics import get_metric_direction
+from feature_forge.evaluation.metrics import MetricDirection, get_metric_direction
 from feature_forge.evaluation.model_factory import ModelFactory
 from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.exceptions import DatasetError
@@ -378,21 +380,27 @@ def replay_gold_package(
         or package.request.silver_fingerprint != silver.manifest.layer_fingerprint
     ):
         raise DatasetError("Gold package does not reference the supplied Silver package")
+    decisions_by_candidate = {item.candidate_id: item for item in package.decisions}
     working = silver.canonical_features.copy()
     with replay_provider_guard():
         for path in sorted(package.code):
             batch = [item for item in package.candidates if item.code_path == path]
+            # Mirror generation exactly: only ACCEPTED candidates contribute columns
+            # to the working frame, and fully rejected/errored batches contribute no
+            # accepted evidence (their code is not executed at all).
+            accepted_batch = [
+                item
+                for item in batch
+                if (decision := decisions_by_candidate.get(item.candidate_id)) is not None
+                and decision.state is FeatureDecisionState.ACCEPTED
+            ]
+            if not accepted_batch:
+                continue
             try:
                 output = sandbox.execute(package.code[path], working, source="gold_replay")
             except Exception as exc:
-                if all(
-                    item.state is FeatureDecisionState.ERROR
-                    for item in package.decisions
-                    if item.candidate_id in {x.candidate_id for x in batch}
-                ):
-                    continue
                 raise DatasetError(f"Gold replay failure outcome mismatch for {path}") from exc
-            names = [item.name for item in batch]
+            names = [item.name for item in accepted_batch]
             if any(name not in output.columns for name in names):
                 raise DatasetError(f"Gold replay output schema mismatch for {path}")
             values = output[names].reset_index(drop=True)
@@ -484,8 +492,205 @@ def build_platinum_request(
     )
 
 
+def _platinum_arm_fold_scores(discovery: pd.DataFrame, label: str) -> dict[int, float]:
+    """Fold → score mapping for one persisted discovery arm, failing closed."""
+    frame = discovery[discovery["arm"] == label]
+    if frame.empty:
+        raise DatasetError(f"Platinum discovery evidence is missing arm: {label}")
+    return {
+        int(fold): float(score) for fold, score in zip(frame["fold"], frame["score"], strict=True)
+    }
+
+
+def _verify_platinum_evidence_v2(
+    *,
+    request: PlatinumRequest,
+    evidence: PlatinumEvidenceIndex,
+    metrics: pd.DataFrame,
+    aggregate: AggregateMetric,
+    uncertainty: UncertaintySummary,
+    decisions: list[PlatinumSelectionDecision],
+    discovery: pd.DataFrame,
+    steps: list[dict[str, Any]],
+    preprocessing: dict[str, Any],
+) -> None:
+    """Reconstruct the v2 Platinum evidence set from persisted evidence alone.
+
+    Every check fails closed with :class:`DatasetError` (ADR 0018 decision 8,
+    plan 23 §7.9): discovery-scope trial arms, selected-set membership, the
+    directional paired Student-t interval, the aggregate gains, the greedy
+    gating that actually elected each step, and the preprocessing identity
+    must all reproduce from the persisted fold evidence.
+    """
+    required_discovery_columns = {
+        "arm",
+        "fold",
+        "metric",
+        "score",
+        "n_train",
+        "n_validation",
+        "status",
+        "partition",
+    }
+    if (
+        not required_discovery_columns.issubset(discovery.columns)
+        or not (discovery["partition"] == "discovery").all()
+    ):
+        raise DatasetError(
+            "Platinum discovery fold evidence does not describe discovery-scope folds"
+        )
+    if (
+        evidence.selection_partition != request.evaluation_policy.selection_partition
+        or evidence.evaluation_protocol != request.evaluation_policy.evaluation_protocol
+        or not math.isclose(
+            evidence.confidence_level,
+            request.uncertainty_policy.confidence_level,
+            rel_tol=1e-12,
+            abs_tol=1e-12,
+        )
+    ):
+        raise DatasetError("Platinum evidence index disagrees with its persisted request")
+    chosen_sequence = [step["chosen"] for step in steps if step["chosen"] is not None]
+    if evidence.selected != chosen_sequence:
+        raise DatasetError("Platinum selected set disagrees with the persisted selection steps")
+    if set(evidence.selected) != {item.feature_name for item in decisions if item.selected}:
+        raise DatasetError("Platinum selected set disagrees with the persisted selection decisions")
+
+    # Directional paired Student-t interval over the evaluation arms; the
+    # local import avoids the module-level cycle (_io is imported by the
+    # platinum node module).
+    from feature_forge.dataflows.platinum import _t_critical
+
+    baseline = metrics[metrics["arm"] == "baseline"].sort_values("fold")
+    enhanced = metrics[metrics["arm"] == "enhanced"].sort_values("fold")
+    direction = 1.0 if request.metric_direction is MetricDirection.MAXIMIZE else -1.0
+    raw_deltas = enhanced["score"].to_numpy() - baseline["score"].to_numpy()
+    deltas = raw_deltas * direction
+    pair_count = len(deltas)
+    std = float(deltas.std(ddof=1)) if pair_count > 1 else 0.0
+    se = std / math.sqrt(pair_count)
+    margin = _t_critical(request.uncertainty_policy.confidence_level, pair_count - 1) * se
+    mean = float(deltas.mean())
+    for field, expected in {
+        "mean_directional_gain": mean,
+        "standard_deviation": std,
+        "standard_error": se,
+        "lower_bound": float(mean - margin),
+        "upper_bound": float(mean + margin),
+    }.items():
+        if not math.isclose(getattr(uncertainty, field), expected, rel_tol=1e-12, abs_tol=1e-12):
+            raise DatasetError(f"Platinum uncertainty {field} does not reconstruct")
+    if uncertainty.pair_count != pair_count:
+        raise DatasetError("Platinum uncertainty pair_count does not reconstruct")
+    if not math.isclose(
+        uncertainty.confidence_level,
+        request.uncertainty_policy.confidence_level,
+        rel_tol=1e-12,
+        abs_tol=1e-12,
+    ):
+        raise DatasetError("Platinum uncertainty confidence_level does not reconstruct")
+    if not math.isclose(aggregate.directional_gain, mean, rel_tol=1e-12, abs_tol=1e-12):
+        raise DatasetError("Platinum directional aggregate does not reconstruct")
+    if not math.isclose(
+        aggregate.legacy_gain, float(raw_deltas.mean()), rel_tol=1e-12, abs_tol=1e-12
+    ):
+        raise DatasetError("Platinum legacy aggregate does not reconstruct")
+    # Every decision carries the evaluation-aggregate directional interval
+    # bound (see the PlatinumSelectionDecision.lower_bound field note): it
+    # must match the persisted — and now reconstructed — interval exactly.
+    if any(
+        not math.isclose(item.lower_bound, uncertainty.lower_bound, rel_tol=1e-12, abs_tol=1e-12)
+        for item in decisions
+    ):
+        raise DatasetError(
+            "Platinum selection decision bounds disagree with the persisted interval"
+        )
+
+    # Greedy gating: every step's ranking must reproduce from the persisted
+    # discovery arms against the previous step's elected arm (baseline for
+    # step 1); the chosen entry's fold scores must match that arm exactly.
+    # The previous arm is ``candidate:<f>`` while only one feature precedes
+    # the step (step 1 reuses per-candidate arms) and ``greedy:...`` from
+    # the third step on, mirroring the producer's arm naming.
+    previous_scores: dict[int, float]
+    for step in steps:
+        selected_before = list(step["selected_before"])
+        if not selected_before:
+            previous_scores = _platinum_arm_fold_scores(discovery, "baseline")
+        elif len(selected_before) == 1:
+            previous_scores = _platinum_arm_fold_scores(
+                discovery, f"candidate:{selected_before[0]}"
+            )
+        else:
+            previous_scores = _platinum_arm_fold_scores(
+                discovery, f"greedy:{'+'.join(selected_before)}"
+            )
+        for entry in step["ranking"]:
+            feature = entry["feature"]
+            label = (
+                f"greedy:{'+'.join([*selected_before, feature])}"
+                if selected_before
+                else f"candidate:{feature}"
+            )
+            scores = _platinum_arm_fold_scores(discovery, label)
+            if set(scores) != set(previous_scores):
+                raise DatasetError(f"Platinum greedy arm folds do not align: {label}")
+            arm_deltas = np.asarray(
+                [
+                    direction * (scores[fold] - previous_scores[fold])
+                    for fold in sorted(previous_scores)
+                ],
+                dtype=float,
+            )
+            if not math.isclose(
+                float(entry["directional_gain"]),
+                float(arm_deltas.mean()),
+                rel_tol=1e-12,
+                abs_tol=1e-12,
+            ):
+                raise DatasetError(f"Platinum greedy ranking gain does not reconstruct: {label}")
+        chosen = step["chosen"]
+        if chosen is None:
+            continue
+        label = (
+            f"greedy:{'+'.join([*selected_before, chosen])}"
+            if selected_before
+            else f"candidate:{chosen}"
+        )
+        persisted_scores = _platinum_arm_fold_scores(discovery, label)
+        recorded_scores = step["fold_scores"]
+        if set(recorded_scores) != {str(fold) for fold in persisted_scores} or any(
+            not math.isclose(
+                recorded_scores[str(fold)],
+                persisted_scores[fold],
+                rel_tol=1e-12,
+                abs_tol=1e-12,
+            )
+            for fold in persisted_scores
+        ):
+            raise DatasetError(f"Platinum chosen arm fold scores do not reconstruct: {label}")
+
+    evaluation_folds = {str(int(fold)) for fold in baseline["fold"]}
+    if set(preprocessing) != {"baseline", "enhanced"}:
+        raise DatasetError("Platinum preprocessing identity does not cover the evaluation arms")
+    for arm in ("baseline", "enhanced"):
+        specification = preprocessing[arm]
+        if specification is None:
+            continue
+        if not set(specification) >= evaluation_folds:
+            raise DatasetError(
+                f"Platinum preprocessing identity is missing evaluation folds: {arm}"
+            )
+
+
 def load_platinum_package(store: LocalArtifactStore, ref: ManifestRef) -> PlatinumPackage:
-    """Load and validate persisted Platinum evidence without executing models."""
+    """Load and validate persisted Platinum evidence without executing models.
+
+    v2 packages (an ``evidence.json`` marker among the manifest artifacts)
+    additionally reconstruct selection, interval, aggregate, greedy-gating,
+    and preprocessing evidence offline from the persisted discovery folds
+    alone; v1 packages keep the pre-PR-4 read semantics unchanged.
+    """
     if ref.layer is not Layer.PLATINUM:
         raise DatasetError("Platinum loading requires a Platinum manifest reference")
     try:
@@ -552,6 +757,40 @@ def load_platinum_package(store: LocalArtifactStore, ref: ManifestRef) -> Platin
             float(enhanced["score"].mean()), aggregate.enhanced_score, rel_tol=1e-12, abs_tol=1e-12
         ):
             raise DatasetError("Platinum enhanced aggregate does not reconstruct")
+        if any(item.relative_path == "evidence.json" for item in manifest.artifacts):
+            raw_evidence = store.read_json_artifact(ref, "evidence.json")
+            if (
+                not isinstance(raw_evidence, dict)
+                or raw_evidence.get("evidence_schema_version") != "2"
+            ):
+                raise DatasetError(
+                    "Platinum evidence.json declares an unsupported evidence schema version"
+                )
+            _verify_platinum_evidence_v2(
+                request=request,
+                evidence=PlatinumEvidenceIndex.model_validate(raw_evidence),
+                metrics=metrics,
+                aggregate=aggregate,
+                uncertainty=uncertainty,
+                decisions=decisions,
+                discovery=pd.read_parquet(
+                    store.resolve(
+                        ArtifactRef(
+                            layer=Layer.PLATINUM,
+                            run_id=ref.run_id,
+                            relative_path="discovery_fold_metrics.parquet",
+                        )
+                    )
+                ),
+                steps=cast(
+                    list[dict[str, Any]],
+                    store.read_json_artifact(ref, "selection_steps.json"),
+                ),
+                preprocessing=cast(
+                    dict[str, Any],
+                    store.read_json_artifact(ref, "preprocessing.json"),
+                ),
+            )
         return PlatinumPackage(
             manifest=manifest,
             request=request,

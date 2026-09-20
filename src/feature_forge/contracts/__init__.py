@@ -9,6 +9,7 @@ from feature_forge.contracts.artifacts import (
     RunId,
     Sha256,
 )
+from feature_forge.contracts.base import EvaluationProtocol
 from feature_forge.contracts.datasets import (
     BronzeMaterialization,
     BronzeRecord,
@@ -29,6 +30,7 @@ from feature_forge.contracts.gold import (
 )
 from feature_forge.contracts.identity import (
     IDENTITY_SCHEMA_VERSION,
+    PLATINUM_IDENTITY_SCHEMA_VERSION,
     MethodIdentity,
     bronze_fingerprint,
     gold_input_fingerprint,
@@ -49,6 +51,7 @@ from feature_forge.contracts.platinum import (
     AggregateMetric,
     EvaluationPolicy,
     ModelSpecification,
+    PlatinumEvidenceIndex,
     PlatinumMaterialization,
     PlatinumPackage,
     PlatinumRequest,
@@ -74,6 +77,7 @@ from feature_forge.contracts.stages import (
 
 __all__ = [
     "IDENTITY_SCHEMA_VERSION",
+    "PLATINUM_IDENTITY_SCHEMA_VERSION",
     "AggregateMetric",
     "ArtifactDescriptor",
     "ArtifactNamespace",
@@ -87,6 +91,7 @@ __all__ = [
     "DatasetRequest",
     "EnvironmentSnapshot",
     "EvaluationPolicy",
+    "EvaluationProtocol",
     "FailureClass",
     "FeatureCandidate",
     "FeatureDecision",
@@ -101,6 +106,7 @@ __all__ = [
     "Materialization",
     "MethodIdentity",
     "ModelSpecification",
+    "PlatinumEvidenceIndex",
     "PlatinumMaterialization",
     "PlatinumPackage",
     "PlatinumRequest",

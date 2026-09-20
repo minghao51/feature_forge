@@ -75,6 +75,7 @@ def qualify(cache_dir: Path, *, rows: int = 16) -> dict[str, Any]:
             case_fingerprint="qualification-case",
             split_seed=42,
             cv_folds=2,
+            evaluation_protocol="compatibility",
             evaluation_holdout_fraction=0.0,
         )
         started = time.perf_counter()

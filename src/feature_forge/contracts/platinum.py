@@ -8,7 +8,7 @@ import pandas as pd
 from pydantic import ConfigDict, Field, model_validator
 
 from feature_forge.contracts.artifacts import ManifestRef, RunId
-from feature_forge.contracts.base import ContractModel
+from feature_forge.contracts.base import ContractModel, EvaluationProtocol
 from feature_forge.contracts.materialization import Materialization
 from feature_forge.contracts.runs import RunManifest
 from feature_forge.contracts.stages import CheckResult
@@ -35,6 +35,9 @@ class EvaluationPolicy(ContractModel):
     estimator_threads: int = Field(default=1, ge=1)
     blas_threads: int = Field(default=1, ge=1)
     selection_partition: Literal["discovery", "evaluation", "all"] = "discovery"
+    # Partition provenance, ADR 0018; selection_partition/protocol combinations
+    # are enforced at PlatinumRequest validation.
+    evaluation_protocol: EvaluationProtocol = "holdout"
 
 
 class UncertaintyPolicy(ContractModel):
@@ -46,8 +49,11 @@ class UncertaintyPolicy(ContractModel):
 class SelectionPolicy(ContractModel):
     schema_version: Literal["1"] = "1"
     profile: Literal["compatibility", "recommended"] = "compatibility"
+    # Enforced by greedy selection on discovery folds (plan 23 PR 3).
     minimum_practical_gain: float = Field(default=0.0, ge=0)
+    # Enforced by greedy selection on discovery folds (plan 23 PR 3).
     require_positive_lower_bound: bool = False
+    # Enforced by greedy selection on discovery folds (plan 23 PR 3).
     max_selected_features: int | None = Field(default=None, ge=1)
 
 
@@ -89,6 +95,26 @@ class PlatinumRequest(ContractModel):
             raise ValueError("platinum_input_fingerprint does not match request fields")
         return self
 
+    @model_validator(mode="after")
+    def validate_selection_partition_profile(self) -> PlatinumRequest:
+        """Reject unsupported selection_partition/protocol combinations (ADR 0018 §5)."""
+        partition = self.evaluation_policy.selection_partition
+        protocol = self.evaluation_policy.evaluation_protocol
+        if partition == "evaluation":
+            raise ValueError(
+                "selection_partition='evaluation' selects features on the reported "
+                "evaluation folds, which is leakage in every profile; use 'discovery' "
+                "(ADR 0018 decision 5)"
+            )
+        if protocol == "holdout" and partition != "discovery":
+            raise ValueError(
+                f"selection_partition={partition!r} is unsupported under "
+                "evaluation_protocol='holdout', which selects on 'discovery' folds only; "
+                "'all' is legal only under the explicit 'compatibility' protocol "
+                "(ADR 0018 decision 5)"
+            )
+        return self
+
 
 class AggregateMetric(ContractModel):
     schema_version: Literal["1"] = "1"
@@ -123,7 +149,27 @@ class PlatinumSelectionDecision(ContractModel):
     reason: str
     legacy_gain: float
     directional_gain: float
+    # Carries the evaluation-aggregate directional interval bound, not a
+    # per-step discovery bound; the bounds that actually gated greedy
+    # selection are persisted in selection_steps.json (ranking entries'
+    # lower_bound), and offline reconstruction of the gating recomputes them
+    # from the persisted discovery fold metrics.
     lower_bound: float
+
+
+class PlatinumEvidenceIndex(ContractModel):
+    """v2 evidence-set marker binding the durable Platinum evidence set.
+
+    Per-artifact ``schema_version`` fields stay at ``"1"`` (the artifact store
+    pins them); the evidence-set schema bump lives only in this persisted
+    marker (ADR 0018 decision 8).
+    """
+
+    evidence_schema_version: Literal["2"] = "2"
+    selected: list[str]
+    selection_partition: str
+    evaluation_protocol: EvaluationProtocol
+    confidence_level: float
 
 
 class PlatinumMaterialization(Materialization):
