@@ -24,6 +24,17 @@ One entry per event, newest first:
 
 ## Entries
 
+### 2026-09-21 — Slice B step 2: thread caps clear both CI failure families
+
+- Pushed job-level single-thread BLAS/OpenMP/NumExpr caps (test + hamilton-compat
+  lanes only; intel lane deliberately uncapped) as `152d2d7`. Run `35627198375`:
+  `test (3.11/3.12/3.13)` and both `hamilton-compat` cells green — the
+  SandboxTimeoutError family and the `<2` lane's Gold mismatch/`Resource
+  temporarily unavailable` were both native-thread oversubscription on shared
+  runners, not code regressions. Only `security` remains red (Slice D scope).
+- Consequence: Slice C's dependency isolation is still correct hygiene but no
+  longer unblocks a red lane; B3–B5 proceed as robustness/correctness work.
+
 ### 2026-09-21 — Slice A provenance recovery + Slice B step 1 sandbox diagnostics
 
 - Slice A executed: pushed immutable tag `archive/pr-1-medallion-refactor`
