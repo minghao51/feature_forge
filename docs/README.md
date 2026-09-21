@@ -55,6 +55,17 @@ remains the completed execution-runtime specification; plan 22 is the active
 scheduler handoff. Plans 18–20 retain their exploratory research and roadmap
 roles.
 
+### Implementation handoffs (`docs/handoffs/`)
+
+Chronological session handoffs: the per-PR working plans that drive and
+record agent-assisted implementation, migrated from the workstation-local
+`.claude/handoffs/` on 2026-09-18 so plan history is versioned with the code.
+They are **provenance, not guidance** — each describes what was planned and
+executed at a point in time, including superseded reasoning; `docs/plan/`
+and accepted ADRs win where they conflict. Indexed in
+`docs/handoffs/README.md`; handoffs older than 2026-09 may retain
+originating-workstation absolute paths in narrative text.
+
 ### Other exploratory documents (`docs/`)
 
 | Location | Role |
@@ -85,8 +96,8 @@ roles.
 
 User-facing pages are built by mkdocs; the nav in `mkdocs.yml` defines
 what is published. This map, `docs/decisions/`, `docs/deferred-design.md`,
-and `docs/archive/` are internal working documents and are intentionally not
-in the nav.
+`docs/handoffs/`, and `docs/archive/` are internal working documents and are
+intentionally not in the nav.
 
 | Nav page (file) | Content |
 |-----------------|---------|

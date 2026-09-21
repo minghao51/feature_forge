@@ -204,7 +204,7 @@ Use the pickup skill or command:
 
 Or read the handoff file:
 ```
-/Users/minghao/Desktop/personal/feature_forge/.claude/handoffs/2026-05-02-feature-forge-phases-4-13.md
+/Users/minghao/Desktop/personal/feature_forge/docs/handoffs/2026-05-02-feature-forge-phases-4-13.md
 ```
 
 ---

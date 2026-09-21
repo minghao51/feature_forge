@@ -5,6 +5,7 @@ exclude_docs: |
   archive/
   decisions/
   deferred-design.md
+  handoffs/
 theme:
   name: material
   custom_dir: overrides

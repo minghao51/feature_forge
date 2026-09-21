@@ -79,7 +79,7 @@ One entry per event, newest first:
 - Full suite: 1106 passed / 9 expected skips / 8 xfailed, zero XPASS; all
   AGENTS.md gates green (ruff, format, mypy src, hygiene, docs refs,
   mkdocs --strict, uv lock, git diff --check).
-- Handoff: `.claude/handoffs/2026-09-18-post-audit-fix-batch.md`.
+- Handoff: `docs/handoffs/2026-09-18-post-audit-fix-batch.md`.
 - AI assistance: implementation by a worker subagent (DeepSeek V4.1 Flash
   via opencode-go), review by a reviewer subagent (GLM-5.3-Flash),
   marker-module edits, verification passes, coordination, and commits by the
@@ -245,7 +245,7 @@ One entry per event, newest first:
   Links:
   `docs/plan/23_evaluation_integrity_security_hardening.md` §5–§6 PR 5,
   `docs/decisions/0019-sandbox-containment-bounded-lifecycle.md`,
-  `.claude/handoffs/2026-09-18-plan23-pr5-sandbox-containment.md`.
+  `docs/handoffs/2026-09-18-plan23-pr5-sandbox-containment.md`.
 
 ### 2026-09-18 — Plan 23 PR 4: Platinum v2 evidence and uncertainty (ADR 0018 decisions 7–8)
 
@@ -327,7 +327,7 @@ One entry per event, newest first:
   maintainer review. Links:
   `docs/plan/23_evaluation_integrity_security_hardening.md` §6 PR 4,
   `docs/decisions/0018-independent-discovery-evaluation-protocol.md`,
-  `.claude/handoffs/2026-09-16-plan23-pr4-platinum-v2-evidence-uncertainty.md`.
+  `docs/handoffs/2026-09-16-plan23-pr4-platinum-v2-evidence-uncertainty.md`.
 
 ### 2026-09-16 — Plan 23 PR 3: fold-local preprocessing and selection (ADR 0018 decisions 4–6)
 
@@ -380,7 +380,7 @@ One entry per event, newest first:
   all fixed or documented). Pending maintainer review. Links:
   `docs/plan/23_evaluation_integrity_security_hardening.md` §6 PR 3,
   `docs/decisions/0018-independent-discovery-evaluation-protocol.md`,
-  `.claude/handoffs/2026-09-16-plan23-pr4-platinum-v2-evidence-uncertainty.md`.
+  `docs/handoffs/2026-09-16-plan23-pr4-platinum-v2-evidence-uncertainty.md`.
 
 ### 2026-09-16 — Plan 23 PR 2: partition-aware discovery (ADR 0018 decisions 1–3)
 
@@ -426,7 +426,7 @@ One entry per event, newest first:
   tests — were all fixed). Pending maintainer review. Links:
   `docs/plan/23_evaluation_integrity_security_hardening.md` §6 PR 2,
   `docs/decisions/0018-independent-discovery-evaluation-protocol.md`,
-  `.claude/handoffs/2026-09-16-plan23-pr3-fold-local-preprocessing.md`.
+  `docs/handoffs/2026-09-16-plan23-pr3-fold-local-preprocessing.md`.
 
 ### 2026-09-15 — ADRs 0018–0020 accepted; plan 23 PR 2 unlocked
 
@@ -435,7 +435,7 @@ One entry per event, newest first:
   0020 (LLM cache identity v2); statuses and the ADR index were flipped to
   Accepted and plan 23 is now Active.
 - PR-1 handoff closed and superseded by the PR-2 handoff
-  (`.claude/handoffs/2026-09-15-plan23-pr2-partition-aware-discovery.md`),
+  (`docs/handoffs/2026-09-15-plan23-pr2-partition-aware-discovery.md`),
   which assigns plan 23 PR 2 only (partition-aware discovery) and maps the
   PR-1 xfail markers each later PR must remove.
 - AI assistance: bookkeeping by the session agent; no runtime changes.
@@ -485,7 +485,7 @@ One entry per event, newest first:
 - AI assistance: plan and handoff drafted by Codex with independent evaluation
   and security review agents. Links:
   `docs/plan/23_evaluation_integrity_security_hardening.md`,
-  `.claude/handoffs/2026-09-15-evaluation-security-audit-remediation.md`.
+  `docs/handoffs/2026-09-15-evaluation-security-audit-remediation.md`.
 
 ### 2026-09-14 — Independent project audit
 
@@ -542,7 +542,7 @@ One entry per event, newest first:
   assistance (pi coding agent; reviewer subagent audit) within the
   maintainer-accepted ADR 0017 scope; final review pending.
 - Links: `docs/plan/22_fail_fast_cancellation_contract.md`; ADR 0017;
-  `.claude/handoffs/2026-09-14-fail-fast-cancellation-complete.md`.
+  `docs/handoffs/2026-09-14-fail-fast-cancellation-complete.md`.
 
 ### 2026-09-14 — Plan 22 PR 4: operator documentation and completion audit (ADR 0017)
 
@@ -588,7 +588,7 @@ dormant `ResourceConfig.max_attempts` retry gap visible.
 | §6.1/§12 PR 1 transitional `legacy` engine default/config examples | HISTORICAL (intermediate-state descriptions superseded by ADR 0016; doc header + §0 already record removal) | none |
 | §18: "dry-run, resume, replay, retry, cancellation, sequential, process have end-to-end coverage" | OVERSTATED for retry | retry removed from the unconditional claim + `[Audited 2026-09-14]` note marking it explicitly open |
 
-- Continuation handoff: `.claude/handoffs/2026-09-14-fail-fast-cancellation-complete.md`
+- Continuation handoff: `docs/handoffs/2026-09-14-fail-fast-cancellation-complete.md`
 (summary of PRs 1–4, key files, validation evidence, confirmed decisions,
 next steps including the Python 3.11/3.12/3.13 + both-mp-contexts
 re-validation note).

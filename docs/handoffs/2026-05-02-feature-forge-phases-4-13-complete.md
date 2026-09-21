@@ -314,7 +314,7 @@ Use the pickup skill or command:
 
 Or read the handoff file:
 ```
-/Users/minghao/Desktop/personal/feature_forge/.claude/handoffs/2026-05-02-feature-forge-phases-4-13-complete.md
+/Users/minghao/Desktop/personal/feature_forge/docs/handoffs/2026-05-02-feature-forge-phases-4-13-complete.md
 ```
 
 ---
@@ -325,4 +325,4 @@ Or read the handoff file:
 - **Technical roadmap**: `/Users/minghao/Desktop/personal/feature_forge/docs/MALMAS_Technical_Roadmap.md`
 - **Implementation plan**: `/Users/minghao/Desktop/personal/feature_forge/docs/plan/`
 - **Project root**: `/Users/minghao/Desktop/personal/feature_forge`
-- **Previous handoff**: `/Users/minghao/Desktop/personal/feature_forge/.claude/handoffs/2026-05-02-feature-forge-phases-4-13.md`
+- **Previous handoff**: `/Users/minghao/Desktop/personal/feature_forge/docs/handoffs/2026-05-02-feature-forge-phases-4-13.md`

@@ -152,6 +152,7 @@ mlruns/
 # MkDocs
 .cache/mkdocs-jupyter/
 
+# Session handoffs live in docs/handoffs/ (tracked) as of 2026-09-18.
 .claude/
 .feature_forge_artifacts/
 .playwright-mcp/

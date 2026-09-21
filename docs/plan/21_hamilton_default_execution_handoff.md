@@ -95,8 +95,9 @@ This plan is subordinate to the package contract in `README.md`, the active plan
 index in `docs/plan/00_index.md`, and accepted ADRs in `docs/decisions/`.
 
 It supersedes the implementation direction in the feature branch's
-`.claude/handoffs/2026-07-13-medallion-refactor.md` and
-`.claude/handoffs/2026-07-14-medallion-pr-index.md`. Those records retain
+`docs/handoffs/2026-07-13-medallion-refactor.md` and
+`docs/handoffs/2026-07-14-medallion-pr-index.md` (neither retained in the
+2026-09-18 `docs/handoffs/` migration). Those records retain
 historical value but specify optional Hamilton, application-owned execution,
 and profile-specific cache disabling that conflict with the decisions below.
 
