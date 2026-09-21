@@ -12,7 +12,11 @@ same as `docs/archive/`, `docs/decisions/`, and `docs/deferred-design.md`.
 
 **Directory history:** these documents previously lived in `.claude/handoffs/`
 (gitignored, workstation-local). On 2026-09-18 they were migrated here so
-plan history is versioned with the code. Files dated before 2026-09 may
+plan history is versioned with the code. On 2026-09-21 the ten July
+medallion-planning handoffs were recovered verbatim from remote PR #1
+(immutable tag `archive/pr-1-medallion-refactor` at `690a764`) — they had
+existed only on the feature branch's workstation-local `.claude/handoffs/`
+and were never part of the 2026-09-18 migration. Files dated before 2026-09 may
 retain originating-workstation absolute paths in narrative text; repo
 references use `docs/handoffs/`.
 
@@ -37,6 +41,16 @@ directly into `docs/plan/` (`15_notebook_updates_handoff.md`,
 | `2026-09-14-fail-fast-cancellation-complete.md` | Plan 22 completion record — fail-fast scheduling and cooperative cancellation (ADR 0017) | Complete 2026-09-14 |
 | `2026-09-14-legacy-removal-and-fail-fast-plan.md` | Legacy-removal decision and fail-fast planning (ADR 0016/0017) | Superseded by completion record above |
 | `2026-09-10-hamilton-default-continuation.md` | Hamilton-default execution continuation (plan 21) | Superseded by `docs/plan/21_*` |
+| `2026-07-14-pr8-decision-readiness.md` | PR 8 — decision-readiness evidence for the optional Astro/browser catalog | Historical deferral record |
+| `2026-07-14-pr8-optional-astro-catalog.md` | PR 8 — optional Astro/browser catalog implementation handoff | Historical deferral record |
+| `2026-07-14-pr7-docs-operations.md` | PR 7 — docs and operations | Historical — plan lineage; execution superseded by plans 21–23 |
+| `2026-07-14-pr6-catalog-verification-observability.md` | PR 6 — catalog, verification, observability | Historical — plan lineage; execution superseded by plans 21–23 |
+| `2026-07-14-pr5-scheduler-resume-resources.md` | PR 5 — scheduler resume and resources | Historical — plan lineage; execution superseded by plans 21–23 |
+| `2026-07-14-pr4-platinum-evidence.md` | PR 4 — platinum evidence | Historical — plan lineage; execution superseded by plans 21–23 |
+| `2026-07-14-pr3-gold-offline-replay.md` | PR 3 — gold offline replay | Historical — plan lineage; execution superseded by plans 21–23 |
+| `2026-07-14-pr2.5-foundation-stabilization.md` | PR 2.5 — foundation stabilization | Historical — plan lineage; execution superseded by plans 21–23 |
+| `2026-07-14-medallion-pr-index.md` | Medallion PR series index | Historical — plan lineage; execution superseded by plans 21–23 |
+| `2026-07-13-medallion-refactor.md` | Medallion architecture refactor master handoff (R12–R21) | Historical — plan lineage; execution superseded by plans 21–23 |
 | `2026-05-03-feature-forge-unified-artifacts-implementation.md` | Unified artifact store implementation (early phases) | Historical |
 | `2026-05-02-feature-forge-phases-4-13-complete.md` | Early project phases 4–13 completion record | Historical |
 | `2026-05-02-feature-forge-phases-4-13.md` | Early project phases 4–13 plan | Historical |

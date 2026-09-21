@@ -3,7 +3,8 @@
 **Date:** 2026-09-09  
 **Status:** Implemented — PR 1 through PR 6 and all six legacy-removal gates are complete; ADR 0016 authorizes a separate removal change  
 **Decision owner:** Maintainer  
-**Source implementation:** `origin/feat/medallion-refactor` at `690a764`  
+**Source implementation:** immutable tag `archive/pr-1-medallion-refactor` at
+`690a764` (feature branch `feat/medallion-refactor`, retained read-only)
 **Implementation base:** current default branch after each prerequisite PR merges  
 **Related:** ADR 0001, ADR 0006, ADR 0016,
 `20_long_term_roadmap.md`, `22_fail_fast_cancellation_contract.md`, `REPORT_LOG.md`
@@ -96,9 +97,9 @@ index in `docs/plan/00_index.md`, and accepted ADRs in `docs/decisions/`.
 
 It supersedes the implementation direction in the feature branch's
 `docs/handoffs/2026-07-13-medallion-refactor.md` and
-`docs/handoffs/2026-07-14-medallion-pr-index.md` (neither retained in the
-2026-09-18 `docs/handoffs/` migration). Those records retain
-historical value but specify optional Hamilton, application-owned execution,
+`docs/handoffs/2026-07-14-medallion-pr-index.md` (both recovered verbatim
+from remote PR #1 on 2026-09-21; see `docs/handoffs/README.md`). Those records
+retain historical value but specify optional Hamilton, application-owned execution,
 and profile-specific cache disabling that conflict with the decisions below.
 
 Before PR 1 starts, preserve the current uncommitted work through a

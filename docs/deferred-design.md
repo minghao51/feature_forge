@@ -175,3 +175,27 @@ Referenced by `AGENTS.md` (decision order 3).
   opt into expiry/caps when disk pressure is real.
 - Revival trigger (for richer policy): multi-host experiment fleets sharing
   a cache directory, or cache directories exceeding ~10 GiB.
+
+### D-10 Optional browser/interactive catalog (Astro or equivalent)
+
+- Source: `docs/handoffs/2026-07-14-pr8-optional-astro-catalog.md` and
+  `docs/handoffs/2026-07-14-pr8-decision-readiness.md` (recovered 2026-09-21
+  from `archive/pr-1-medallion-refactor` at `690a764`); branch-only PR8
+  evidence corpus remains accessible under that tag
+  (`docs/generated/pr8/`, `scripts/*pr8*`, `docs/decisions/pr8-*` paths do
+  not exist on main and must not be copied)
+- Summary: an optional rebuildable browser/interactive catalog (Astro UI or
+  equivalent) over medallion packages, beyond the static MkDocs site and
+  generated stage-DAG/reference docs. PR8 gathered decision evidence and a
+  synthetic snapshot-schema proposal only; implementation was never
+  authorized.
+- Deferred because: current static MkDocs site plus generated references are
+  adequate for recorded needs; a second serving surface adds hosting,
+  security-review, and maintenance obligations with no measured experiment
+  demanding interactivity; ADR 0013 keeps the warehouse-free authoritative
+  package store as the only required path.
+- Revival trigger: at least two demonstrated interactive requirements (e.g.,
+  cross-run package comparison with filtering that static docs cannot
+  serve), evidence at representative scale, a stable versioned + allowlisted
+  public-snapshot schema, and named security, hosting, and maintenance
+  owners recorded in a new accepted decision record.

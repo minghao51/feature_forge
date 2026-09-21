@@ -1401,7 +1401,8 @@ maintainer direction; ADR 0017 + plan 22 PR 3 scope.
 
 ### 2026-09-09 — Hamilton-default runtime review and implementation handoff
 
-- Reviewed the default branch and `origin/feat/medallion-refactor@690a764`.
+- Reviewed the default branch and the medallion feature branch (preserved as
+  immutable tag `archive/pr-1-medallion-refactor` at `690a764`).
   The feature branch contains strong medallion contracts and verification but
   does not connect Hamilton to the public durable execution path; its combined
   graph contains disconnected stages and its cache policy produced only 4 hits
