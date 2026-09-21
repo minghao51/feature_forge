@@ -39,6 +39,16 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
+    env:
+      # Single-thread the BLAS/OpenMP pools. Sandbox spawn workers import
+      # numpy/pandas per call; on a shared runner the default one-thread-per-core
+      # pools oversubscribe the CPU and push spawn+import past the 5s sandbox
+      # deadline (the SandboxTimeoutError family, main run 35596522314). This is
+      # the measured runner policy from PR #1 commit 4f1610e, not a timeout bump.
+      OPENBLAS_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -86,6 +96,15 @@ jobs:
     strategy:
       matrix:
         hamilton-spec: ["apache-hamilton==1.90.0", "apache-hamilton<2"]
+    env:
+      # Same single-thread BLAS/OpenMP caps as `test`. This lane's NumPy/Pandas
+      # upgrade can spawn oversubscribed native thread pools that surface as
+      # `std::system_error: Resource temporarily unavailable` (main run
+      # 35596522314), so it needs the measured 4f1610e runner policy too.
+      OPENBLAS_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
