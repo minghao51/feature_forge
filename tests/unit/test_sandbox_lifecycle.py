@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import glob
 import multiprocessing as mp
 import tempfile
@@ -212,3 +213,80 @@ async def test_sync_and_async_success_results_match() -> None:
     sync_result = _executor(5.0).execute(_SUCCESS_CODE, frame)
     async_result = await _executor(5.0).execute_async(_SUCCESS_CODE, frame)
     pd.testing.assert_frame_equal(sync_result, async_result)
+
+
+class TestBoundedPhaseDiagnostics:
+    """Slice B step 1: cheap monotonic phase timing that survives a stall."""
+
+    def test_execution_diagnostics_names_last_completed_phase(self) -> None:
+        diagnostics = sandbox_module._ExecutionDiagnostics()
+        diagnostics.mark("validate")
+        diagnostics.mark("serialize")
+        summary = diagnostics.summary()
+        assert summary["last_parent_phase"] == "serialize"
+        assert {
+            "phase_parent_validate_ms",
+            "phase_parent_serialize_ms",
+            "parent_phase_elapsed_ms",
+            "elapsed_ms",
+        } <= set(summary)
+        assert "last completed parent phase=serialize" in diagnostics.describe()
+
+    def test_worker_progress_reports_not_started_and_in_progress_phase(self) -> None:
+        ctx = mp.get_context("spawn")
+        progress = sandbox_module._WorkerProgress(
+            phase=ctx.Value(ctypes.c_int, sandbox_module._PHASE_NOT_STARTED, lock=False),
+            stamps=ctx.RawArray(ctypes.c_double, len(sandbox_module._WORKER_PHASES)),
+        )
+        assert progress.fields() == {"worker_phase": "not_started"}
+        progress.enter("containment_setup")
+        progress.enter("input_load")
+        progress.enter("landlock")
+        progress.enter("code_exec")
+        fields = progress.fields()
+        assert fields["worker_phase"] == "code_exec"
+        assert fields["worker_phase_elapsed_ms"] >= 0
+        assert fields["phase_worker_containment_setup_ms"] >= 0
+        assert fields["phase_worker_input_load_ms"] >= 0
+        assert fields["phase_worker_landlock_ms"] >= 0
+        # Bootstrap precedes the worker's entry stamp, so the marker never
+        # derives it; the worker reports it against the parent's spawn stamp.
+        assert "phase_worker_bootstrap_ms" not in fields
+
+    def test_timeout_error_carries_last_completed_phase(self) -> None:
+        diagnostics = sandbox_module._ExecutionDiagnostics()
+        diagnostics.mark("spawn")
+        error = _executor(5.0)._timeout_error(diagnostics)
+        assert isinstance(error, SandboxTimeoutError)
+        assert "last completed parent phase=spawn" in str(error)
+
+    def test_timeout_message_reports_phase_and_worker_progress(self) -> None:
+        with pytest.raises(SandboxTimeoutError) as excinfo:
+            _executor(0.25).execute(_HANGING_CODE, pd.DataFrame({"x": [1.0]}))
+        message = str(excinfo.value)
+        assert "last completed parent phase=" in message
+        assert "completed[" in message
+        # The marker fields are intentionally not asserted here: shared-memory
+        # creation can legitimately fail on a host (the executor degrades
+        # cleanly by design), so the pure message fallback is pinned by
+        # ``test_timeout_error_carries_last_completed_phase`` and the
+        # zero-marker path by ``test_timeout_without_worker_marker_degrades``.
+
+    def test_timeout_without_worker_marker_degrades(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A host where shared-memory creation fails still times out cleanly.
+
+        Pins the degraded fallback: no marker attached, so the timeout message
+        carries only the parent-side phase trail and the error stays exactly
+        ``SandboxTimeoutError`` (no diagnostics wrapper or machinery leak).
+        """
+        monkeypatch.setattr(
+            sandbox_module.SandboxedExecutor,
+            "_new_worker_progress",
+            staticmethod(lambda ctx: None),
+        )
+        with pytest.raises(SandboxTimeoutError) as excinfo:
+            _executor(0.25).execute(_HANGING_CODE, pd.DataFrame({"x": [1.0]}))
+        message = str(excinfo.value)
+        assert type(excinfo.value) is SandboxTimeoutError
+        assert "last completed parent phase=" in message
+        assert "worker phase=" not in message

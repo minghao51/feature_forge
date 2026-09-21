@@ -26,7 +26,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, ClassVar, cast
 
 import numpy as np
@@ -73,6 +73,49 @@ def _containment_fields(containment: _SandboxContainment) -> dict[str, Any]:
         "sandbox_mechanism": containment.mechanism,
         "sandbox_landlock_abi": containment.landlock_abi,
     }
+
+
+_MAX_DIAGNOSTIC_MS = 3_600_000.0
+"""Upper bound for a plausible phase duration (one hour).
+
+Diagnostic durations are omitted past this bound so a mismatched clock or a
+wedged host can never produce a misleading unbounded field.
+"""
+
+_PHASE_NOT_STARTED = -1
+"""Worker phase marker value before the worker's first statement has run."""
+
+_WORKER_PHASES: tuple[str, ...] = (
+    "bootstrap",
+    "containment_setup",
+    "input_load",
+    "landlock",
+    "code_exec",
+    "output_publish",
+    "result_send",
+    "done",
+)
+"""Ordered worker-side phases exposed through the shared progress marker.
+
+The worker records the phase it is *entering*; a timed-out parent can then
+name the in-progress phase without any extra wait, pipe, thread, or semaphore
+(ADR 0019 decision 5 keeps one authoritative deadline).  ``bootstrap`` is the
+spawn exec + interpreter + module-import window, which only the parent's
+spawn stamp can measure because it precedes ``_sandbox_worker_main`` entry.
+"""
+
+
+def _elapsed_ms(start: float, end: float) -> float | None:
+    """Milliseconds between two monotonic stamps, or ``None`` when unusable.
+
+    ``None`` covers an unset start marker (``<= 0``) and an implausible
+    reading (negative or above :data:`_MAX_DIAGNOSTIC_MS`), so a broken or
+    cross-epoch clock degrades to "unknown" instead of a misleading number.
+    """
+    if start <= 0 or end < start:
+        return None
+    elapsed = (end - start) * 1000.0
+    return round(elapsed, 1) if elapsed <= _MAX_DIAGNOSTIC_MS else None
 
 
 # Linux Landlock UAPI. Raw ctypes keeps the containment boundary dependency-free.
@@ -399,6 +442,179 @@ class SandboxLimits:
 
 
 @dataclass
+class _WorkerProgress:
+    """Lock-free shared progress marker for one worker (diagnostics only).
+
+    ``phase`` holds the index in :data:`_WORKER_PHASES` the worker is
+    currently entering and ``stamps`` holds its ``time.monotonic()`` instant
+    at each transition.  The parent only reads this while reporting a
+    timeout, so no wait, retry, thread, pipe, or semaphore is added to the
+    bounded lifecycle (ADR 0019 decision 5).  Every method is best-effort:
+    diagnostics must never be able to fail an execution.
+    """
+
+    phase: Any
+    stamps: Any
+
+    def enter(self, name: str) -> None:
+        """Record that *name* is now in progress.  Never raises."""
+        try:
+            index = _WORKER_PHASES.index(name)
+            # Stamp-then-index store order is intentional; readers tolerate
+            # reordering by design (an unset stamp makes ``_elapsed_ms``
+            # return None, so the field is simply omitted).  Adding a lock
+            # here would violate ADR 0019 decision 5 (no new locks/threads
+            # in the worker path).
+            self.stamps[index] = time.monotonic()
+            self.phase.value = index
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return
+
+    def _current_index(self) -> int:
+        try:
+            return int(self.phase.value)
+        except (AttributeError, TypeError, ValueError):
+            return _PHASE_NOT_STARTED
+
+    def phase_latency_ms(self, name: str) -> float | None:
+        """Elapsed ms since the worker entered *name* (shared monotonic clock)."""
+        try:
+            index = _WORKER_PHASES.index(name)
+            started = float(self.stamps[index])
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return None
+        return _elapsed_ms(started, time.monotonic())
+
+    def fields(self) -> dict[str, Any]:
+        """Bounded, secret-free worker progress fields for logs and errors."""
+        index = self._current_index()
+        if index < 0:
+            return {"worker_phase": "not_started"}
+        index = min(index, len(_WORKER_PHASES) - 1)
+        fields: dict[str, Any] = {"worker_phase": _WORKER_PHASES[index]}
+        if _WORKER_PHASES[index] != "done":
+            # "done" means the worker finished its work; the remaining tail is
+            # parent-side join time, already reported as phase_parent_join_ms.
+            pending = self.phase_latency_ms(_WORKER_PHASES[index])
+            if pending is not None:
+                fields["worker_phase_elapsed_ms"] = pending
+        # Phase 0 (spawn exec + interpreter + module import) precedes
+        # ``stamps[0]``, so its marker delta would be a misleading ~0ms; the
+        # worker measures it against the parent's spawn stamp instead.
+        for completed in range(1, index):
+            try:
+                started = float(self.stamps[completed])
+                ended = float(self.stamps[completed + 1])
+            except (AttributeError, IndexError, TypeError, ValueError):
+                break
+            elapsed = _elapsed_ms(started, ended)
+            if elapsed is not None:
+                fields[f"phase_worker_{_WORKER_PHASES[completed]}_ms"] = elapsed
+        return fields
+
+
+@dataclass
+class _ExecutionDiagnostics:
+    """Bounded parent-side phase diagnostics for one sandbox execution.
+
+    Every value derives from one ``time.monotonic()`` origin: no extra clock,
+    wait, thread, retry, or input-sized allocation is introduced.
+    ``mark`` records the duration of the phase that just completed as
+    ``phase_parent_<name>_ms`` and remembers it as the last completed phase,
+    so a timeout report can name the phase that was in progress without extra
+    bookkeeping in the execution path.
+    """
+
+    origin: float = field(default_factory=time.monotonic)
+    phases_ms: dict[str, float] = field(default_factory=dict)
+    reported_phases_ms: dict[str, float] = field(default_factory=dict)
+    last_phase: str = "start"
+    worker: _WorkerProgress | None = None
+    _marked_at: float = field(default_factory=time.monotonic)
+
+    def merge_reported(self, worker_metadata: dict[str, Any]) -> None:
+        """Adopt the worker-reported timings that reached the parent.
+
+        These are authoritative when present (the worker measured them around
+        its own phases); the shared-marker fields remain the fallback for a
+        worker that never posted a response.
+        """
+        for name, value in worker_metadata.items():
+            if name.startswith("phase_") and isinstance(value, (int, float)):
+                self.reported_phases_ms[name] = float(value)
+
+    def merge_reported_defaults(self, derived: dict[str, float]) -> None:
+        """Fill reported phases from marker-derived values without overriding.
+
+        Worker-reported timings adopted via :meth:`merge_reported` are
+        authoritative; these marker-derived fields (e.g.
+        ``phase_worker_result_send_ms``) only fill gaps.  Never raises:
+        diagnostics must never be able to fail an execution.
+        """
+        try:
+            for name, value in derived.items():
+                self.reported_phases_ms.setdefault(name, float(value))
+        except (AttributeError, TypeError, ValueError):
+            return
+
+    def mark(self, phase: str) -> None:
+        """Record the just-completed parent phase.  Never raises."""
+        now = time.monotonic()
+        elapsed = _elapsed_ms(self._marked_at, now)
+        self._marked_at = now
+        if elapsed is not None:
+            self.phases_ms[f"phase_parent_{phase}_ms"] = elapsed
+        self.last_phase = phase
+
+    def elapsed_ms(self) -> float:
+        return round(max(0.0, (time.monotonic() - self.origin) * 1000.0), 1)
+
+    def summary(self) -> dict[str, Any]:
+        """Bounded, secret-free diagnostics for logs and error reporting."""
+        fields: dict[str, Any] = {
+            "last_parent_phase": self.last_phase,
+            "elapsed_ms": self.elapsed_ms(),
+            **self.phases_ms,
+        }
+        pending = _elapsed_ms(self._marked_at, time.monotonic())
+        if pending is not None:
+            fields["parent_phase_elapsed_ms"] = pending
+        if self.worker is not None:
+            fields.update(self.worker.fields())
+        fields.update(self.reported_phases_ms)
+        return fields
+
+    def describe(self) -> str:
+        """One-line, bounded phase summary appended to timeout messages."""
+        parts = [f"last completed parent phase={self.last_phase}"]
+        pending = _elapsed_ms(self._marked_at, time.monotonic())
+        if pending is not None:
+            parts.append(f"in progress for {pending:.1f}ms")
+        if self.phases_ms:
+            completed = " ".join(
+                f"{name.removeprefix('phase_parent_').removesuffix('_ms')}={value:.1f}ms"
+                for name, value in self.phases_ms.items()
+            )
+            parts.append(f"completed[{completed}]")
+        if self.worker is not None:
+            worker = self.worker.fields()
+            phase = worker.get("worker_phase")
+            if phase is not None:
+                parts.append(f"worker phase={phase}")
+            pending_worker = worker.get("worker_phase_elapsed_ms")
+            if pending_worker is not None:
+                parts.append(f"worker in progress for {pending_worker:.1f}ms")
+            worker_completed = " ".join(
+                f"{name.removeprefix('phase_worker_').removesuffix('_ms')}={value:.1f}ms"
+                for name, value in worker.items()
+                if name.startswith("phase_worker_")
+            )
+            if worker_completed:
+                parts.append(f"worker completed[{worker_completed}]")
+        return "; ".join(parts)
+
+
+@dataclass
 class _WorkerHandle:
     """Parent-owned resources for one sandbox worker."""
 
@@ -407,6 +623,7 @@ class _WorkerHandle:
     input_path: str
     output_path: str
     artifact_path: str = ""
+    worker_progress: _WorkerProgress | None = None
 
 
 _ACTIVE_HANDLES: set[int] = set()
@@ -604,15 +821,22 @@ class SandboxedExecutor:
         agent_name: str = "unknown",
     ) -> pd.DataFrame:
         """Execute feature generation code safely in a bounded worker."""
+        diagnostics = _ExecutionDiagnostics()
         execute_t0 = time.perf_counter()
         deadline = self._execution_deadline()
         code_hash = self._log_execution_start(code, df, source, agent_name)
         tree = self._parse_and_validate(code)
         payload = ast.unparse(tree) if hasattr(ast, "unparse") else code
+        diagnostics.mark("validate")
         result = self._execute_in_worker(
-            payload, df, source=source, agent_name=agent_name, deadline=deadline
+            payload,
+            df,
+            source=source,
+            agent_name=agent_name,
+            deadline=deadline,
+            diagnostics=diagnostics,
         )
-        self._log_execution_complete(result, execute_t0, source, agent_name, code_hash)
+        self._log_execution_complete(result, execute_t0, source, agent_name, code_hash, diagnostics)
         return result
 
     async def execute_async(
@@ -631,14 +855,21 @@ class SandboxedExecutor:
         timeout.
         """
         execute_t0 = time.perf_counter()
+        diagnostics = _ExecutionDiagnostics()
         deadline = self._execution_deadline()
         code_hash = self._log_execution_start(code, df, source, agent_name)
         tree = self._parse_and_validate(code)
         payload = ast.unparse(tree) if hasattr(ast, "unparse") else code
+        diagnostics.mark("validate")
         result = await self._execute_in_worker_async(
-            payload, df, source=source, agent_name=agent_name, deadline=deadline
+            payload,
+            df,
+            source=source,
+            agent_name=agent_name,
+            deadline=deadline,
+            diagnostics=diagnostics,
         )
-        self._log_execution_complete(result, execute_t0, source, agent_name, code_hash)
+        self._log_execution_complete(result, execute_t0, source, agent_name, code_hash, diagnostics)
         return result
 
     def _log_execution_start(
@@ -664,6 +895,7 @@ class SandboxedExecutor:
         source: str,
         agent_name: str,
         code_hash: str,
+        diagnostics: _ExecutionDiagnostics | None = None,
     ) -> None:
         logger.info(
             "sandbox_execute_complete",
@@ -672,22 +904,23 @@ class SandboxedExecutor:
             source=source,
             agent=agent_name,
             code_hash=code_hash,
+            **(diagnostics.summary() if diagnostics is not None else {}),
             **self.provenance,
         )
 
     def _execution_deadline(self) -> float:
         return time.monotonic() + max(0.0, self.limits.timeout_seconds)
 
-    def _assert_deadline(self, deadline: float) -> None:
+    def _assert_deadline(
+        self, deadline: float, diagnostics: _ExecutionDiagnostics | None = None
+    ) -> None:
         if time.monotonic() >= deadline:
             logger.error(
                 "sandbox_timeout",
                 timeout_seconds=self.limits.timeout_seconds,
                 effective_timeout_seconds=max(0.0, self.limits.timeout_seconds),
             )
-            raise SandboxTimeoutError(
-                f"Sandbox execution timed out after {self.limits.timeout_seconds:.1f}s"
-            )
+            raise self._timeout_error(diagnostics)
 
     def _execute_in_worker(
         self,
@@ -697,20 +930,41 @@ class SandboxedExecutor:
         source: str = "unknown",
         agent_name: str = "unknown",
         deadline: float | None = None,
+        diagnostics: _ExecutionDiagnostics | None = None,
     ) -> pd.DataFrame:
         execution_deadline = self._execution_deadline() if deadline is None else deadline
-        handle = self._start_worker(code, df, source, agent_name, execution_deadline)
+        handle = self._start_worker(code, df, source, agent_name, execution_deadline, diagnostics)
         deadline = execution_deadline
+        if diagnostics is not None:
+            diagnostics.worker = handle.worker_progress
         try:
-            status, payload, containment = self._wait_for_response(handle, deadline)
+            status, payload, worker_metadata = self._wait_for_response(
+                handle, deadline, diagnostics=diagnostics
+            )
+            if diagnostics is not None:
+                diagnostics.mark("response_wait")
             result = self._consume_response(
-                handle, status, payload, containment, deadline, source=source, agent_name=agent_name
+                handle,
+                status,
+                payload,
+                worker_metadata,
+                deadline,
+                source=source,
+                agent_name=agent_name,
+                diagnostics=diagnostics,
             )
             if not self._wait_for_exit(handle.process, deadline):
-                raise self._timeout_error()
+                # Best-effort exit_code: False implies still alive, so this is
+                # normally None and populated only via the tiny
+                # is_alive()->exitcode race.
+                raise self._timeout_error(diagnostics, exit_code=handle.process.exitcode)
+            if diagnostics is not None:
+                diagnostics.mark("join")
             return result
         finally:
             self._cleanup_worker(handle, deadline)
+            if diagnostics is not None:
+                diagnostics.mark("cleanup")
 
     async def _execute_in_worker_async(
         self,
@@ -720,20 +974,39 @@ class SandboxedExecutor:
         source: str = "unknown",
         agent_name: str = "unknown",
         deadline: float | None = None,
+        diagnostics: _ExecutionDiagnostics | None = None,
     ) -> pd.DataFrame:
         execution_deadline = self._execution_deadline() if deadline is None else deadline
         # This call, including Process.start(), intentionally runs on the
         # event-loop thread; process ownership never moves to a worker thread.
-        handle = self._start_worker(code, df, source, agent_name, execution_deadline)
+        handle = self._start_worker(code, df, source, agent_name, execution_deadline, diagnostics)
         deadline = execution_deadline
+        if diagnostics is not None:
+            diagnostics.worker = handle.worker_progress
         cleaned = False
         try:
-            status, payload, containment = await self._poll_response(handle, deadline)
+            status, payload, worker_metadata = await self._poll_response(
+                handle, deadline, diagnostics=diagnostics
+            )
+            if diagnostics is not None:
+                diagnostics.mark("response_wait")
             result = self._consume_response(
-                handle, status, payload, containment, deadline, source=source, agent_name=agent_name
+                handle,
+                status,
+                payload,
+                worker_metadata,
+                deadline,
+                source=source,
+                agent_name=agent_name,
+                diagnostics=diagnostics,
             )
             if not await self._wait_for_exit_async(handle.process, deadline):
-                raise self._timeout_error()
+                # Best-effort exit_code: False implies still alive, so this is
+                # normally None and populated only via the tiny
+                # is_alive()->exitcode race.
+                raise self._timeout_error(diagnostics, exit_code=handle.process.exitcode)
+            if diagnostics is not None:
+                diagnostics.mark("join")
             return result
         except asyncio.CancelledError:
             # Cleanup is synchronous but has only bounded process/queue/file
@@ -744,6 +1017,8 @@ class SandboxedExecutor:
         finally:
             if not cleaned:
                 self._cleanup_worker(handle, deadline)
+            if diagnostics is not None:
+                diagnostics.mark("cleanup")
 
     def _start_worker(
         self,
@@ -752,6 +1027,7 @@ class SandboxedExecutor:
         source: str,
         agent_name: str,
         deadline: float,
+        diagnostics: _ExecutionDiagnostics | None = None,
     ) -> _WorkerHandle:
         self._ensure_strict_available()
         ctx = mp.get_context("spawn")
@@ -767,20 +1043,32 @@ class SandboxedExecutor:
             # reintroducing an executor thread; each phase is followed by a
             # deadline assertion so overrun is reported, never silently
             # absorbed (ADR 0019 decision 5).
-            self._assert_deadline(deadline)
+            self._assert_deadline(deadline, diagnostics)
             with tempfile.NamedTemporaryFile(
                 mode="wb", suffix=".parquet", delete=False, prefix="feature_forge_input_"
             ) as input_file:
                 input_path = input_file.name
                 df.to_parquet(input_path)
-            self._assert_deadline(deadline)
+            self._assert_deadline(deadline, diagnostics)
             # Predeclare the output inode before Landlock is installed in the
             # child so the child can publish exactly this file.
             with tempfile.NamedTemporaryFile(
                 mode="wb", suffix=".parquet", delete=False, prefix="ff_sandbox_"
             ) as output_file:
                 output_path = output_file.name
-            self._assert_deadline(deadline)
+            self._assert_deadline(deadline, diagnostics)
+            if diagnostics is not None:
+                diagnostics.mark("serialize")
+            progress = self._new_worker_progress(ctx)
+            if diagnostics is not None:
+                # Attach before Process.start() so a spawn-phase timeout can
+                # still report whatever the child managed to record.
+                diagnostics.worker = progress
+            # Monotonic stamp handed to the child so the spawn exec +
+            # interpreter + module-import window (which precedes
+            # ``_sandbox_worker_main`` entry) stays measurable.  CPython
+            # monotonic clocks are system-wide on every supported platform.
+            parent_start = time.monotonic()
             process = ctx.Process(
                 target=_sandbox_worker_main,
                 args=(
@@ -792,15 +1080,23 @@ class SandboxedExecutor:
                     source,
                     agent_name,
                     self.profile.value,
+                    progress,
+                    parent_start,
                 ),
                 daemon=True,
             )
             # Direct call is intentional: async ownership starts here, on the
             # caller's event-loop/main thread.
             process.start()
-            self._assert_deadline(deadline)
+            if diagnostics is not None:
+                diagnostics.mark("spawn")
+            self._assert_deadline(deadline, diagnostics)
             handle = _WorkerHandle(
-                cast("mp.Process", process), response_queue, input_path, output_path
+                cast("mp.Process", process),
+                response_queue,
+                input_path,
+                output_path,
+                worker_progress=progress,
             )
             _ACTIVE_HANDLES.add(id(handle))
             return handle
@@ -827,33 +1123,93 @@ class SandboxedExecutor:
                     "degraded_development explicitly for local development"
                 )
 
-    def _timeout_error(self) -> SandboxTimeoutError:
-        return SandboxTimeoutError(
-            f"Sandbox execution timed out after {self.limits.timeout_seconds:.1f}s"
+    @staticmethod
+    def _new_worker_progress(ctx: Any) -> _WorkerProgress | None:
+        """Best-effort lock-free worker progress marker (diagnostics only).
+
+        Creation failures (unsupported platform, mmap exhaustion) are not an
+        execution failure: the sandbox contract is unchanged and the timeout
+        report simply omits the worker-side fields.
+        """
+        try:
+            return _WorkerProgress(
+                phase=ctx.Value(ctypes.c_int, _PHASE_NOT_STARTED, lock=False),
+                stamps=ctx.RawArray(ctypes.c_double, len(_WORKER_PHASES)),
+            )
+        except (AttributeError, OSError, RuntimeError, ValueError):
+            return None
+
+    def _timeout_error(
+        self,
+        diagnostics: _ExecutionDiagnostics | None = None,
+        *,
+        exit_code: int | None = None,
+    ) -> SandboxTimeoutError:
+        """Build the typed timeout error, recording the phase trail once.
+
+        The WARNING event is the CI-visible diagnostic: CI runs at WARNING, so
+        the timeout path must carry the last completed phase, per-phase
+        elapsed milliseconds, and the worker's shared-memory phase here rather
+        than only in INFO-level completion logs.
+        """
+        message = f"Sandbox execution timed out after {self.limits.timeout_seconds:.1f}s"
+        fields: dict[str, Any] = {}
+        if diagnostics is not None:
+            fields = diagnostics.summary()
+            message = f"{message} ({diagnostics.describe()})"
+        if exit_code is not None:
+            # Abnormal worker exit observed while the deadline expired.
+            fields["worker_exit_code"] = exit_code
+            message = f"{message} (worker exit_code={exit_code})"
+        logger.warning(
+            "sandbox_timeout_diagnostics",
+            timeout_seconds=self.limits.timeout_seconds,
+            **fields,
         )
+        return SandboxTimeoutError(message)
+
+    @staticmethod
+    def _worker_death_message(handle: _WorkerHandle) -> str:
+        """Typed worker-death message, including an abnormal exit code."""
+        message = "sandbox worker died before reporting a result"
+        try:
+            exit_code = handle.process.exitcode
+        except (AssertionError, AttributeError, ValueError):
+            return message
+        if exit_code is None:
+            return message
+        return f"{message} (worker exit_code={exit_code})"
 
     def _wait_for_response(
-        self, handle: _WorkerHandle, deadline: float
+        self,
+        handle: _WorkerHandle,
+        deadline: float,
+        *,
+        diagnostics: _ExecutionDiagnostics | None = None,
     ) -> tuple[str, str, dict[str, Any]]:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise self._timeout_error()
+            raise self._timeout_error(diagnostics)
         try:
             return cast(
                 "tuple[str, str, dict[str, Any]]", handle.response_queue.get(timeout=remaining)
             )
         except queue.Empty as exc:
-            raise self._timeout_error() from exc
+            raise self._timeout_error(diagnostics) from exc
         except EOFError as exc:
             # A worker killed before posting (e.g. the RLIMIT_AS feeder-thread
             # failure mode in _worker_log_event) closes the queue write-end
             # with no item; surface it through the typed hierarchy instead of
             # a raw EOFError that would bypass callers' CodeExecutionError
-            # handling.
-            raise CodeExecutionError("sandbox worker died before reporting a result") from exc
+            # handling.  An abnormal exit code is included when observable.
+            raise CodeExecutionError(self._worker_death_message(handle)) from exc
 
     async def _poll_response(
-        self, handle: _WorkerHandle, deadline: float
+        self,
+        handle: _WorkerHandle,
+        deadline: float,
+        *,
+        diagnostics: _ExecutionDiagnostics | None = None,
     ) -> tuple[str, str, dict[str, Any]]:
         while True:
             try:
@@ -861,22 +1217,65 @@ class SandboxedExecutor:
             except queue.Empty:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise self._timeout_error() from None
+                    raise self._timeout_error(diagnostics) from None
                 await asyncio.sleep(min(0.01, remaining))
             except EOFError as exc:
-                raise CodeExecutionError("sandbox worker died before reporting a result") from exc
+                raise CodeExecutionError(self._worker_death_message(handle)) from exc
+
+    def _log_worker_phases(
+        self,
+        handle: _WorkerHandle,
+        worker_metadata: dict[str, Any],
+        *,
+        source: str,
+        agent_name: str,
+    ) -> dict[str, float]:
+        """Log the worker's reported phase timings (secret-free, bounded).
+
+        Worker-reported facts are logged in the parent only: the worker must
+        never emit structlog/OTel events (see _worker_log_event).  The result
+        send is completed by the worker but observable only here, so its
+        latency is derived from the shared progress marker when available.
+        Returns the logged fields so the caller can fold them into the
+        execution summary.
+        """
+        fields: dict[str, float] = {
+            name: float(value)
+            for name, value in worker_metadata.items()
+            if name.startswith("phase_") and isinstance(value, (int, float))
+        }
+        progress = handle.worker_progress
+        if progress is not None:
+            send_ms = progress.phase_latency_ms("result_send")
+            if send_ms is not None:
+                fields.setdefault("phase_worker_result_send_ms", send_ms)
+        if not fields:
+            return fields
+        logger.info("sandbox_worker_phases", source=source, agent=agent_name, **fields)
+        return fields
 
     def _consume_response(
         self,
         handle: _WorkerHandle,
         status: str,
         payload: str,
-        containment: dict[str, Any],
+        worker_metadata: dict[str, Any],
         deadline: float,
         *,
         source: str = "unknown",
         agent_name: str = "unknown",
+        diagnostics: _ExecutionDiagnostics | None = None,
     ) -> pd.DataFrame:
+        phase_fields = self._log_worker_phases(
+            handle, worker_metadata, source=source, agent_name=agent_name
+        )
+        if diagnostics is not None:
+            diagnostics.merge_reported(worker_metadata)
+            # Fold in marker-derived timings that never travel in the worker
+            # response tuple (e.g. `phase_worker_result_send_ms`).  The
+            # worker-reported values recorded above always win; these only
+            # fill gaps.  Best-effort: never fail an execution.
+            diagnostics.merge_reported_defaults(phase_fields)
         if status == "ok":
             if os.path.realpath(payload) != os.path.realpath(handle.output_path):
                 raise CodeExecutionError("Sandbox worker returned an invalid output artifact")
@@ -885,16 +1284,26 @@ class SandboxedExecutor:
             handle.artifact_path = handle.output_path
             # Worker-reported containment is logged here in the parent: the
             # worker itself must not emit structlog/OTel events (see
-            # _worker_log_event).
+            # _worker_log_event).  Phase timings travel in the same metadata
+            # and are logged separately as `sandbox_worker_phases`.
+            # Explicit exclusion convention over the four fixed containment
+            # keys: keep every non-`phase_*` entry, drop the phase diagnostics.
+            containment = {
+                name: value
+                for name, value in worker_metadata.items()
+                if not name.startswith("phase_")
+            }
             logger.info(
                 "sandbox_worker_containment",
                 source=source,
                 agent=agent_name,
                 **containment,
             )
-            self._assert_deadline(deadline)
+            self._assert_deadline(deadline, diagnostics)
             result = pd.read_parquet(handle.output_path)
-            self._assert_deadline(deadline)
+            self._assert_deadline(deadline, diagnostics)
+            if diagnostics is not None:
+                diagnostics.mark("result_read")
             if not isinstance(result, pd.DataFrame):
                 raise CodeExecutionError(
                     f"generate_features must return a DataFrame, got {type(result).__name__}"
@@ -1213,12 +1622,60 @@ def _sandbox_worker_main(
     source: str = "unknown",
     agent_name: str = "unknown",
     profile: str = SandboxProfile.STRICT.value,
+    progress: _WorkerProgress | None = None,
+    parent_start: float = 0.0,
 ) -> None:
+    # Phase diagnostics: worker-local monotonic deltas ride back in the
+    # response metadata, while the shared ``progress`` marker (when the parent
+    # provided one) lets a *timed-out* parent name the phase the worker was in
+    # without any extra wait, pipe, or thread (ADR 0019 decision 5).
+    worker_started_at = time.monotonic()
+    worker_phases: dict[str, Any] = {}
+    if progress is not None:
+        progress.enter("bootstrap")
+    if (bootstrap_ms := _elapsed_ms(parent_start, worker_started_at)) is not None:
+        # Spawn exec + interpreter start + module import all run before this
+        # function is entered, so only the parent's spawn stamp can measure
+        # them; CPython's monotonic clock is system-wide on every supported
+        # platform, so the two processes share one timeline.
+        worker_phases["phase_worker_bootstrap_ms"] = bootstrap_ms
+
+    def _begin_phase(name: str) -> float:
+        """Mark *name* in progress and return its monotonic start stamp."""
+        started = time.monotonic()
+        if progress is not None:
+            progress.enter(name)
+        return started
+
+    def _end_phase(name: str, started: float) -> float:
+        """Record the duration of *name* and return the end stamp."""
+        ended = time.monotonic()
+        if (elapsed := _elapsed_ms(started, ended)) is not None:
+            worker_phases[f"phase_worker_{name}_ms"] = elapsed
+        return ended
+
+    def _response_metadata(containment: dict[str, Any] | None = None) -> dict[str, Any]:
+        metadata: dict[str, Any] = dict(containment or {})
+        metadata.update(worker_phases)
+        if (total := _elapsed_ms(worker_started_at, time.monotonic())) is not None:
+            metadata["phase_worker_total_ms"] = total
+        return metadata
+
+    def _respond(status: str, payload: str, containment: dict[str, Any] | None = None) -> None:
+        """Publish the single response, marking the result-send phase first."""
+        if progress is not None:
+            progress.enter("result_send")
+        response_queue.put((status, payload, _response_metadata(containment)))
+        if progress is not None:
+            progress.enter("done")
+
     # Establish containment's termination boundary before any potentially
     # expensive worker phase, then remove inherited secrets before loading data.
+    phase_started_at = _begin_phase("containment_setup")
     _establish_worker_process_group()
     _scrub_worker_environment()
     _apply_resource_limits(max_memory_mb=max_memory_mb)
+    phase_started_at = _end_phase("containment_setup", phase_started_at)
     code_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()[:16]
 
     def _blocked_network(*_args: Any, **_kwargs: Any) -> Any:
@@ -1266,15 +1723,18 @@ def _sandbox_worker_main(
         def close(self) -> None:
             return None
 
+    phase_started_at = _begin_phase("input_load")
     try:
         # Input loading happens before restrictions because it is trusted
         # sandbox plumbing. The output inode was predeclared by the parent.
         df = pd.read_parquet(input_parquet_path)
     except Exception as exc:
-        response_queue.put(("error", f"Failed to read input data: {exc}", {}))
+        _respond("error", f"Failed to read input data: {exc}")
         return
+    phase_started_at = _end_phase("input_load", phase_started_at)
 
     output_to_parquet = pd.DataFrame.to_parquet
+    phase_started_at = _begin_phase("landlock")
     try:
         resolved_profile = SandboxProfile(profile)
         if resolved_profile is SandboxProfile.STRICT:
@@ -1287,8 +1747,10 @@ def _sandbox_worker_main(
                 None,
             )
     except SandboxContainmentError as exc:
-        response_queue.put(("containment_unavailable", str(exc), {}))
+        _end_phase("landlock", phase_started_at)
+        _respond("containment_unavailable", str(exc))
         return
+    phase_started_at = _end_phase("landlock", phase_started_at)
 
     # Never emit structlog events inside the worker (see _worker_log_event):
     # the containment report travels back in the response and the parent logs
@@ -1325,31 +1787,31 @@ def _sandbox_worker_main(
     safe_globals["math"] = math
     local_vars: dict[str, Any] = {}
 
+    phase_started_at = _begin_phase("code_exec")
     try:
         exec(compile(code, filename="<sandbox>", mode="exec"), safe_globals, local_vars)
         generate_features = local_vars.get("generate_features")
         if generate_features is None:
-            response_queue.put(("error", "Code must define a 'generate_features(df)' function", {}))
+            _end_phase("code_exec", phase_started_at)
+            _respond("error", "Code must define a 'generate_features(df)' function")
             return
         result = generate_features(df)
         if not isinstance(result, pd.DataFrame):
-            response_queue.put(
-                (
-                    "error",
-                    f"generate_features must return a DataFrame, got {type(result).__name__}",
-                    {},
-                )
+            _end_phase("code_exec", phase_started_at)
+            _respond(
+                "error",
+                f"generate_features must return a DataFrame, got {type(result).__name__}",
             )
             return
         # Convert non-serializable types (Interval, Categorical, object) to safe numeric/string
         result = _to_parquet_safe(result)
-        try:
-            output_to_parquet(result, output_parquet_path)
-            response_queue.put(("ok", output_parquet_path, containment_report))
-        except Exception:
-            raise
+        phase_started_at = _end_phase("code_exec", phase_started_at)
+        phase_started_at = _begin_phase("output_publish")
+        output_to_parquet(result, output_parquet_path)
+        _end_phase("output_publish", phase_started_at)
+        _respond("ok", output_parquet_path, containment_report)
     except BaseException as exc:  # pragma: no cover - subprocess path
-        response_queue.put(("error", f"Feature generation execution failed: {exc}", {}))
+        _respond("error", f"Feature generation execution failed: {exc}")
 
 
 def _apply_resource_limits(max_memory_mb: int) -> None:

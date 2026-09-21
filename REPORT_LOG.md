@@ -24,6 +24,27 @@ One entry per event, newest first:
 
 ## Entries
 
+### 2026-09-21 — Slice A provenance recovery + Slice B step 1 sandbox diagnostics
+
+- Slice A executed: pushed immutable tag `archive/pr-1-medallion-refactor`
+  (resolves to `690a76436669fff43bb2aaff8b6069dc684e40a0`), recovered the ten
+  July medallion handoffs byte-verbatim into `docs/handoffs/`, indexed them as
+  historical plan lineage, repointed plan 21 and this log at the tag, and
+  recorded D-10 (optional browser catalog) in `docs/deferred-design.md` with
+  revival triggers. All docs gates green (hygiene, reference check, mkdocs
+  `--strict`, `git diff --check`).
+- Slice B step 1 landed: bounded secret-free per-phase timing in the sandbox
+  (parent `phase_parent_*_ms`, worker `phase_worker_*_ms`, lock-free
+  shared-memory progress marker read only on timeout; WARNING
+  `sandbox_timeout_diagnostics` carries last-completed phase + elapsed).
+  Zero behavior change; containment ordering untouched (ADR 0019).
+- Measured on this workstation: worker spawn bootstrap ≈1.1–1.2 s cold
+  (interpreter + pandas/numpy import) against the 5 s CI budget, generated-code
+  execution ≈1 ms, parent join tail ≈280 ms — supporting the runner-sensitive
+  spawn/import stall hypothesis for the `test (3.13)` timeout family.
+  Implementation: worker `opencode-go/deepseek-v4.1-flash`; review by
+  `zai/glm-5.3-flash` (approved with nits, all addressed).
+
 ### 2026-09-21 — Remote PR #1 salvage and CI-recovery audit
 
 - Audited open PR #1 (`feat/medallion-refactor@690a764`) against current main
