@@ -24,6 +24,42 @@ One entry per event, newest first:
 
 ## Entries
 
+### 2026-09-21 — Remote PR #1 salvage and CI-recovery audit
+
+- Audited open PR #1 (`feat/medallion-refactor@690a764`) against current main
+  (`e2b0c6b`): the PR is conflicting/dirty and predates ADRs 0016–0020, so it
+  must not be merged or wholesale cherry-picked. Eight medallion contract/
+  storage/check blobs are already byte-identical on main; registry, tracker,
+  directional evaluation, holdout, Hamilton dataflow, and verification scope
+  has otherwise landed or been superseded by plans 21–23.
+- Identified durable salvage: recover the ten July medallion handoffs as
+  historical provenance; preserve the branch tip under an immutable tag before
+  close; add the deferred Astro/browser-catalog decision and measurable revival
+  trigger to `docs/deferred-design.md`. Do not import the colliding branch ADRs
+  or stale generated PR8 corpus.
+- Verified current remote CI is red (run `35596522314`; the last ten queried
+  main push runs also report failure). Python 3.13 showed a 5-second sandbox
+  startup timeout, Hamilton recovery persisted
+  `failure_counts={'SandboxTimeoutError': 1}`, and Malmus masked its timeout
+  with `KeyError: 'gains'`; Hamilton `<2` additionally changed unrelated
+  NumPy/Pandas versions and emitted `Resource temporarily unavailable`;
+  security found 51 advisories in the broad dev environment. These are split
+  into sandbox, Hamilton-compatibility, and security-policy work rather than
+  treated as one root cause.
+- Portable PR lessons are one-way spawn-compatible Pipe IPC, scoped/observable
+  address-space limiting, and CI BLAS/OpenMP thread caps. Rejected verbatim
+  ports: Linux fork (ADR 0010 OpenMP conflict), pickle sidecars/current sandbox
+  replacement (ADR 0019), branch lazy init (drops Intel bootstrap ordering),
+  2-tier memory (ADR 0002 conflict), old independent-candidate selection
+  (superseded by plan-23 greedy evidence reconstruction), and authoritative
+  DuckDB catalog (ADR 0013).
+- Execution handoff:
+  `docs/handoffs/2026-09-21-pr1-salvage-ci-recovery-closeout.md`.
+- AI assistance: read-only plan/governance review by GLM-5.3-Flash,
+  architecture/CI audit by DeepSeek V4.1 Flash after two reviewer endpoint
+  failures, and direct source/ADR/remote verification plus handoff synthesis by
+  the pi session agent. No source, remote ref, tag, or PR state was changed.
+
 ### 2026-09-18 — Post-audit fix batch: leakage fail-closed, typed worker-death errors, portability and provenance pins
 
 - Verified three-way audit findings (src/tests/docs-meta reviewers, then an
