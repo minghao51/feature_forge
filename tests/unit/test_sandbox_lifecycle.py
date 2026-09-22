@@ -99,8 +99,8 @@ def test_worker_death_without_response_surfaces_typed_error(
 ) -> None:
     """A worker dying before posting surfaces a typed sandbox error, never EOFError.
 
-    End-to-end guard for the RLIMIT_AS feeder-thread failure mode (see
-    _worker_log_event): the child exits without posting, so ``execute()``
+    End-to-end guard for a worker that dies before it can post (see
+    _worker_log_event): the child exits without sending, so ``execute()``
     must report through the sandbox error hierarchy the pipeline already
     handles — never a raw EOFError that bypasses it. Whether the read
     observes the closed write-end as EOFError (→ CodeExecutionError) or

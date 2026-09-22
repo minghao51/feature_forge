@@ -24,7 +24,8 @@ import struct
 import sys
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, cast
 
@@ -48,14 +49,13 @@ _WORKER_LOGGER_NAME = "feature_forge.evaluation.sandbox.worker"
 def _worker_log_event(level: int, event: str, **fields: Any) -> None:
     """Emit a worker-process log event through the stdlib logger only.
 
+    The worker is a fresh ``spawn`` process, so it already pays the full
+    import cost of pandas/numpy/pyarrow, and the scoped RLIMIT_AS cap around
+    generated code leaves little headroom for more import machinery.
     structlog's processor chain lazily imports OpenTelemetry on the first
-    event; inside the RLIMIT_AS-capped worker that import can exhaust the
-    remaining address space and fail before the worker can put its response
-    on the pipe (``RuntimeError: can't start new thread``, observed while
-    qualifying plan 23 PR 5 on Python 3.13 with single-thread BLAS/OpenMP
-    env). The worker therefore never emits structlog events; every
-    worker-reported fact travels back in the response message and the
-    parent logs it.
+    event, which is exactly that kind of avoidable mid-run import; the worker
+    therefore never emits structlog events.  Every worker-reported fact
+    travels back in the response message and the parent logs it.
     """
     worker_logger = logging.getLogger(_WORKER_LOGGER_NAME)
     if not worker_logger.isEnabledFor(level):
@@ -795,6 +795,26 @@ class SandboxedExecutor:
         "connect",
         "create_connection",
     }
+    # Escape surfaces that are not file I/O but reach process-global
+    # primitives: ``np.ctypeslib.ctypes`` is the live ``ctypes`` module, whose
+    # ``prlimit64`` can raise the RLIMIT_AS soft limit back to infinity and
+    # defeat the scoped address-space cap.  Terminal + path matching mirrors
+    # ``BLOCKED_IO_ATTRS`` so aliases and nested chains such as
+    # ``np.ctypeslib.ctypes`` trip the policy.
+    BLOCKED_ESCAPE_ATTRS: ClassVar[set[str]] = {
+        "ctypes",
+        "ctypeslib",
+        "cdll",
+        "load_library",
+        "find_library",
+        "prlimit64",
+        "setrlimit",
+    }
+    BLOCKED_ESCAPE_PATHS: ClassVar[set[str]] = set()
+    for _module in ("np", "numpy", "pd", "pandas"):
+        for _name in BLOCKED_ESCAPE_ATTRS:
+            BLOCKED_ESCAPE_PATHS.add(f"{_module}.{_name.lower()}")
+    del _module, _name
 
     def __init__(
         self,
@@ -1049,10 +1069,11 @@ class SandboxedExecutor:
         # One-way pipe, one message per execution.  ``duplex=False`` returns
         # ``(read_end, write_end)``: the parent keeps only the read end and
         # hands the write end to the child.  There is no background writer
-        # thread and no semaphore allocation inside the RLIMIT_AS-capped
-        # worker, and a worker that dies without sending closes the last write
-        # handle so the parent observes a real EOF instead of a stall (see
-        # ``_wait_for_response``).
+        # thread and no semaphore allocation in the worker (the RLIMIT_AS cap
+        # is scoped to the ``code_exec`` window, but the transport still keeps
+        # worker teardown cheap and synchronous), and a worker that dies
+        # without sending closes the last write handle so the parent observes
+        # a real EOF instead of a stall (see ``_wait_for_response``).
         response_conn: Any
         worker_conn: Any
         response_conn, worker_conn = ctx.Pipe(duplex=False)
@@ -1321,23 +1342,23 @@ class SandboxedExecutor:
             # Only record the parent-created output path for cleanup.  Never
             # unlink an arbitrary path supplied by the worker response.
             handle.artifact_path = handle.output_path
-            # Worker-reported containment is logged here in the parent: the
-            # worker itself must not emit structlog/OTel events (see
-            # _worker_log_event).  Phase timings travel in the same metadata
-            # and are logged separately as `sandbox_worker_phases`.
-            # Explicit exclusion convention over the four fixed containment
-            # keys: keep every non-`phase_*` entry, drop the phase diagnostics.
-            containment = {
-                name: value
-                for name, value in worker_metadata.items()
-                if not name.startswith("phase_")
-            }
-            logger.info(
-                "sandbox_worker_containment",
-                source=source,
-                agent=agent_name,
-                **containment,
-            )
+        # Worker-reported containment and memory-cap state are logged in the
+        # parent for *every* status: the worker itself must not emit structlog
+        # events (see _worker_log_event), and a cap that was skipped as
+        # infeasible must stay visible even when the run fails, so it is never
+        # advertised as enforced.  Explicit exclusion convention: keep every
+        # non-`phase_*` entry, drop the phase diagnostics (they are logged
+        # separately as `sandbox_worker_phases`).
+        containment = {
+            name: value for name, value in worker_metadata.items() if not name.startswith("phase_")
+        }
+        logger.info(
+            "sandbox_worker_containment",
+            source=source,
+            agent=agent_name,
+            **containment,
+        )
+        if status == "ok":
             self._assert_deadline(deadline, diagnostics)
             result = pd.read_parquet(handle.output_path)
             self._assert_deadline(deadline, diagnostics)
@@ -1496,6 +1517,16 @@ class SandboxedExecutor:
             return path
         return None
 
+    def _blocked_escape_reason(self, node: ast.Attribute) -> str | None:
+        """Return a policy reason for a process-escape library attribute."""
+        terminal = node.attr.lower()
+        path = self._normalized_attribute_path(node)
+        if terminal in {name.lower() for name in self.BLOCKED_ESCAPE_ATTRS}:
+            return terminal
+        if path in self.BLOCKED_ESCAPE_PATHS:
+            return path
+        return None
+
     def _parse_and_validate(self, code: str) -> ast.AST:
         try:
             tree = ast.parse(code)
@@ -1511,6 +1542,19 @@ class SandboxedExecutor:
                             "sandbox_validation_blocked", reason=f"import_not_allowed: {alias.name}"
                         )
                         raise SandboxValidationError(f"Import not allowed: {alias.name}")
+                    if {part.lower() for part in alias.name.split(".")} & {
+                        name.lower() for name in self.BLOCKED_ESCAPE_ATTRS
+                    }:
+                        # ``import numpy.ctypeslib`` would otherwise re-bind the
+                        # parent attribute to the real submodule and reopen the
+                        # escape surface the runtime guard closed.
+                        logger.warning(
+                            "sandbox_validation_blocked",
+                            reason=f"blocked_escape_import: {alias.name}",
+                        )
+                        raise SandboxValidationError(
+                            f"Blocked sandbox-escape API import: {alias.name}"
+                        )
             elif isinstance(node, ast.ImportFrom):
                 root = (node.module or "").split(".")[0]
                 if root not in self.ALLOWED_IMPORTS:
@@ -1519,6 +1563,16 @@ class SandboxedExecutor:
                         reason=f"import_from_not_allowed: {node.module}",
                     )
                     raise SandboxValidationError(f"Import from not allowed: {node.module}")
+                if {part.lower() for part in (node.module or "").split(".")} & {
+                    name.lower() for name in self.BLOCKED_ESCAPE_ATTRS
+                }:
+                    logger.warning(
+                        "sandbox_validation_blocked",
+                        reason=f"blocked_escape_import: {node.module}",
+                    )
+                    raise SandboxValidationError(
+                        f"Blocked sandbox-escape API import: {node.module}"
+                    )
                 for alias in node.names:
                     imported_name = alias.name.rsplit(".", maxsplit=1)[-1].lower()
                     if alias.name == "*" or imported_name in {
@@ -1530,6 +1584,14 @@ class SandboxedExecutor:
                         )
                         raise SandboxValidationError(
                             f"Blocked file I/O API import: {node.module}.{alias.name}"
+                        )
+                    if imported_name in {name.lower() for name in self.BLOCKED_ESCAPE_ATTRS}:
+                        logger.warning(
+                            "sandbox_validation_blocked",
+                            reason=f"blocked_escape_import: {node.module}.{alias.name}",
+                        )
+                        raise SandboxValidationError(
+                            f"Blocked sandbox-escape API import: {node.module}.{alias.name}"
                         )
             elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
                 if node.func.id in self.FORBIDDEN_NAMES:
@@ -1543,6 +1605,13 @@ class SandboxedExecutor:
                         "sandbox_validation_blocked", reason=f"forbidden_name: {node.id}"
                     )
                     raise SandboxValidationError(f"Forbidden name reference: {node.id}")
+                if node.id.lower() in {
+                    name.lower() for name in self.BLOCKED_ESCAPE_ATTRS
+                } and isinstance(node.ctx, ast.Load):
+                    logger.warning(
+                        "sandbox_validation_blocked", reason=f"blocked_escape_name: {node.id}"
+                    )
+                    raise SandboxValidationError(f"Blocked sandbox-escape API reference: {node.id}")
             elif isinstance(node, ast.Attribute):
                 if node.attr.startswith(self.FORBIDDEN_DUNDER_PREFIX):
                     logger.warning(
@@ -1555,6 +1624,15 @@ class SandboxedExecutor:
                         "sandbox_validation_blocked", reason=f"blocked_io_attr: {blocked_io}"
                     )
                     raise SandboxValidationError(f"Blocked file I/O API usage: {blocked_io}")
+                blocked_escape = self._blocked_escape_reason(node)
+                if blocked_escape is not None:
+                    logger.warning(
+                        "sandbox_validation_blocked",
+                        reason=f"blocked_escape_attr: {blocked_escape}",
+                    )
+                    raise SandboxValidationError(
+                        f"Blocked sandbox-escape API usage: {blocked_escape}"
+                    )
                 if node.attr in self.BLOCKED_NETWORK_ATTRS:
                     logger.warning(
                         "sandbox_validation_blocked", reason=f"blocked_network_attr: {node.attr}"
@@ -1602,12 +1680,12 @@ def _scrub_worker_environment() -> None:
     An explicit allowlist keeps only locale entries and runtime thread /
     allocation cap variables: clearing the thread caps makes the BLAS/OpenMP
     runtimes default to one pool per core, which alone reserves an extra
-    ~0.5-1.3 GB of address space and can push the RLIMIT_AS-capped worker
-    against its limit so it cannot start the thread it needs before sending
-    its response (found during plan 23 PR 5 qualification on Python 3.13
-    under single-thread BLAS/OpenMP env). Provider credentials and every other
-    inherited value (HOME, PATH, TMPDIR included) never reach generated code;
-    this function deliberately never reads or logs a value.
+    ~0.5-1.3 GB of address space and can push a spawn worker's post-import
+    VmSize past a configured address-space cap, making the scoped cap
+    infeasible so it is skipped (found during plan 23 PR 5 qualification on
+    Python 3.13 under single-thread BLAS/OpenMP env). Provider credentials and
+    every other inherited value (HOME, PATH, TMPDIR included) never reach
+    generated code; this function deliberately never reads or logs a value.
     """
     for name in list(os.environ):
         if name not in _WORKER_ENV_ALLOWLIST and not name.startswith("LC_"):
@@ -1654,6 +1732,31 @@ def _install_library_io_guards(blocked: Callable[..., Any]) -> None:
             continue
         for name in SandboxedExecutor.BLOCKED_IO_ATTRS:
             patch(library_owner, name)
+
+    # Escape-surface guards: ``np.ctypeslib.ctypes`` is the live ctypes module
+    # and ``prlimit64`` could raise RLIMIT_AS soft back to infinity.  AST
+    # blocks these names, but this runtime patch is the authoritative layer:
+    # attribute traversal that never appears as an AST attribute name (for
+    # example ``"{0.ctypeslib.ctypes}".format(np)``, whose field path lives
+    # inside a string constant) would otherwise reach the real module.  ``pd``
+    # is patched defensively for any equivalent surface on supported versions.
+    for name in ("ctypeslib", "ctypes"):
+        patch(np, name)
+        patch(pd, name)
+    # ``import numpy.ctypeslib`` re-binds the parent attribute from
+    # ``sys.modules`` to the real submodule object, so also patch the live
+    # submodule's own ``ctypes`` reference; a re-import then cannot reopen the
+    # surface the parent patch closed.
+    for module_name in (
+        "numpy.ctypeslib",
+        "numpy.ctypes",
+        "pandas.ctypeslib",
+        "pandas.ctypes",
+    ):
+        submodule = sys.modules.get(module_name)
+        if submodule is not None:
+            patch(submodule, "ctypes")
+            patch(submodule, "ctypeslib")
 
 
 def _sandbox_worker_main(
@@ -1738,14 +1841,27 @@ def _run_sandbox_worker(
             worker_phases[f"phase_worker_{name}_ms"] = elapsed
         return ended
 
-    def _response_metadata(containment: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _response_metadata(
+        containment: dict[str, Any] | None = None,
+        memory_cap: _MemoryCapReport | None = None,
+    ) -> dict[str, Any]:
         metadata: dict[str, Any] = dict(containment or {})
+        if memory_cap is not None:
+            # A cap decision is recorded for every response that reached the
+            # code-execution window, including failures: a skipped cap is
+            # never silently advertised as enforced.
+            metadata.update(memory_cap.fields())
         metadata.update(worker_phases)
         if (total := _elapsed_ms(worker_started_at, time.monotonic())) is not None:
             metadata["phase_worker_total_ms"] = total
         return metadata
 
-    def _respond(status: str, payload: str, containment: dict[str, Any] | None = None) -> None:
+    def _respond(
+        status: str,
+        payload: str,
+        containment: dict[str, Any] | None = None,
+        memory_cap: _MemoryCapReport | None = None,
+    ) -> None:
         """Publish the single response, timing the actual pipe send.
 
         ``Connection.send`` is synchronous, so the ``result_send`` marker
@@ -1764,16 +1880,20 @@ def _run_sandbox_worker(
         if progress is not None:
             progress.enter("result_send")
         payload = payload[:_MAX_RESPONSE_PAYLOAD_CHARS]
-        response_conn.send((status, payload, _response_metadata(containment)))
+        response_conn.send((status, payload, _response_metadata(containment, memory_cap)))
         if progress is not None:
             progress.enter("done")
 
     # Establish containment's termination boundary before any potentially
-    # expensive worker phase, then remove inherited secrets before loading data.
+    # expensive worker phase, then remove inherited secrets before loading
+    # data.  Address-space limiting deliberately does NOT run here: RLIMIT_AS
+    # is scoped to the generated-code window inside the `code_exec` phase
+    # below.  Entry-time limiting caps the interpreter's own import/publish
+    # mappings (a fresh spawn worker already maps ~1 GB+, more than a 512 MB
+    # request) and can kill the worker before it can report failure.
     phase_started_at = _begin_phase("containment_setup")
     _establish_worker_process_group()
     _scrub_worker_environment()
-    _apply_resource_limits(max_memory_mb=max_memory_mb)
     phase_started_at = _end_phase("containment_setup", phase_started_at)
     code_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()[:16]
 
@@ -1832,6 +1952,14 @@ def _run_sandbox_worker(
         return
     phase_started_at = _end_phase("input_load", phase_started_at)
 
+    # Measured here, after input load and before Landlock (which denies
+    # /proc/self/status), so the cap decision reflects the worker's real
+    # post-import footprint without ever running the interpreter under the cap.
+    # If the worker grows between this measurement and the scoped window, the
+    # stale measurement only makes the cap stricter: generated code fails fast
+    # with a typed MemoryError under the reachable cap, never a hang.
+    address_space_before_landlock = _current_address_space_bytes()
+
     output_to_parquet = pd.DataFrame.to_parquet
     phase_started_at = _begin_phase("landlock")
     try:
@@ -1887,47 +2015,215 @@ def _run_sandbox_worker(
     local_vars: dict[str, Any] = {}
 
     phase_started_at = _begin_phase("code_exec")
+    memory_cap: _MemoryCapReport | None = None
+    code_error: str | None = None
+    code_result: pd.DataFrame | None = None
     try:
-        exec(compile(code, filename="<sandbox>", mode="exec"), safe_globals, local_vars)
-        generate_features = local_vars.get("generate_features")
-        if generate_features is None:
-            _end_phase("code_exec", phase_started_at)
-            _respond("error", "Code must define a 'generate_features(df)' function")
-            return
-        result = generate_features(df)
-        if not isinstance(result, pd.DataFrame):
-            _end_phase("code_exec", phase_started_at)
-            _respond(
-                "error",
-                f"generate_features must return a DataFrame, got {type(result).__name__}",
-            )
-            return
-        # Convert non-serializable types (Interval, Categorical, object) to safe numeric/string
-        result = _to_parquet_safe(result)
-        phase_started_at = _end_phase("code_exec", phase_started_at)
-        phase_started_at = _begin_phase("output_publish")
-        output_to_parquet(result, output_parquet_path)
-        _end_phase("output_publish", phase_started_at)
-        _respond("ok", output_parquet_path, containment_report)
+        # The address-space cap is scoped to the generated-code window only:
+        # it must not be active during spawn/import, input load, or the
+        # response send.  The context manager restores the pre-exec rlimits on
+        # every exit path, including a MemoryError raised by generated code,
+        # so the (small) error response is published outside the cap.
+        with _scoped_address_space_cap(
+            max_memory_mb, current_bytes=address_space_before_landlock
+        ) as memory_cap:
+            exec(compile(code, filename="<sandbox>", mode="exec"), safe_globals, local_vars)
+            generate_features = local_vars.get("generate_features")
+            if generate_features is None:
+                code_error = "Code must define a 'generate_features(df)' function"
+            else:
+                candidate = generate_features(df)
+                if not isinstance(candidate, pd.DataFrame):
+                    code_error = (
+                        f"generate_features must return a DataFrame, got {type(candidate).__name__}"
+                    )
+                else:
+                    # Convert non-serializable types (Interval, Categorical,
+                    # object) to safe numeric/string while still inside the
+                    # generated-result window; publication happens after the
+                    # cap is restored.
+                    code_result = _to_parquet_safe(candidate)
     except BaseException as exc:  # pragma: no cover - subprocess path
-        _respond("error", f"Feature generation execution failed: {exc}")
+        _end_phase("code_exec", phase_started_at)
+        detail = (
+            f"memory exhausted (MemoryError): {exc}" if isinstance(exc, MemoryError) else str(exc)
+        )
+        _respond(
+            "error",
+            f"Feature generation execution failed: {detail}",
+            containment_report,
+            memory_cap,
+        )
+        return
+    _end_phase("code_exec", phase_started_at)
+    if code_error is not None:
+        _respond("error", code_error, containment_report, memory_cap)
+        return
+    assert code_result is not None
+    # The cap is already restored here, so post-restore publication is bounded
+    # by the parent's deadline/watchdog, not by RLIMIT_AS.
+    phase_started_at = _begin_phase("output_publish")
+    output_to_parquet(code_result, output_parquet_path)
+    _end_phase("output_publish", phase_started_at)
+    _respond("ok", output_parquet_path, containment_report, memory_cap)
 
 
-def _apply_resource_limits(max_memory_mb: int) -> None:
+def _load_resource_module() -> Any:
+    """Import the POSIX ``resource`` module, or return ``None`` when absent.
+
+    A seam so tests can exercise the disabled/unavailable branches
+    deterministically without touching the host process's real rlimits.
+    """
     try:
         import resource
     except ImportError:  # pragma: no cover - non-Unix platforms
-        return
+        return None
+    return resource
 
-    if max_memory_mb > 0:
-        max_bytes = max_memory_mb * 1024 * 1024
-        current_soft, current_hard = resource.getrlimit(resource.RLIMIT_AS)
-        if current_hard > 0:
-            max_bytes = min(max_bytes, current_hard)
-        if current_soft > 0 and max_bytes > current_soft:
-            max_bytes = current_soft
+
+def _current_address_space_bytes() -> int:
+    """Best-effort current virtual address space (Linux ``VmSize``), else 0.
+
+    ``0`` means "unknown": achievability of a cap cannot be established on
+    this platform, so the caller reports the cap as unavailable instead of
+    risking an unmeasurable worker kill.
+    """
+    try:
+        with open("/proc/self/status", encoding="ascii") as handle:
+            for line in handle:
+                if line.startswith("VmSize:"):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        return int(parts[1]) * 1024
+                    break
+    except (OSError, ValueError):
+        pass
+    return 0
+
+
+@dataclass(frozen=True)
+class _MemoryCapReport:
+    """Outcome of one scoped address-space-cap decision (secret-free).
+
+    ``state`` is one of ``enforced``, ``skipped-infeasible``, ``disabled``
+    (``max_memory_mb <= 0``), or ``unavailable`` (no ``resource`` module or
+    unmeasurable usage).  The response metadata always carries the requested
+    value, so a cap is never silently advertised as enforced.
+    """
+
+    state: str
+    requested_mb: int
+    current_mb: int | None = None
+
+    def fields(self) -> dict[str, Any]:
+        fields: dict[str, Any] = {
+            "sandbox_memory_cap": self.state,
+            "sandbox_memory_cap_requested_mb": self.requested_mb,
+        }
+        if self.current_mb is not None:
+            fields["sandbox_memory_cap_current_mb"] = self.current_mb
+        return fields
+
+
+@contextmanager
+def _scoped_address_space_cap(
+    max_memory_mb: int, *, current_bytes: int | None = None
+) -> Iterator[_MemoryCapReport]:
+    """Apply ``RLIMIT_AS`` around generated-code execution, then restore it.
+
+    The cap is enforced only when it is measurably reachable: the worker's
+    current ``VmSize`` must be strictly below the requested cap.  Only the
+    soft limit is lowered (the hard limit is untouched), so the original
+    limits can always be restored before output publication and the response
+    send.  Infeasible or unavailable caps are skipped explicitly and reported
+    in the response metadata and a flat key=value worker log event; they are
+    never silently advertised as enforced.
+
+    ``current_bytes`` is the worker's measurement taken before Landlock is
+    installed (the strict ruleset denies ``/proc/self/status``); when omitted,
+    the helper measures it directly.
+    """
+    if max_memory_mb <= 0:
+        yield _MemoryCapReport("disabled", max_memory_mb)
+        return
+    resource = _load_resource_module()
+    if resource is None:
+        _worker_log_event(
+            logging.WARNING,
+            "sandbox_memory_cap_unavailable",
+            requested_mb=max_memory_mb,
+            reason="no_resource_module",
+        )
+        yield _MemoryCapReport("unavailable", max_memory_mb)
+        return
+    if current_bytes is None:
+        current_bytes = _current_address_space_bytes()
+    if current_bytes <= 0:
+        _worker_log_event(
+            logging.WARNING,
+            "sandbox_memory_cap_unavailable",
+            requested_mb=max_memory_mb,
+            reason="unknown_current_usage",
+        )
+        yield _MemoryCapReport("unavailable", max_memory_mb)
+        return
+    current_mb = current_bytes // (1024 * 1024)
+    target_bytes = max_memory_mb * 1024 * 1024
+    if target_bytes <= current_bytes:
+        # A cap at or below what is already mapped cannot be enforced without
+        # killing the worker's own interpreter/publish mappings.
+        _worker_log_event(
+            logging.WARNING,
+            "sandbox_memory_cap_skipped_infeasible",
+            requested_mb=max_memory_mb,
+            requested_bytes=target_bytes,
+            current_mb=current_mb,
+            current_bytes=current_bytes,
+        )
+        yield _MemoryCapReport("skipped-infeasible", max_memory_mb, current_mb)
+        return
+    try:
+        soft_before, hard_before = resource.getrlimit(resource.RLIMIT_AS)
+    except (AttributeError, OSError, ValueError):  # pragma: no cover - platform-specific
+        yield _MemoryCapReport("unavailable", max_memory_mb, current_mb)
+        return
+    capped_soft = target_bytes
+    if hard_before > 0:
+        capped_soft = min(capped_soft, hard_before)
+    if soft_before > 0:
+        capped_soft = min(capped_soft, soft_before)
+    if capped_soft <= 0:
+        yield _MemoryCapReport("unavailable", max_memory_mb, current_mb)
+        return
+    try:
+        # Lower the soft limit only.  Raising it again on the way out is then
+        # always permitted; reducing the hard limit would be irreversible and
+        # would leave the response send under the cap.
+        resource.setrlimit(resource.RLIMIT_AS, (capped_soft, hard_before))
+    except (OSError, ValueError):  # pragma: no cover - platform-specific
+        _worker_log_event(
+            logging.WARNING,
+            "sandbox_memory_cap_enforce_failed",
+            requested_mb=max_memory_mb,
+            current_mb=current_mb,
+        )
+        yield _MemoryCapReport("unavailable", max_memory_mb, current_mb)
+        return
+    _worker_log_event(
+        logging.INFO,
+        "sandbox_memory_cap_enforced",
+        requested_mb=max_memory_mb,
+        current_mb=current_mb,
+        soft_bytes=capped_soft,
+    )
+    try:
+        yield _MemoryCapReport("enforced", max_memory_mb, current_mb)
+    finally:
         try:
-            resource.setrlimit(resource.RLIMIT_AS, (max_bytes, max_bytes))
+            resource.setrlimit(resource.RLIMIT_AS, (soft_before, hard_before))
         except (OSError, ValueError):  # pragma: no cover - platform-specific
-            # Best effort only; timeout still protects runaway execution.
-            return
+            _worker_log_event(
+                logging.WARNING,
+                "sandbox_memory_cap_restore_failed",
+                requested_mb=max_memory_mb,
+            )

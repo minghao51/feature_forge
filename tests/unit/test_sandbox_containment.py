@@ -135,8 +135,8 @@ def test_worker_containment_failure_reports_and_maps_to_typed_error(
     The worker runs in-process with containment monkeypatched to fail (spawn
     children re-import the module, so parent monkeypatches cannot reach a real
     child). Process-group and environment setup are no-oped because they would
-    otherwise mutate the pytest process; max_memory_mb=0 skips the RLIMIT_AS
-    write for the same reason.
+    otherwise mutate the pytest process; max_memory_mb=0 disables the scoped
+    RLIMIT_AS cap for the same reason.
     """
 
     def _fail_containment(*_args: object, **_kwargs: object) -> sandbox_module._SandboxContainment:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
@@ -12,10 +11,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from feature_forge.evaluation import sandbox as sandbox_module
 from feature_forge.evaluation.sandbox import (
     _MAX_RESPONSE_PAYLOAD_CHARS,
     SandboxedExecutor,
-    _apply_resource_limits,
+    _scoped_address_space_cap,
     _to_parquet_safe,
 )
 from feature_forge.exceptions import CodeExecutionError, SandboxValidationError
@@ -80,119 +80,100 @@ class TestToParquetSafe:
         assert result["x"].dtype == float
 
 
-class TestApplyResourceLimits:
-    """Cover _apply_resource_limits edge cases (lines 317-334)."""
+class TestScopedAddressSpaceCap:
+    """Pin the scoped RLIMIT_AS contract with a mocked ``resource`` module.
 
-    def _inject_mock_resource(self) -> Callable[[int], tuple[None, MagicMock]]:
-        import sys
+    Slice B step 4 replaces entry-time limiting: the cap is applied only
+    around generated-code execution and the pre-exec limits are restored
+    afterwards, so the worker's own import/input-load/publish mappings never
+    run under it.
+    """
 
+    def _mock_resource(self, monkeypatch: pytest.MonkeyPatch, soft: int, hard: int) -> MagicMock:
         mock_resource = MagicMock()
         mock_resource.RLIMIT_AS = 0
-        mock_resource.getrlimit.return_value = (1024 * 1024 * 1024, 1024 * 1024 * 1024)
+        mock_resource.getrlimit.return_value = (soft, hard)
+        monkeypatch.setattr(sandbox_module, "_load_resource_module", lambda: mock_resource)
+        monkeypatch.setattr(
+            sandbox_module, "_current_address_space_bytes", lambda: 64 * 1024 * 1024
+        )
+        return mock_resource
 
-        def _wrapper_fn(max_memory_mb: int) -> tuple[None, MagicMock]:
-            old = sys.modules.get("resource")
-            sys.modules["resource"] = mock_resource
-            import importlib
+    def test_sets_only_soft_and_restores(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        mock_resource = self._mock_resource(monkeypatch, soft=-1, hard=-1)
+        with _scoped_address_space_cap(max_memory_mb=128) as report:
+            assert report.state == "enforced"
+            assert mock_resource.setrlimit.call_args_list[0][0][1] == (
+                128 * 1024 * 1024,
+                -1,
+            )
+        assert mock_resource.setrlimit.call_args_list[-1][0][1] == (-1, -1)
 
-            importlib.reload(sys.modules["feature_forge.evaluation.sandbox"])
-            from feature_forge.evaluation.sandbox import _apply_resource_limits as fn
+    def test_capped_by_hard_limit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        mock_resource = self._mock_resource(
+            monkeypatch, soft=1024 * 1024 * 1024, hard=64 * 1024 * 1024
+        )
+        with _scoped_address_space_cap(max_memory_mb=512) as report:
+            assert report.state == "enforced"
+            args = mock_resource.setrlimit.call_args[0]
+            assert args[1][0] == 64 * 1024 * 1024
 
-            if old is not None:
-                sys.modules["resource"] = old
-            fn(max_memory_mb)
-            return None, mock_resource
+    def test_capped_by_soft_limit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        mock_resource = self._mock_resource(
+            monkeypatch, soft=32 * 1024 * 1024, hard=1024 * 1024 * 1024
+        )
+        with _scoped_address_space_cap(max_memory_mb=512) as report:
+            assert report.state == "enforced"
+            args = mock_resource.setrlimit.call_args[0]
+            assert args[1][0] == 32 * 1024 * 1024
 
-        return _wrapper_fn
-
-    def test_sets_rlimit(self) -> None:
-        mock_resource = MagicMock()
-        mock_resource.RLIMIT_AS = 0
-        mock_resource.getrlimit.return_value = (1024 * 1024 * 1024, 1024 * 1024 * 1024)
-
-        import sys
-
-        old = sys.modules.get("resource")
-        sys.modules["resource"] = mock_resource
-        try:
-            _apply_resource_limits(max_memory_mb=128)
-        finally:
-            if old is not None:
-                sys.modules["resource"] = old
-            else:
-                del sys.modules["resource"]
-
-        mock_resource.setrlimit.assert_called_once()
-
-    def test_capped_by_hard_limit(self) -> None:
-        import sys
-
-        mock_resource = MagicMock()
-        mock_resource.RLIMIT_AS = 0
-        mock_resource.getrlimit.return_value = (1024 * 1024 * 1024, 64 * 1024 * 1024)
-        old = sys.modules.get("resource")
-        sys.modules["resource"] = mock_resource
-        try:
-            _apply_resource_limits(max_memory_mb=512)
-        finally:
-            if old is not None:
-                sys.modules["resource"] = old
-            else:
-                del sys.modules["resource"]
-        args = mock_resource.setrlimit.call_args[0]
-        assert args[1][0] == 64 * 1024 * 1024
-
-    def test_capped_by_soft_limit(self) -> None:
-        import sys
-
-        mock_resource = MagicMock()
-        mock_resource.RLIMIT_AS = 0
-        mock_resource.getrlimit.return_value = (32 * 1024 * 1024, 1024 * 1024 * 1024)
-        old = sys.modules.get("resource")
-        sys.modules["resource"] = mock_resource
-        try:
-            _apply_resource_limits(max_memory_mb=512)
-        finally:
-            if old is not None:
-                sys.modules["resource"] = old
-            else:
-                del sys.modules["resource"]
-        args = mock_resource.setrlimit.call_args[0]
-        assert args[1][0] == 32 * 1024 * 1024
-
-    def test_zero_memory_skips(self) -> None:
-        import sys
-
-        mock_resource = MagicMock()
-        mock_resource.RLIMIT_AS = 0
-        old = sys.modules.get("resource")
-        sys.modules["resource"] = mock_resource
-        try:
-            _apply_resource_limits(max_memory_mb=0)
-        finally:
-            if old is not None:
-                sys.modules["resource"] = old
-            else:
-                del sys.modules["resource"]
+    def test_zero_memory_records_disabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        mock_resource = self._mock_resource(monkeypatch, soft=-1, hard=-1)
+        with _scoped_address_space_cap(max_memory_mb=0) as report:
+            assert report.state == "disabled"
         mock_resource.setrlimit.assert_not_called()
 
-    def test_import_fallback_no_error(self) -> None:
-        """Real (unmocked) ``_apply_resource_limits`` completes without error.
+    def test_infeasible_cap_is_skipped_not_enforced(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        mock_resource = self._mock_resource(monkeypatch, soft=-1, hard=-1)
+        monkeypatch.setattr(
+            sandbox_module, "_current_address_space_bytes", lambda: 700 * 1024 * 1024
+        )
+        with _scoped_address_space_cap(max_memory_mb=512) as report:
+            assert report.state == "skipped-infeasible"
+            assert report.current_mb == 700
+        mock_resource.setrlimit.assert_not_called()
 
-        Runs in a subprocess: setting RLIMIT_AS inside this process would
-        shrink it below its own pandas/pyarrow VSZ and break every later
-        allocation, even when restored.
+    def test_real_rlimit_is_restored(self) -> None:
+        """Real (unmocked) helper restores the host's limits afterwards.
+
+        Runs in a subprocess so the real ``setrlimit`` cannot shrink the
+        pytest process; this is the restore half of the scoped contract that
+        keeps the response send outside the cap.  The cap is derived from the
+        subprocess's own measured ``VmSize`` (plus 256 MB) so it is provably
+        reachable and therefore actually exercises ``setrlimit`` + restore
+        instead of always landing in the skipped-infeasible branch.
         """
         import subprocess
         import sys
 
+        script = (
+            "import resource, sys\n"
+            "from feature_forge.evaluation.sandbox import (\n"
+            "    _current_address_space_bytes,\n"
+            "    _scoped_address_space_cap,\n"
+            ")\n"
+            "current = _current_address_space_bytes()\n"
+            "if current <= 0:\n"
+            "    sys.exit(0)\n"
+            "current_mb = current // (1024 * 1024)\n"
+            "before = resource.getrlimit(resource.RLIMIT_AS)\n"
+            "with _scoped_address_space_cap(current_mb + 256) as report:\n"
+            "    assert report.state == 'enforced', report.state\n"
+            "after = resource.getrlimit(resource.RLIMIT_AS)\n"
+            "assert after == before, (before, after)\n"
+        )
         result = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                "from feature_forge.evaluation.sandbox import _apply_resource_limits; "
-                "assert _apply_resource_limits(max_memory_mb=128) is None",
-            ],
+            [sys.executable, "-c", script],
             capture_output=True,
             text=True,
             timeout=120,

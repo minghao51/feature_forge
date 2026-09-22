@@ -24,6 +24,51 @@ One entry per event, newest first:
 
 ## Entries
 
+### 2026-09-21 — Slice B step 4: scoped sandbox address-space cap
+
+- Replaced entry-time `RLIMIT_AS` (`_apply_resource_limits`, removed) with
+  `_scoped_address_space_cap`: the cap is applied only around generated-code
+  execution (`exec` + `generate_features` + `_to_parquet_safe`) and the
+  pre-exec limits are restored before `output_publish`/`result_send`, so a
+  spawn worker's own import, input-load, and publish mappings never run under
+  it. Only the soft limit is lowered, which makes restoration always legal.
+- Feasibility is measured from the worker's own `VmSize` taken after input
+  load and before Landlock (the strict ruleset denies `/proc/self/status`).
+  States are explicit in the response metadata and never silent: `enforced`,
+  `skipped-infeasible` (requested ≤ current), `disabled`
+  (`max_memory_mb <= 0`), `unavailable` (no `resource` module / unmeasurable
+  usage / `setrlimit` failure), with `sandbox_memory_cap`,
+  `sandbox_memory_cap_requested_mb`, and `sandbox_memory_cap_current_mb`.
+  The parent logs the state (`sandbox_worker_containment`) for every status;
+  a `MemoryError` from generated code is prefixed `memory exhausted`.
+- Closed the `np.ctypeslib.ctypes` → `prlimit64` soft-cap bypass: AST policy
+  rejects `ctypes`/`ctypeslib`/`cdll`/`load_library`/`find_library`/
+  `prlimit64`/`setrlimit` (terminal + path matching, including dotted imports
+  such as `import numpy.ctypeslib`), and the worker runtime patch replaces
+  `np`/`pd` `ctypeslib` (and `ctypes`) plus the live submodule's own
+  `ctypes`, so attribute traversal that hides from the AST (e.g. `str.format`
+  field paths) or a re-import dies before the real ctypes module is
+  reachable.
+- Containment ordering (ADR 0019) is unchanged; `containment_setup` now
+  measures only process-group + environment scrub and the limit application
+  is re-homed into the `code_exec` window (documented in code). Landlock,
+  network, and env-scrub content untouched.
+- Measured on this workstation: spawn workers map ≈3.1 GB post-import, so the
+  512 MB and 2048 MB configurations correctly record `skipped-infeasible`
+  (and still return a small frame); a worker-derived `+256 MB` reachable cap
+  records `enforced` and a ~16 GB allocation surfaces as a typed
+  `CodeExecutionError` with no worker/temp leak.
+- Tests: new `tests/unit/test_sandbox_memory.py` (P1–P4 pins, written before
+  the rework and failing against the entry-time implementation);
+  `test_sandbox.py`'s mocked-rlimit class updated to the scoped contract with
+  a real-restore subprocess pin; `test_sandbox_io_defense.py` gains the AST
+  escape matrix and the `str.format`-traversal runtime pin. Full suite: 1137
+  passed / 9 skipped / 8 xfailed; ruff, format, mypy src, hygiene, docs refs
+  green.
+- AI assistance: implementation and tests by a worker subagent
+  (DeepSeek V4.1 Flash via opencode-go) at the maintainer's request; no
+  dependency or supplied-data changes.
+
 ### 2026-09-21 — Slice B step 2: thread caps clear both CI failure families
 
 - Pushed job-level single-thread BLAS/OpenMP/NumExpr caps (test + hamilton-compat
