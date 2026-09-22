@@ -24,6 +24,28 @@ One entry per event, newest first:
 
 ## Entries
 
+### 2026-09-22 — CI fully green; Slice C/D landed; PR #1 closed as superseded
+
+- Slice C (`f74bfad`): hamilton-compat lane varies Hamilton only (lockfile
+  constraints + `--upgrade-package`, numpy/pandas verified unchanged) and
+  reports both cells independently (`fail-fast: false`).
+- Slice D (`b5af13d`): security split into runtime (`pip-audit -r` over the
+  `--no-default-groups` closure; allowlist-free) and tooling lanes (dev env +
+  all-extras closure, allowlisted); targeted upgrades fixed every advisory
+  (anyio/pillow runtime; jupyter*/tornado/soupsieve/pymdown/setuptools/pip/
+  click/mkdocs-material dev; cryptography/gitpython/mlflow/pyasn1/sqlparse
+  extras-only). Sole documented residual: diskcache CVE-2025-69872 (no upstream
+  fix; owner/expiry/reason/evidence recorded). Note: `main` has no branch
+  protection — registering `security-tooling` as a required check is optional
+  maintainer hardening.
+- Run `35731276754` on `b5af13d`: **all 13 CI jobs green** — first fully green
+  main run since ~2026-07-13. Final local gates: 1147 passed / 9 skipped /
+  8 xfailed; ruff/mypy(src+tests)/hygiene/docs-refs/mkdocs `--strict`/
+  `uv lock --check`/`git diff --check` all pass.
+- Slice E: PR #1 annotated with the salvage map (tag, recovered handoffs,
+  main equivalents, successor commits, rejected scope) and closed as
+  superseded; branch retained pending independent tag/file verification.
+
 ### 2026-09-21 — Slice D: split runtime/tooling dependency audits; security green
 
 - Classified the 53 advisories pip-audit reported in the full dev environment
