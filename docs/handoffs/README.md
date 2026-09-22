@@ -30,6 +30,7 @@ directly into `docs/plan/` (`15_notebook_updates_handoff.md`,
 
 | Handoff | Covers | Status |
 |---------|--------|--------|
+| `2026-09-22-post-ci-recovery-followups.md` | Post-recovery hardening — caafe/llmfe/malmas typed failure records, sandbox sentinel non-stringification + preload comment, limits default alignment, security runbook + branch-protection checklist | Ready for execution |
 | `2026-09-21-pr1-salvage-ci-recovery-closeout.md` | Remote PR #1 audit follow-up — immutable archive, July handoff recovery, CI recovery slices, and superseded-PR closeout | Complete 2026-09-22 |
 | `2026-09-18-plan23-pr6-llm-cache-identity-v2.md` | Plan 23 PR 6 — LLM cache request identity v2 (ADR 0020): `cache_identity()`, `CACHE_KEY_SCHEMA_VERSION = 2`, provenance, flipping the 8 strict xfails | Ready for implementation |
 | `2026-09-18-post-audit-fix-batch.md` | Verified post-audit fix batch across plan-23 PRs 1–5 (leakage fail-closed, typed worker-death errors, provenance/portability pins), slice commits, push | Complete 2026-09-18 |

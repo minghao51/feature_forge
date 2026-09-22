@@ -24,6 +24,17 @@ One entry per event, newest first:
 
 ## Entries
 
+### 2026-09-22 — Follow-up handoff drafted: post-CI-recovery hardening
+
+- Drafted `docs/handoffs/2026-09-22-post-ci-recovery-followups.md` covering the
+  four follow-up tracks documented during the salvage session: (F1) typed
+  failure records for caafe/llmfe/malmas (B5 contract completion), (F2)
+  sandbox escape-surface sentinel hardening + preload-assumption doc
+  (B4 review nits), (F3) `SandboxLimits` 512/2048 default alignment, (F4)
+  dependency-audit runbook + maintainer branch-protection checklist.
+  All anchors re-verified against `9d42f6c`; deferred architecture candidates
+  explicitly out of scope.
+
 ### 2026-09-22 — CI fully green; Slice C/D landed; PR #1 closed as superseded
 
 - Slice C (`f74bfad`): hamilton-compat lane varies Hamilton only (lockfile
