@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -407,7 +407,7 @@ def _make_iterative_method(
         evaluator=mock_evaluator,
     )
     if executor is not None:
-        method.sandbox = executor
+        method.sandbox = cast(Any, executor)
     return method
 
 

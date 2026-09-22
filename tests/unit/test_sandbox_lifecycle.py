@@ -9,6 +9,7 @@ import multiprocessing as mp
 import os
 import tempfile
 import threading
+from typing import cast
 import time
 from pathlib import Path
 from typing import Any, cast
@@ -164,7 +165,7 @@ def test_worker_death_message_includes_abnormal_exit_code() -> None:
     assert process.exitcode == 7
     response_conn = _closed_write_end_conn()
     try:
-        handle = _WorkerHandle(process, response_conn, "", "")
+        handle = _WorkerHandle(cast(mp.Process, process), response_conn, "", "")
         message = sandbox_module.SandboxedExecutor._worker_death_message(handle)
     finally:
         response_conn.close()
