@@ -92,15 +92,22 @@ jobs:
       - run: uv run pytest tests/unit/test_package_contract.py -q
 
   hamilton-compat:
+    # Compatibility lane: must vary Hamilton ONLY. numpy/pandas (and every
+    # other dependency) are pinned from uv.lock via a generated constraints
+    # file, and only the package under test is allowed to move.
     runs-on: ubuntu-24.04
     strategy:
+      # fail-fast is disabled so both Hamilton cells report independently
+      # instead of cancelling one when the other fails (run 35596522314
+      # cancelled the 1.90.0 cell when `<2` failed).
+      fail-fast: false
       matrix:
         hamilton-spec: ["apache-hamilton==1.90.0", "apache-hamilton<2"]
     env:
-      # Same single-thread BLAS/OpenMP caps as `test`. This lane's NumPy/Pandas
-      # upgrade can spawn oversubscribed native thread pools that surface as
-      # `std::system_error: Resource temporarily unavailable` (main run
-      # 35596522314), so it needs the measured 4f1610e runner policy too.
+      # Same single-thread BLAS/OpenMP caps as `test`. Sandbox spawn workers
+      # import numpy/pandas per call; oversubscribed native thread pools surface
+      # as `std::system_error: Resource temporarily unavailable` (main run
+      # 35596522314), so this lane keeps the measured 4f1610e runner policy.
       OPENBLAS_NUM_THREADS: "1"
       OMP_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"
@@ -112,7 +119,40 @@ jobs:
           enable-cache: true
           python-version: "3.12"
       - run: uv sync --group dev
-      - run: uv pip install --upgrade "${{ matrix.hamilton-spec }}"
+      - name: Export locked constraints (all deps except Hamilton)
+        # Pin every dependency to the uv.lock resolution so the lane cannot
+        # drift numpy/pandas majors. apache-hamilton is excluded from the
+        # constraints so the matrix spec alone selects the version under test.
+        # --no-emit-project drops the `-e .` line, which uv rejects as an
+        # unnamed constraint (`uv export --help` flags verified locally).
+        run: >-
+          uv export --format requirements-txt --no-header --no-hashes
+          --no-annotate --no-emit-project --no-emit-package apache-hamilton
+          --all-groups --group dev
+          -o /tmp/constraints.txt
+      - name: Record numpy/pandas versions before Hamilton install
+        run: |
+          uv pip list | grep -E "^(numpy|pandas) " | sort > /tmp/before.txt
+          cat /tmp/before.txt
+      - name: Install Hamilton under test (narrow upgrade)
+        # `--upgrade-package apache-hamilton` replaces the old blanket
+        # `--upgrade`: only Hamilton may move, and the constraints file keeps
+        # numpy/pandas and everything else at their locked versions.
+        run: >-
+          uv pip install
+          --upgrade-package apache-hamilton
+          --constraint /tmp/constraints.txt
+          "${{ matrix.hamilton-spec }}"
+      - name: Verify numpy/pandas unchanged
+        # Fails loudly if the constraint approach silently failed to pin, i.e.
+        # if the lane changed more than Hamilton.
+        run: |
+          uv pip list | grep -E "^(numpy|pandas) " | sort > /tmp/after.txt
+          cat /tmp/after.txt
+          if ! diff -u /tmp/before.txt /tmp/after.txt; then
+            echo "::error::Hamilton install changed numpy/pandas; constraint pinning failed"
+            exit 1
+          fi
       - run: >-
           uv run pytest
           tests/unit/test_dataflow_inventory.py
