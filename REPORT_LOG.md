@@ -24,6 +24,22 @@ One entry per event, newest first:
 
 ## Entries
 
+### 2026-09-21 — Slice B steps 3 and 5: pipe IPC, Malmus typed iteration failures
+
+- Step 3 (`e55c039`): response transport is a one-way `Pipe(duplex=False)` —
+  deterministic EOF→typed worker-death errors (parent holds no write handle),
+  no feeder thread/semaphore allocation under the cap, payloads capped at the
+  source (4096 chars). Single deadline, cleanup, process-group kill, Landlock
+  containment, and phase diagnostics unchanged; zero fd/worker/temp leaks.
+- Step 5: Malmus iteration records guarantee `gains`/`kept` on every recorded
+  path with a typed `error` payload retaining the original exception (the CI
+  `KeyError: 'gains'` at test_malmus.py:297 had masked a `SandboxTimeoutError`).
+  `BaseMethod._record_iteration_failure` is additive; caafe/llmfe carry the
+  same latent legacy shape and remain natural follow-ups.
+- Full local suite 1147 passed / 9 skipped / 8 xfailed; ruff/mypy/hygiene/
+  docs-refs green. Implementation: `opencode-go/deepseek-v4.1-flash`;
+  review: `zai/glm-5.3-flash`.
+
 ### 2026-09-21 — Slice B step 4: scoped sandbox address-space cap
 
 - Replaced entry-time `RLIMIT_AS` (`_apply_resource_limits`, removed) with

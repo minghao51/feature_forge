@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import warnings
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
+from collections.abc import MutableMapping
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, TypedDict, runtime_checkable
 
 import pandas as pd
 
@@ -21,6 +22,56 @@ logger = get_logger(__name__)
 
 class _FeatureExecutionProtocol(Protocol):
     def execute(self, code: str, df: pd.DataFrame) -> pd.DataFrame: ...
+
+
+class IterationErrorPayload(TypedDict):
+    """Root cause attached to a failed iterative-method iteration record.
+
+    ``type`` is the original exception class name and ``message`` its
+    ``str()`` form, so the root cause survives instead of being replaced by a
+    downstream ``KeyError``.
+    """
+
+    type: str
+    message: str
+
+
+class IterationRecord(TypedDict, total=False):
+    """Stable shape of one iterative-method iteration artifact.
+
+    Currently enforced by Malmus (``methods/malmus/method.py``); caafe and
+    llmfe retain the legacy ``error: str`` shape pending migration to
+    ``_record_iteration_failure``.
+
+    ``gains`` and ``kept`` are present on *every* recorded iteration. A failed
+    iteration keeps ``gains`` as ``{}`` (or partial measurable gains) and
+    ``kept`` as ``False``, and adds ``error`` with the original exception
+    ``type``/``message``. Consumers can therefore always read
+    ``record["gains"]`` without a ``KeyError`` and inspect ``record["error"]``
+    for the root cause.
+
+    ``raw_json`` and ``raw_response`` are method-specific LLM payloads;
+    artifact-reference fields (``all_new_features``, ``kept_features``) hold
+    storage handles whose concrete type is owned by the storage backend.
+    """
+
+    iteration: int
+    prompt: str
+    prompt_meta: dict[str, Any]
+    raw_json: Any
+    raw_response: str
+    feature_definitions: list[dict[str, Any]]
+    generated_code: str
+    all_new_features: Any
+    kept_features: Any
+    gains: dict[str, float]
+    kept: bool
+    error: IterationErrorPayload
+
+
+def iteration_error_payload(exc: BaseException) -> IterationErrorPayload:
+    """Return a typed error payload preserving the original exception cause."""
+    return {"type": type(exc).__name__, "message": str(exc)}
 
 
 @runtime_checkable
@@ -132,6 +183,19 @@ class BaseMethod(ArtifactExporter):
                     }
                 )
         return records
+
+    @staticmethod
+    def _record_iteration_failure(record: MutableMapping[str, Any], exc: BaseException) -> None:
+        """Stamp a failed iteration record with the stable contract fields.
+
+        Guarantees ``gains`` (``{}`` unless partial gains were already
+        recorded) and ``kept`` exist, and stores the original exception
+        ``type``/``message`` under ``error``. Callers keep their existing
+        continue/fail-fast behavior; this only makes the failure observable.
+        """
+        record.setdefault("gains", {})
+        record["kept"] = False
+        record["error"] = iteration_error_payload(exc)
 
     def _gain_is_improvement(self, gain: float) -> bool:
         evaluator = getattr(self, "evaluator", None)

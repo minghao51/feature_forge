@@ -212,6 +212,11 @@ class MalmusMethod(BaseMethod):
                 "prompt": prompt,
                 "prompt_meta": prompt_meta,
                 "raw_json": raw_json,
+                # Stable contract: these keys exist on every recorded
+                # iteration, so downstream `record["gains"]` never raises a
+                # secondary KeyError that masks the real failure.
+                "gains": {},
+                "kept": False,
             }
 
             try:
@@ -229,6 +234,11 @@ class MalmusMethod(BaseMethod):
                     baseline_score,
                     cumulative_cols,
                 )
+                # Record measurable gains before code assembly/storage so a
+                # later failure still exposes partial results.
+                iteration_record["gains"] = kept_gains
+                iteration_record["kept"] = len(kept_gains) > 0
+
                 kept_this_round: list[FeatureDefinition] = []
                 for col in kept_gains:
                     matching_def = next(
@@ -251,8 +261,6 @@ class MalmusMethod(BaseMethod):
                     f"malmus_iter_{i}_kept",
                     kept_features,
                 )
-                iteration_record["gains"] = kept_gains
-                iteration_record["kept"] = len(kept_gains) > 0
 
                 if kept_gains:
                     feedback_parts = [
@@ -262,10 +270,14 @@ class MalmusMethod(BaseMethod):
                     feedback_str = "Previous iteration feedback: " + "; ".join(feedback_parts)
 
             except Exception as exc:
-                iteration_record["error"] = str(exc)
-                iteration_record["kept"] = False
+                self._record_iteration_failure(iteration_record, exc)
                 feedback_str = f"Previous iteration failed: {exc}"
-                logger.warning("malmus_iteration_failed", iteration=i, error=str(exc))
+                logger.warning(
+                    "malmus_iteration_failed",
+                    iteration=i,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
 
             iterations.append(iteration_record)
 
