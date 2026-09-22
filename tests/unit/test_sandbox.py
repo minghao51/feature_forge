@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -12,6 +13,7 @@ import pandas as pd
 import pytest
 
 from feature_forge.evaluation.sandbox import (
+    _MAX_RESPONSE_PAYLOAD_CHARS,
     SandboxedExecutor,
     _apply_resource_limits,
     _to_parquet_safe,
@@ -273,6 +275,51 @@ def generate_features(df):
             df = pd.DataFrame({"a": [1, 2, 3]})
             executor.execute(code, df)
             assert mock_unlink.call_count >= 2
+
+    def test_huge_exception_message_is_capped_before_send(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An enormous exception message is truncated at the worker, not in transit.
+
+        Generated code can inflate exception text without bound
+        (``"A" * 10_000_000``).  The worker must cap the payload at
+        :data:`_MAX_RESPONSE_PAYLOAD_CHARS` before ``send`` so the parent's
+        post-poll ``recv`` drains one bounded message; the typed error still
+        arrives within the normal execution budget.
+        """
+        executor = SandboxedExecutor(timeout_seconds=10.0)
+        code = """
+def generate_features(df):
+    raise ValueError("A" * 10_000_000)
+"""
+        received: dict[str, str] = {}
+        original = SandboxedExecutor._consume_response
+
+        def capture(
+            self_: SandboxedExecutor,
+            handle: Any,
+            status: str,
+            payload: str,
+            worker_metadata: dict[str, Any],
+            deadline: float,
+            **kwargs: Any,
+        ) -> pd.DataFrame:
+            received["payload"] = payload
+            return original(self_, handle, status, payload, worker_metadata, deadline, **kwargs)
+
+        monkeypatch.setattr(SandboxedExecutor, "_consume_response", capture)
+
+        started = time.monotonic()
+        with pytest.raises(CodeExecutionError, match="Feature generation execution failed"):
+            executor.execute(code, pd.DataFrame({"a": [1.0]}))
+        elapsed = time.monotonic() - started
+
+        # The wire payload is capped at the source; the parent then truncates
+        # it to 300 chars when building the typed message.  Allow for the
+        # error prefix on top of the cap.
+        prefix = "Feature generation execution failed: "
+        assert len(received["payload"]) <= _MAX_RESPONSE_PAYLOAD_CHARS + len(prefix)
+        assert elapsed < 10.0
 
 
 class TestParseAndValidate:

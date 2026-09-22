@@ -149,29 +149,33 @@ def test_worker_containment_failure_reports_and_maps_to_typed_error(
     input_path = tmp_path / "input.parquet"
     output_path = tmp_path / "output.parquet"
     pd.DataFrame({"x": [1.0]}).to_parquet(input_path)
-    response_queue: mp.Queue[tuple[str, str, dict[str, object]]] = mp.Queue()
+    # One-way pipe matching the production transport: the worker holds the
+    # write end only and the parent reads from the other end.
+    ctx = mp.get_context("spawn")
+    response_conn, worker_conn = ctx.Pipe(duplex=False)
     try:
         sandbox_module._sandbox_worker_main(
             _CODE,
             str(input_path),
             str(output_path),
             0,
-            response_queue,
+            worker_conn,
             profile=SandboxProfile.STRICT.value,
         )
-        status, payload, containment = response_queue.get(timeout=5)
+        assert response_conn.poll(5)
+        status, payload, containment = response_conn.recv()
         assert status == "containment_unavailable"
         assert payload == "boom"
 
         # The parent maps the worker report onto the typed error hierarchy.
         executor = SandboxedExecutor(profile=SandboxProfile.DEGRADED_DEVELOPMENT)
         handle = _WorkerHandle(
-            cast("mp.Process", None), response_queue, str(input_path), str(output_path)
+            cast("mp.Process", None), response_conn, str(input_path), str(output_path)
         )
         with pytest.raises(SandboxContainmentError, match="boom"):
             executor._consume_response(
                 handle, status, payload, containment, deadline=time.monotonic() + 5
             )
     finally:
-        response_queue.close()
-        response_queue.cancel_join_thread()
+        worker_conn.close()
+        response_conn.close()

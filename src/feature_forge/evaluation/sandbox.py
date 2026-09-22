@@ -18,7 +18,6 @@ import logging
 import multiprocessing as mp
 import os
 import platform
-import queue
 import signal
 import socket
 import struct
@@ -51,8 +50,8 @@ def _worker_log_event(level: int, event: str, **fields: Any) -> None:
 
     structlog's processor chain lazily imports OpenTelemetry on the first
     event; inside the RLIMIT_AS-capped worker that import can exhaust the
-    remaining address space so the response queue's feeder thread fails to
-    start (``RuntimeError: can't start new thread``, observed while
+    remaining address space and fail before the worker can put its response
+    on the pipe (``RuntimeError: can't start new thread``, observed while
     qualifying plan 23 PR 5 on Python 3.13 with single-thread BLAS/OpenMP
     env). The worker therefore never emits structlog events; every
     worker-reported fact travels back in the response message and the
@@ -82,6 +81,16 @@ Diagnostic durations are omitted past this bound so a mismatched clock or a
 wedged host can never produce a misleading unbounded field.
 """
 
+_MAX_RESPONSE_PAYLOAD_CHARS = 4096
+"""Hard cap on the response payload the worker puts on the wire.
+
+Mirrors the parent-side ``payload[:300]`` truncation convention at the source:
+generated code can inflate exception text arbitrarily (e.g.
+``ValueError("A" * 10_000_000)``), and the parent's post-poll ``recv`` has no
+deadline of its own.  Capping here bounds that drain window to one capped
+message, so the authoritative deadline plus a single capped transfer is the
+total worst case.
+"""
 _PHASE_NOT_STARTED = -1
 """Worker phase marker value before the worker's first statement has run."""
 
@@ -619,7 +628,13 @@ class _WorkerHandle:
     """Parent-owned resources for one sandbox worker."""
 
     process: mp.Process
-    response_queue: Any
+    response_conn: Any
+    """Parent-held read end of the one-way response pipe.
+
+    The parent never keeps a write handle: it closes its copy immediately
+    after ``Process.start()`` so that worker death (or an explicit worker-side
+    close) surfaces as a real EOF on this end, distinguishable from a stall.
+    """
     input_path: str
     output_path: str
     artifact_path: str = ""
@@ -627,10 +642,10 @@ class _WorkerHandle:
 
 
 _ACTIVE_HANDLES: set[int] = set()
-"""Live parent-owned worker handles (process + queue + temp paths).
+"""Live parent-owned worker handles (process + response pipe + temp paths).
 
 Cleanup removes its handle id; leak tests assert this registry is empty so
-queue/process cleanup is observably complete, not merely non-raising.
+process/pipe/temp cleanup is observably complete, not merely non-raising.
 """
 
 
@@ -850,9 +865,9 @@ class SandboxedExecutor:
         """Execute code without delegating process ownership to an executor thread.
 
         The worker is started synchronously on the event-loop thread.  Once it
-        has started, queue reads are non-blocking and yield to the loop so a
-        caller can cancel this coroutine and trigger the same cleanup path as a
-        timeout.
+        has started, response-pipe reads are non-blocking and yield to the loop
+        so a caller can cancel this coroutine and trigger the same cleanup path
+        as a timeout.
         """
         execute_t0 = time.perf_counter()
         diagnostics = _ExecutionDiagnostics()
@@ -1009,7 +1024,7 @@ class SandboxedExecutor:
                 diagnostics.mark("join")
             return result
         except asyncio.CancelledError:
-            # Cleanup is synchronous but has only bounded process/queue/file
+            # Cleanup is synchronous but has only bounded process/pipe/file
             # operations; importantly, no executor thread survives cancellation.
             self._cleanup_worker(handle, deadline, force=True)
             cleaned = True
@@ -1031,7 +1046,16 @@ class SandboxedExecutor:
     ) -> _WorkerHandle:
         self._ensure_strict_available()
         ctx = mp.get_context("spawn")
-        response_queue: Any = ctx.Queue(maxsize=1)
+        # One-way pipe, one message per execution.  ``duplex=False`` returns
+        # ``(read_end, write_end)``: the parent keeps only the read end and
+        # hands the write end to the child.  There is no background writer
+        # thread and no semaphore allocation inside the RLIMIT_AS-capped
+        # worker, and a worker that dies without sending closes the last write
+        # handle so the parent observes a real EOF instead of a stall (see
+        # ``_wait_for_response``).
+        response_conn: Any
+        worker_conn: Any
+        response_conn, worker_conn = ctx.Pipe(duplex=False)
         input_path = ""
         output_path = ""
         process: Any = None
@@ -1076,7 +1100,7 @@ class SandboxedExecutor:
                     input_path,
                     output_path,
                     self.limits.max_memory_mb,
-                    response_queue,
+                    worker_conn,
                     source,
                     agent_name,
                     self.profile.value,
@@ -1088,12 +1112,17 @@ class SandboxedExecutor:
             # Direct call is intentional: async ownership starts here, on the
             # caller's event-loop/main thread.
             process.start()
+            # The parent must never retain a write handle: closing our copy
+            # here leaves the child as the sole writer, so worker death (or
+            # the worker's own explicit close) yields EOF on ``response_conn``.
+            self._close_response_conn(worker_conn)
+            worker_conn = None
             if diagnostics is not None:
                 diagnostics.mark("spawn")
             self._assert_deadline(deadline, diagnostics)
             handle = _WorkerHandle(
                 cast("mp.Process", process),
-                response_queue,
+                response_conn,
                 input_path,
                 output_path,
                 worker_progress=progress,
@@ -1107,7 +1136,10 @@ class SandboxedExecutor:
                     process.join(timeout=0.5)
                 except (AssertionError, OSError, ValueError):
                     pass
-            self._close_response_queue(response_queue)
+            # Release both ends on every failure path.  ``worker_conn`` is
+            # already None when the close above succeeded; ``None`` is a no-op.
+            self._close_response_conn(response_conn)
+            self._close_response_conn(worker_conn)
             self._remove_paths(input_path, output_path)
             raise
 
@@ -1191,17 +1223,21 @@ class SandboxedExecutor:
         if remaining <= 0:
             raise self._timeout_error(diagnostics)
         try:
-            return cast(
-                "tuple[str, str, dict[str, Any]]", handle.response_queue.get(timeout=remaining)
-            )
-        except queue.Empty as exc:
-            raise self._timeout_error(diagnostics) from exc
+            # ``poll`` is the only wait: it is bounded by the single
+            # authoritative deadline.  It returns True both when a message is
+            # available *and* when the pipe is at EOF (all write handles
+            # closed), so a dead worker is detected immediately rather than
+            # racing the deadline.
+            if not handle.response_conn.poll(timeout=remaining):
+                raise self._timeout_error(diagnostics)
+            return cast("tuple[str, str, dict[str, Any]]", handle.response_conn.recv())
         except EOFError as exc:
-            # A worker killed before posting (e.g. the RLIMIT_AS feeder-thread
-            # failure mode in _worker_log_event) closes the queue write-end
-            # with no item; surface it through the typed hierarchy instead of
-            # a raw EOFError that would bypass callers' CodeExecutionError
-            # handling.  An abnormal exit code is included when observable.
+            # The worker died (or closed its write end) before posting.  This
+            # is now deterministic: poll() reported readability, recv() found
+            # no message, so the read end is at EOF.  Surface it through the
+            # typed hierarchy instead of a raw EOFError that would bypass
+            # callers' CodeExecutionError handling.  An abnormal exit code is
+            # included when observable.
             raise CodeExecutionError(self._worker_death_message(handle)) from exc
 
     async def _poll_response(
@@ -1213,14 +1249,17 @@ class SandboxedExecutor:
     ) -> tuple[str, str, dict[str, Any]]:
         while True:
             try:
-                return cast("tuple[str, str, dict[str, Any]]", handle.response_queue.get_nowait())
-            except queue.Empty:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise self._timeout_error(diagnostics) from None
-                await asyncio.sleep(min(0.01, remaining))
+                if handle.response_conn.poll(0):
+                    return cast("tuple[str, str, dict[str, Any]]", handle.response_conn.recv())
             except EOFError as exc:
+                # Same deterministic EOF-vs-stall distinction as the sync
+                # path: non-blocking poll() saw readability (EOF included),
+                # recv() found no message.
                 raise CodeExecutionError(self._worker_death_message(handle)) from exc
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise self._timeout_error(diagnostics) from None
+            await asyncio.sleep(min(0.01, remaining))
 
     def _log_worker_phases(
         self,
@@ -1370,7 +1409,7 @@ class SandboxedExecutor:
                 process.close()
         except (AssertionError, OSError, ValueError):
             pass
-        self._close_response_queue(handle.response_queue)
+        self._close_response_conn(handle.response_conn)
         self._remove_paths(handle.artifact_path, handle.output_path, handle.input_path)
         _ACTIVE_HANDLES.discard(id(handle))
 
@@ -1401,14 +1440,18 @@ class SandboxedExecutor:
             pass
 
     @staticmethod
-    def _close_response_queue(response_queue: Any) -> None:
+    def _close_response_conn(response_conn: Any) -> None:
+        """Close one end of the response pipe.  Idempotent; never raises.
+
+        ``None`` is accepted so the failure path can close both ends
+        unconditionally, and a double close (e.g. the parent's write end after
+        a successful ``Process.start()``) is a no-op.
+        """
+        if response_conn is None:
+            return
         try:
-            response_queue.cancel_join_thread()
-        except (AttributeError, OSError):
-            pass
-        try:
-            response_queue.close()
-        except (AttributeError, OSError):
+            response_conn.close()
+        except (AttributeError, OSError, ValueError):
             pass
 
     @staticmethod
@@ -1560,9 +1603,9 @@ def _scrub_worker_environment() -> None:
     allocation cap variables: clearing the thread caps makes the BLAS/OpenMP
     runtimes default to one pool per core, which alone reserves an extra
     ~0.5-1.3 GB of address space and can push the RLIMIT_AS-capped worker
-    against its limit so the response queue's feeder thread cannot start
-    (found during plan 23 PR 5 qualification on Python 3.13 under
-    single-thread BLAS/OpenMP env). Provider credentials and every other
+    against its limit so it cannot start the thread it needs before sending
+    its response (found during plan 23 PR 5 qualification on Python 3.13
+    under single-thread BLAS/OpenMP env). Provider credentials and every other
     inherited value (HOME, PATH, TMPDIR included) never reach generated code;
     this function deliberately never reads or logs a value.
     """
@@ -1618,7 +1661,48 @@ def _sandbox_worker_main(
     input_parquet_path: str,
     output_parquet_path: str,
     max_memory_mb: int,
-    response_queue: mp.Queue[tuple[str, str, dict[str, Any]]],
+    response_conn: Any,
+    source: str = "unknown",
+    agent_name: str = "unknown",
+    profile: str = SandboxProfile.STRICT.value,
+    progress: _WorkerProgress | None = None,
+    parent_start: float = 0.0,
+) -> None:
+    """Worker entry point that owns the response pipe's write end.
+
+    The parent holds only the read end, so this end is closed before the
+    worker exits on *every* path (success, typed worker error, unexpected
+    exception).  That explicit close, rather than process teardown, is what
+    makes worker death a deterministic EOF for the parent instead of a
+    deadline stall.  Closing after ``send`` never discards the message: the
+    bytes are already in the pipe buffer and remain readable until drained.
+    """
+    try:
+        _run_sandbox_worker(
+            code,
+            input_parquet_path,
+            output_parquet_path,
+            max_memory_mb,
+            response_conn,
+            source=source,
+            agent_name=agent_name,
+            profile=profile,
+            progress=progress,
+            parent_start=parent_start,
+        )
+    finally:
+        try:
+            response_conn.close()
+        except (AttributeError, OSError, ValueError):
+            pass
+
+
+def _run_sandbox_worker(
+    code: str,
+    input_parquet_path: str,
+    output_parquet_path: str,
+    max_memory_mb: int,
+    response_conn: Any,
     source: str = "unknown",
     agent_name: str = "unknown",
     profile: str = SandboxProfile.STRICT.value,
@@ -1662,10 +1746,25 @@ def _sandbox_worker_main(
         return metadata
 
     def _respond(status: str, payload: str, containment: dict[str, Any] | None = None) -> None:
-        """Publish the single response, marking the result-send phase first."""
+        """Publish the single response, timing the actual pipe send.
+
+        ``Connection.send`` is synchronous, so the ``result_send`` marker
+        brackets the real write.  The parent derives
+        ``phase_worker_result_send_ms`` from that marker once it has received
+        the response (see ``_log_worker_phases``); the metadata itself cannot
+        carry it because it is computed before the send that transports it.
+
+        The payload is capped at :data:`_MAX_RESPONSE_PAYLOAD_CHARS` before the
+        send: generated code can inflate exception text without bound, and the
+        parent's post-poll ``recv`` is not separately deadline-bounded.
+        Capping at the source bounds that drain window to one capped message,
+        so the authoritative deadline plus a single capped transfer is the
+        total worst case.
+        """
         if progress is not None:
             progress.enter("result_send")
-        response_queue.put((status, payload, _response_metadata(containment)))
+        payload = payload[:_MAX_RESPONSE_PAYLOAD_CHARS]
+        response_conn.send((status, payload, _response_metadata(containment)))
         if progress is not None:
             progress.enter("done")
 

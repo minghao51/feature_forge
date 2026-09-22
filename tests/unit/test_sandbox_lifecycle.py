@@ -6,11 +6,12 @@ import asyncio
 import ctypes
 import glob
 import multiprocessing as mp
+import os
 import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pandas as pd
 import pytest
@@ -74,14 +75,23 @@ def _worker_dies_without_posting(*_args: object, **_kwargs: object) -> None:
     return None
 
 
-class _ClosedWriteEndQueue:
-    """Queue double for a worker whose write-end closed with no item posted."""
+def _worker_exits_without_posting(*_args: object, **_kwargs: object) -> None:
+    """Spawn-picklable worker target that dies immediately with a known code."""
+    os._exit(7)
 
-    def get(self, timeout: float | None = None) -> object:
-        raise EOFError
 
-    def get_nowait(self) -> object:
-        raise EOFError
+def _closed_write_end_conn() -> Any:
+    """Read end of a one-way pipe whose write end is already closed (EOF).
+
+    Pipe-appropriate replacement for the former queue double: the real worker
+    death signal is now an EOF on the parent's read end, so the double is a
+    genuine ``Connection`` (``poll`` reports readability, ``recv`` raises
+    ``EOFError``) rather than a hand-rolled stub.
+    """
+    ctx = mp.get_context("spawn")
+    read_end, write_end = ctx.Pipe(duplex=False)
+    write_end.close()
+    return read_end
 
 
 def test_worker_death_without_response_surfaces_typed_error(
@@ -92,13 +102,15 @@ def test_worker_death_without_response_surfaces_typed_error(
     End-to-end guard for the RLIMIT_AS feeder-thread failure mode (see
     _worker_log_event): the child exits without posting, so ``execute()``
     must report through the sandbox error hierarchy the pipeline already
-    handles — never a raw EOFError that bypasses it. Whether the queue read
+    handles — never a raw EOFError that bypasses it. Whether the read
     observes the closed write-end as EOFError (→ CodeExecutionError) or
-    races the deadline (→ SandboxTimeoutError) is host timing; both are
-    typed and both satisfy the contract. (A spawn child that fails to import
-    this test module also lands in the timeout branch — still typed; the
-    deterministic closed-write-end pin below covers the exact EOF scenario
-    on both read paths.)
+    races the deadline (→ SandboxTimeoutError) is host timing under the short
+    0.25s timeout here; both are typed and both satisfy the contract. (A
+    spawn child that fails to import this test module also lands in the
+    timeout branch — still typed; the deterministic closed-write-end pin
+    below covers the exact EOF scenario on both read paths, and
+    ``test_worker_death_yields_eof_not_timeout`` pins it end-to-end without
+    the boot race.)
     """
     monkeypatch.setattr(sandbox_module, "_sandbox_worker_main", _worker_dies_without_posting)
     before_files = _sandbox_temp_files()
@@ -111,22 +123,76 @@ def test_worker_death_without_response_surfaces_typed_error(
     assert active_worker_handle_count() == before_handles
 
 
+def test_worker_death_yields_eof_not_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A real worker that exits without sending is typed worker death, not a stall.
+
+    With the one-way pipe the parent holds no write handle, so the child's
+    exit closes the last writer and the parent's ``poll`` reports readability
+    immediately: EOF maps to the typed worker-death error deterministically
+    instead of waiting out the deadline and reporting a stall.  The generous
+    deadline removes the spawn-boot race, so the EOF branch is the only
+    reachable one.
+    """
+    monkeypatch.setattr(sandbox_module, "_sandbox_worker_main", _worker_dies_without_posting)
+    before_files = _sandbox_temp_files()
+    before_children = _child_pids()
+    before_handles = active_worker_handle_count()
+    started = time.monotonic()
+    with pytest.raises(CodeExecutionError, match="worker died before reporting a result"):
+        _executor(60.0).execute(_SUCCESS_CODE, pd.DataFrame({"x": [1.0]}))
+    # EOF arrived from worker death; the 60s deadline was never consumed.
+    assert time.monotonic() - started < 30.0
+    _assert_no_temp_leak(before_files)
+    assert _child_pids() <= before_children
+    assert active_worker_handle_count() == before_handles
+
+
+def test_worker_death_message_includes_abnormal_exit_code() -> None:
+    """The typed worker-death message carries an observable abnormal exit code.
+
+    Pins requirement 4's exit-code half deterministically: the process is
+    joined before the message is built, so ``_worker_death_message`` (which
+    the EOF branch feeds) reports the reaped code rather than racing process
+    teardown.
+    """
+    ctx = mp.get_context("spawn")
+    process = ctx.Process(target=_worker_exits_without_posting, daemon=True)
+    process.start()
+    process.join(timeout=30)
+    assert process.exitcode == 7
+    response_conn = _closed_write_end_conn()
+    try:
+        handle = _WorkerHandle(process, response_conn, "", "")
+        message = sandbox_module.SandboxedExecutor._worker_death_message(handle)
+    finally:
+        response_conn.close()
+        process.close()
+    assert message == "sandbox worker died before reporting a result (worker exit_code=7)"
+
+
 def test_closed_write_end_response_surfaces_code_execution_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The EOF branch maps to CodeExecutionError on both queue-read paths.
+    """The EOF branch maps to CodeExecutionError on both pipe-read paths.
 
-    Deterministic pin for the exact fix-batch scenario: the queue write-end
-    closes with no item (worker killed mid-flight), so the read raises
-    EOFError and must surface as CodeExecutionError, not the raw error.
+    Deterministic pin for the exact scenario: the pipe write-end closes with
+    no item (worker killed mid-flight), so ``poll`` reports readability and
+    ``recv`` raises EOFError, which must surface as CodeExecutionError, not
+    the raw error.
     """
     monkeypatch.setattr(sandbox_module, "_sandbox_worker_main", _worker_dies_without_posting)
     executor = _executor(5.0)
-    handle = _WorkerHandle(cast("mp.Process", None), _ClosedWriteEndQueue(), "", "")
-    with pytest.raises(CodeExecutionError, match="worker died before reporting a result"):
-        executor._wait_for_response(handle, time.monotonic() + 5)
-    with pytest.raises(CodeExecutionError, match="worker died before reporting a result"):
-        asyncio.run(executor._poll_response(handle, time.monotonic() + 5))
+    response_conn = _closed_write_end_conn()
+    try:
+        handle = _WorkerHandle(cast("mp.Process", None), response_conn, "", "")
+        with pytest.raises(CodeExecutionError, match="worker died before reporting a result"):
+            executor._wait_for_response(handle, time.monotonic() + 5)
+        with pytest.raises(CodeExecutionError, match="worker died before reporting a result"):
+            asyncio.run(executor._poll_response(handle, time.monotonic() + 5))
+    finally:
+        response_conn.close()
 
 
 def test_sync_timeout_is_bounded_and_clean() -> None:
@@ -259,6 +325,29 @@ class TestBoundedPhaseDiagnostics:
         error = _executor(5.0)._timeout_error(diagnostics)
         assert isinstance(error, SandboxTimeoutError)
         assert "last completed parent phase=spawn" in str(error)
+
+    def test_pipe_send_and_response_wait_phases_are_recorded(self) -> None:
+        """The pipe swap keeps step-1 timing: real send + poll/recv window.
+
+        ``phase_parent_response_wait_ms`` brackets the deadline-aware
+        poll/recv window.  ``phase_worker_result_send_ms`` is derived from the
+        worker's shared marker because it cannot travel inside the very
+        message it measures; on a host where the marker is unavailable that
+        field degrades away by design, so it is asserted only when present.
+        """
+        executor = _executor(5.0)
+        diagnostics = sandbox_module._ExecutionDiagnostics()
+        result = executor._execute_in_worker(
+            _SUCCESS_CODE,
+            pd.DataFrame({"x": [1.0]}),
+            deadline=time.monotonic() + 5.0,
+            diagnostics=diagnostics,
+        )
+        assert result["double"].tolist() == [2.0]
+        assert "phase_parent_response_wait_ms" in diagnostics.phases_ms
+        if diagnostics.worker is not None:
+            assert "phase_worker_result_send_ms" in diagnostics.reported_phases_ms
+            assert diagnostics.reported_phases_ms["phase_worker_result_send_ms"] >= 0.0
 
     def test_timeout_message_reports_phase_and_worker_progress(self) -> None:
         with pytest.raises(SandboxTimeoutError) as excinfo:
