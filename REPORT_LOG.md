@@ -24,6 +24,59 @@ One entry per event, newest first:
 
 ## Entries
 
+### 2026-09-21 — Slice D: split runtime/tooling dependency audits; security green
+
+- Classified the 53 advisories pip-audit reported in the full dev environment
+  into the runtime closure vs tooling (provenance via `uv tree --invert` and
+  `uv export --no-default-groups`):
+  - Runtime closure: `anyio` (openai/anthropic→httpx→anyio), `pillow`
+    (matplotlib→pillow).
+  - Tooling only: `jupyterlab`/`jupyter-server`/`tornado`/`soupsieve` (dev
+    notebook/jupyter group), `pymdown-extensions`/`mkdocs-material` (dev docs
+    tooling: marimo/mkdocs-material/mkdocstrings), `setuptools` (dev jupyterlab;
+    also torch via the optional caafe extra), `pip` (pip-audit→pip-api),
+    `click` (dev mkdocs/marimo; also optional litellm/mlflow extras), and
+    `diskcache` (dev group + optional observability extra — NOT in the base
+    runtime closure).
+- Upgraded deliberately with targeted `uv lock --upgrade-package` (no blanket
+  upgrade): `anyio` 4.13.0→4.15.1 and `pillow` 12.2.0→12.3.0 (runtime);
+  `jupyter-server` 2.20.0→2.21.1, `jupyterlab` 4.5.9→4.5.11,
+  `mkdocs-material` 9.7.6→9.7.7, `pip` 26.1.2→26.2.1,
+  `soupsieve` 2.8.4→2.9.2, `tornado` 6.5.7→6.5.10 (tooling). Three advisories
+  were blocked by exact/upper pins from optional or notebook dependencies, so
+  their constrainers were upgraded to unblock them: `litellm`
+  1.83.14→1.102.0 (click 8.1.8→8.5.0), `marimo` 0.23.14→0.24.2
+  (pymdown-extensions 10.21.3→11.0.2), `torch` 2.11.0→2.14.0
+  (setuptools 81/82→84.0.0). Transitives moved with litellm (aiohttp,
+  boto3/botocore/s3transfer/jmespath, typing-extensions 4.15.0→4.16.0) and
+  torch (cuda-toolkit, nvidia-*, triton); `uv lock --check` passes.
+- Split `.github/workflows/ci.yml` into two blocking jobs: `security` (runtime
+  lane) exports the closure with `uv export ... --no-default-groups` and runs
+  `pip-audit -r` with NO allowlist; `security-tooling` audits the full dev
+  environment through `scripts/run_pip_audit.py`. `--no-default-groups` is
+  required because `dev` is uv's default group, so a bare `uv export` silently
+  includes it.
+- Only `diskcache` (PYSEC-2026-2447 / GHSA-w8v5-vhqr-4h9v / CVE-2025-69872,
+  no fix published) remains. `security/pip_audit_allowlist.txt` now records ID,
+  package, owner, expiry/removal trigger, reason, and an honest exposure
+  statement for it, and states that runtime-lane advisories are never allowed
+  there.
+- Post-review, the extras surface is audited too: `scripts/run_pip_audit.py`
+  gained a `--requirements <file>` mode and `security-tooling` now audits the
+  `uv export --all-extras` closure. That export surfaced five extras-only
+  advisories the dev environment never sees, fixed with targeted upgrades —
+  `cryptography` 46.0.7→50.0.1, `gitpython` 3.1.50→3.1.62, `mlflow`
+  3.11.1→3.16.1, `pyasn1` 0.6.3→0.6.4, `sqlparse` 0.5.5→0.6.0 — leaving
+  `diskcache` as the only allowlisted hit.
+- Gates: full suite 1147 passed / 9 skipped / 8 xfailed; ruff, format,
+  mypy src, mypy tests, hygiene, docs-refs, `mkdocs build --strict` (validates
+  the pymdown-extensions 10→11 major), `uv lock --check`, and
+  `git diff --check` all green. Both audit lanes report zero un-allowlisted
+  advisories.
+- AI assistance: implementation, lockfile upgrades, and verification by a
+  worker subagent (`opencode-go/deepseek-v4.1-flash`) at the maintainer's
+  request; no supplied-data changes.
+
 ### 2026-09-21 — Slice B steps 3 and 5: pipe IPC, Malmus typed iteration failures
 
 - Step 3 (`e55c039`): response transport is a one-way `Pipe(duplex=False)` —

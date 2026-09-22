@@ -1,5 +1,18 @@
-# Allowed vulnerability IDs for pip-audit.
-# Format: "<ID> <optional reason>"
+# pip-audit allowlist for the TOOLING lane (non-blanket policy).
 #
-# Keep this list minimal and temporary; remove entries once fixed upstream.
-CVE-2025-69872 temporary allowlist until an upstream fixed diskcache release is available
+# One entry per line. The FIRST whitespace-token MUST be the vulnerability ID;
+# pip-audit matches it against the advisory ID and every alias
+# (`--ignore-vuln`). The remainder of the line is pipe-separated `key=value`
+# metadata. Every entry MUST define all four keys:
+#
+#   owner=<accountable role>          who removes the entry
+#   expiry=<removal trigger>          when the entry must be removed
+#   reason=<why it cannot be fixed>   why no fixed version is pinned today
+#   evidence=<exposure statement>     why the vulnerable path is not reached,
+#                                     or the honest statement of residual risk
+#
+# Keep the list minimal and temporary. An entry missing a key, or whose
+# expiry/removal trigger has fired, is a policy violation. The runtime
+# (`security`) lane audits the base install closure WITHOUT this file: a
+# runtime advisory must be fixed, not inherited from the tooling lane.
+CVE-2025-69872 diskcache | owner=maintainer | expiry=remove when a diskcache release >5.6.3 ships without pickle-by-default (upstream GHSA-w8v5-vhqr-4h9v) | reason=pip-audit reports PYSEC-2026-2447 (aliases GHSA-w8v5-vhqr-4h9v, CVE-2025-69872) with an empty fix_versions list; no published diskcache release contains a fix | evidence=diskcache is absent from the base runtime closure (verified with `uv export --no-default-groups`), so it is never shipped by the runtime lane or a core wheel; it reaches the dev environment only via the dev group and the optional observability/all extras, so only the tooling lane sees it. Where installed it backs the local LLM response cache (src/feature_forge/llm/cache.py, SHA-256-keyed SQLite under memory_files/llm_cache). The pickle-deserialization path is reached only when this process reads cache entries it wrote itself; exploitation requires an attacker who already has local write access to the cache directory, and no cache is shipped in wheels or shared over the network.

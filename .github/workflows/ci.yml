@@ -163,6 +163,35 @@ jobs:
           -q
 
   security:
+    # RUNTIME lane (blocking): audits only the base install closure — project
+    # dependencies plus their transitives, no dependency groups (dev) and no
+    # optional extras. `uv export` includes the default `dev` group unless
+    # `--no-default-groups` is passed (`dev` is uv's default group), so the
+    # flag is required to keep this lane runtime-only. After the 2026-09-21
+    # upgrade (anyio 4.15.1, pillow 12.3.0) this lane has zero advisories and
+    # therefore deliberately does NOT consume security/pip_audit_allowlist.txt:
+    # a runtime advisory must be fixed or get its own reviewed policy, never
+    # inherited from the tooling lane.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --group dev
+      - name: Export the runtime closure (no dependency groups, no optional extras)
+        run: >-
+          uv export --format requirements-txt --no-header --no-hashes
+          --no-annotate --no-emit-project --no-default-groups
+          -o /tmp/runtime-requirements.txt
+      - name: Audit the runtime closure
+        run: uv run python -m pip_audit -r /tmp/runtime-requirements.txt
+
+  security-tooling:
+    # TOOLING lane (blocking): audits the full dev environment — tests, docs,
+    # notebooks, and pip-audit itself — through the allowlisted runner. Kept as
+    # a separate job so a runtime regression and a tooling regression report
+    # independently (separate jobs share no matrix, so fail-fast does not apply).
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -171,6 +200,16 @@ jobs:
           enable-cache: true
       - run: uv sync --group dev
       - run: uv run python scripts/run_pip_audit.py
+      - name: Export the extras closure
+        run: >-
+          uv export --format requirements-txt --no-header --no-hashes
+          --no-annotate --no-emit-project --no-default-groups --all-extras
+          -o /tmp/extras-requirements.txt
+      - name: Audit the extras closure
+        # Closes the extras surface (litellm/torch/boto3 previously unaudited).
+        run: >-
+          uv run python scripts/run_pip_audit.py
+          --requirements /tmp/extras-requirements.txt
 
   secrets:
     runs-on: ubuntu-24.04
