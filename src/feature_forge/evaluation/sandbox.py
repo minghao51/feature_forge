@@ -810,6 +810,9 @@ class SandboxedExecutor:
         "prlimit64",
         "setrlimit",
     }
+    # Deliberately redundant, auditable policy mirror: terminal-name matching
+    # in ``_blocked_escape_reason`` already covers every one of these dotted
+    # forms atomically (mirroring ``BLOCKED_IO_PATHS``); do not remove the set.
     BLOCKED_ESCAPE_PATHS: ClassVar[set[str]] = set()
     for _module in ("np", "numpy", "pd", "pandas"):
         for _name in BLOCKED_ESCAPE_ATTRS:
@@ -1692,6 +1695,46 @@ def _scrub_worker_environment() -> None:
             del os.environ[name]
 
 
+_BLOCKED_ATTRIBUTE_TEXT = "blocked-by-sandbox-policy"
+
+
+def _make_blocked_attribute(blocked: Callable[..., Any]) -> Any:
+    """Build a non-stringifying stub for a runtime-blocked library attribute.
+
+    A plain blocked *function* -- or any sentinel storing it on the instance
+    -- still exposes explicit attribute paths such as ``__globals__``,
+    ``__dict__``, ``_block.__globals__``, ``__init__.__globals__``, or
+    ``__class__.__dict__``, so generated code could stringify worker module
+    globals into error text with ``"{0.ctypeslib.__globals__}".format(np)``
+    and friends.  The returned sentinel closes every *explicit* attribute
+    path: instance-level ``__getattribute__`` raises ``AttributeError``
+    carrying only the static benign message for every name, and
+    ``__slots__ = ()`` leaves no instance ``__dict__`` while the blocked
+    callable is captured in a closure, never as an attribute.  Implicit
+    protocol lookups resolve on the type and stay functional: calling the
+    sentinel forwards to ``blocked`` (the same typed ``PermissionError``
+    path with its ``sandbox_runtime_blocked`` log event), and
+    ``str``/``repr``/``format`` return the same static benign text.
+    """
+
+    class _BlockedAttribute:
+        __slots__ = ()
+
+        def __getattribute__(self, name: str) -> Any:
+            raise AttributeError(_BLOCKED_ATTRIBUTE_TEXT)
+
+        def __call__(self, *args: Any, **kwargs: Any) -> Any:
+            return blocked(*args, **kwargs)
+
+        def __repr__(self) -> str:
+            return _BLOCKED_ATTRIBUTE_TEXT
+
+        def __str__(self) -> str:
+            return _BLOCKED_ATTRIBUTE_TEXT
+
+    return _BlockedAttribute()
+
+
 def _install_library_io_guards(blocked: Callable[..., Any]) -> None:
     """Install best-effort I/O guards inside the worker process.
 
@@ -1699,12 +1742,19 @@ def _install_library_io_guards(blocked: Callable[..., Any]) -> None:
     patches are defense in depth only: they do not provide filesystem
     isolation and must not be described as such.  Some NumPy extension types
     cannot be monkeypatched; the static policy still covers their syntax.
+
+    Every patched attribute is replaced with a :class:`_BlockedAttribute`
+    sentinel rather than the raw ``blocked`` callable, for both the IO and
+    escape-surface patches.  The callable path is unchanged: invoking a patched
+    attribute still calls ``blocked`` and raises its typed ``PermissionError``.
     """
+
+    sentinel = _make_blocked_attribute(blocked)
 
     def patch(owner: Any, name: str) -> None:
         try:
             if hasattr(owner, name):
-                setattr(owner, name, blocked)
+                setattr(owner, name, sentinel)
         except (AttributeError, TypeError):
             # A read-only extension attribute is still covered by AST policy.
             pass
@@ -1747,6 +1797,15 @@ def _install_library_io_guards(blocked: Callable[..., Any]) -> None:
     # ``sys.modules`` to the real submodule object, so also patch the live
     # submodule's own ``ctypes`` reference; a re-import then cannot reopen the
     # surface the parent patch closed.
+    #
+    # Preload assumption: these submodules are expected to already be present
+    # in ``sys.modules`` at guard-install time (current numpy imports
+    # ``numpy.ctypeslib`` eagerly; pinned by
+    # ``test_runtime_guard_survives_ctypeslib_reimport``).  A hypothetical
+    # future lazy-loading numpy would let a runtime ``import numpy.ctypeslib``
+    # load a fresh, unpatched submodule, and that path is covered only by the
+    # AST layer's terminal-name matching -- so this runtime guard must not be
+    # "simplified" away.
     for module_name in (
         "numpy.ctypeslib",
         "numpy.ctypes",

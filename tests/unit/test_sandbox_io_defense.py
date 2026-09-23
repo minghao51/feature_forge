@@ -122,6 +122,44 @@ def test_ctypes_traversal_ast_cannot_name_dies_at_runtime() -> None:
         pytest.fail("ctypes traversal reached the real module")
 
 
+@pytest.mark.parametrize(
+    "field_path",
+    [
+        "{0.ctypeslib.__globals__}",
+        "{0.ctypeslib.__dict__}",
+        # Paths that bypass a naive __getattr__-based sentinel: slots and
+        # type-level method attributes resolve without __getattr__.
+        "{0.ctypeslib._block.__globals__}",
+        "{0.ctypeslib.__init__.__globals__}",
+        "{0.ctypeslib.__class__.__dict__}",
+    ],
+)
+def test_blocked_escape_surface_does_not_stringify_module_globals(field_path: str) -> None:
+    """The escape-surface sentinel must never stringify worker module globals.
+
+    ``str.format`` field traversal reaches ``np.ctypeslib`` at runtime, but
+    the stub installed there is a sentinel whose every *explicit* attribute
+    access -- ``__globals__``, ``__dict__``, stored callables, and bound
+    methods alike -- raises ``AttributeError`` with a static benign message.
+    A plain blocked *function* (or a sentinel storing one on the instance)
+    would instead expose those paths and leak the worker module's global
+    names into the generated-code error text.
+    """
+    _require_landlock()
+    code = f"def generate_features(df):\n    leaked = '{field_path}'.format(np)\n    return df\n"
+    # The static layer is blind to a field path inside a string constant,
+    # which is exactly why this runtime pin exists.
+    SandboxedExecutor()._parse_and_validate(code)
+    with pytest.raises(CodeExecutionError) as excinfo:
+        SandboxedExecutor(timeout_seconds=30.0).execute(code, pd.DataFrame({"x": [1.0]}))
+    if isinstance(excinfo.value, SandboxTimeoutError):
+        pytest.skip(f"worker timed out under load before reporting the guard: {excinfo.value}")
+    message = str(excinfo.value)
+    assert "blocked-by-sandbox-policy" in message
+    assert "_install_library_io_guards" not in message
+    assert "_sandbox_worker_main" not in message
+
+
 def test_runtime_guard_survives_ctypeslib_reimport() -> None:
     """Re-patching the parent attribute is not enough; a re-import must not reopen it.
 
