@@ -39,9 +39,10 @@ class IterationErrorPayload(TypedDict):
 class IterationRecord(TypedDict, total=False):
     """Stable shape of one iterative-method iteration artifact.
 
-    Currently enforced by Malmus (``methods/malmus/method.py``); caafe and
-    llmfe retain the legacy ``error: str`` shape pending migration to
-    ``_record_iteration_failure``.
+    All iterative methods (caafe, llmfe, malmus) conform to this shape.
+    Malmas additionally reports per-feature failures via its
+    ``feature_failures`` artifact entries, which carry the same typed
+    ``{'type': ..., 'message': ...}`` error payload.
 
     ``gains`` and ``kept`` are present on *every* recorded iteration. A failed
     iteration keeps ``gains`` as ``{}`` (or partial measurable gains) and

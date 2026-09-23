@@ -24,6 +24,7 @@ from feature_forge.evaluation.prefilter import prefilter_candidate_columns
 from feature_forge.evaluation.sandbox import SandboxedExecutor
 from feature_forge.exceptions import CodeExecutionError, PipelineError, SandboxTimeoutError
 from feature_forge.llm.base import LLMClient
+from feature_forge.methods.base import IterationErrorPayload, iteration_error_payload
 from feature_forge.methods.malmas.agents.base import Agent
 from feature_forge.methods.malmas.pipeline.codegen import CodeGenerator
 from feature_forge.methods.malmas.pipeline.result import PipelineResult
@@ -35,6 +36,18 @@ from feature_forge.types import FeatureSpec
 logger = get_logger(__name__)
 
 
+@dataclass(frozen=True)
+class _ExecFailure:
+    """Typed root cause carried from a failed sandbox execution.
+
+    Downstream ``feature_failures`` entries keep their existing
+    ``reason_code: "execution_failed"`` for compatibility while this payload
+    travels alongside it as the ``error`` field.
+    """
+
+    error: IterationErrorPayload
+
+
 async def _exec_sandbox(
     sandbox: SandboxedExecutor,
     agent_name: str,
@@ -42,7 +55,7 @@ async def _exec_sandbox(
     X: pd.DataFrame,
     source: str,
     sandbox_timeout: float,
-) -> tuple[str, pd.DataFrame] | None:
+) -> tuple[str, pd.DataFrame] | _ExecFailure:
     t0 = time.perf_counter()
     try:
         execute_async = getattr(sandbox, "execute_async", None)
@@ -67,27 +80,27 @@ async def _exec_sandbox(
             latency_ms=round((time.perf_counter() - t0) * 1000, 1),
         )
         return (agent_name, part)
-    except (SandboxTimeoutError, TimeoutError):
+    except (SandboxTimeoutError, TimeoutError) as exc:
         logger.warning(
             "agent_sandbox_timeout",
             agent=agent_name,
             timeout=sandbox_timeout,
         )
-        return None
+        return _ExecFailure(iteration_error_payload(exc))
     except CodeExecutionError as exc:
         logger.warning(
             "agent_code_execution_failed",
             agent=agent_name,
             error=str(exc)[:200],
         )
-        return None
+        return _ExecFailure(iteration_error_payload(exc))
     except Exception as exc:
         logger.exception(
             "agent_code_execution_unexpected",
             agent=agent_name,
             error=str(exc)[:200],
         )
-        return None
+        return _ExecFailure(iteration_error_payload(exc))
 
 
 @dataclass(frozen=True)
@@ -349,7 +362,7 @@ class CorePipeline:
         X_train: pd.DataFrame,
         schema: dict[str, Any],
         semaphore: asyncio.Semaphore,
-    ) -> tuple[pd.DataFrame, list[_SuccessfulCode], list[dict[str, str]]]:
+    ) -> tuple[pd.DataFrame, list[_SuccessfulCode], list[dict[str, Any]]]:
         specs_by_agent: dict[str, list[FeatureSpec]] = defaultdict(list)
         for spec in all_specs:
             specs_by_agent[spec.agent_name].append(spec)
@@ -414,16 +427,17 @@ class CorePipeline:
 
         features_train_parts: list[pd.DataFrame] = []
         successful: list[_SuccessfulCode] = []
-        failures: list[dict[str, str]] = []
+        failures: list[dict[str, Any]] = []
         for (_name, code, expected_names), result in zip(
             unique_code_parts, exec_results, strict=True
         ):
-            if result is None:
+            if isinstance(result, _ExecFailure):
                 failures.extend(
                     {
                         "feature": name,
                         "phase": "train",
                         "reason_code": "execution_failed",
+                        "error": result.error,
                     }
                     for name in expected_names
                 )
@@ -492,7 +506,7 @@ class CorePipeline:
         self,
         successful_code: list[_SuccessfulCode],
         X_test: pd.DataFrame | None,
-    ) -> tuple[pd.DataFrame, list[dict[str, str]]]:
+    ) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
         if X_test is None:
             return pd.DataFrame(), []
 
@@ -513,17 +527,30 @@ class CorePipeline:
         )
 
         features_test_parts: list[pd.DataFrame] = []
-        failures: list[dict[str, str]] = []
+        failures: list[dict[str, Any]] = []
         for batch, test_result in zip(successful_code, test_exec_results, strict=True):
-            if isinstance(test_result, BaseException) or test_result is None:
-                failures.extend(
-                    {
-                        "feature": name,
-                        "phase": "test",
-                        "reason_code": "execution_failed",
-                    }
-                    for name in batch.feature_names
-                )
+            if not isinstance(test_result, tuple):
+                # ``gather(return_exceptions=True)`` surfaces worker
+                # exceptions here; ``_exec_sandbox`` failures arrive as
+                # ``_ExecFailure`` with the root cause already typed.
+                failure_error: IterationErrorPayload
+                if isinstance(test_result, _ExecFailure):
+                    failure_error = test_result.error
+                elif isinstance(test_result, BaseException):
+                    failure_error = iteration_error_payload(test_result)
+                else:  # pragma: no cover - gather() yields results or exceptions
+                    raise AssertionError(
+                        f"unexpected sandbox result type: {type(test_result).__name__}"
+                    )
+                for name in batch.feature_names:
+                    failures.append(
+                        {
+                            "feature": name,
+                            "phase": "test",
+                            "reason_code": "execution_failed",
+                            "error": failure_error,
+                        }
+                    )
                 continue
             output = test_result[1]
             if not output.index.equals(X_test.index):
@@ -571,7 +598,7 @@ class CorePipeline:
         agents: list[Agent],
         code: str,
         successful_code: list[_SuccessfulCode] | None = None,
-        feature_failures: list[dict[str, str]] | None = None,
+        feature_failures: list[dict[str, Any]] | None = None,
     ) -> PipelineResult:
         _cache_key = self._baseline_cache_key(X_train, y_train)
         baseline_score = self._baseline_cache.get(_cache_key)

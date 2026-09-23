@@ -148,6 +148,11 @@ class CAAFEMethod(BaseMethod):
                 "prompt_meta": prompt_meta,
                 "raw_response": raw_response.content,
                 "generated_code": code_block,
+                # Stable contract: these keys exist on every recorded
+                # iteration, so downstream `record["gains"]` never raises a
+                # secondary KeyError that masks the real failure.
+                "gains": {},
+                "kept": False,
             }
 
             try:
@@ -160,6 +165,10 @@ class CAAFEMethod(BaseMethod):
                     baseline_score,
                     cumulative_cols,
                 )
+                # Record measurable gains before storage so a later failure
+                # still exposes partial results.
+                iteration_record["gains"] = kept_gains
+                iteration_record["kept"] = len(kept_gains) > 0
 
                 iteration_record["all_new_features"] = self._storage.store(
                     f"caafe_iter_{i}_all", new_features
@@ -167,8 +176,6 @@ class CAAFEMethod(BaseMethod):
                 iteration_record["kept_features"] = self._storage.store(
                     f"caafe_iter_{i}_kept", kept_features
                 )
-                iteration_record["gains"] = kept_gains
-                iteration_record["kept"] = len(kept_gains) > 0
 
                 if kept_gains:
                     feedback_parts = [
@@ -178,10 +185,14 @@ class CAAFEMethod(BaseMethod):
                     feedback_str = "Previous iteration feedback: " + "; ".join(feedback_parts)
 
             except Exception as exc:
-                iteration_record["error"] = str(exc)
-                iteration_record["kept"] = False
+                self._record_iteration_failure(iteration_record, exc)
                 feedback_str = f"Previous iteration failed: {exc}"
-                logger.warning("caafe_iteration_failed", iteration=i, error=str(exc))
+                logger.warning(
+                    "caafe_iteration_failed",
+                    iteration=i,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
 
             iteration_codes.append(code_block)
             iterations.append(iteration_record)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 import pandas as pd
 
@@ -24,4 +25,4 @@ class PipelineResult:
     generated_code: str
     generated_codes: list[str] = field(default_factory=list)
     code_features: list[list[str]] = field(default_factory=list)
-    feature_failures: list[dict[str, str]] = field(default_factory=list)
+    feature_failures: list[dict[str, Any]] = field(default_factory=list)
