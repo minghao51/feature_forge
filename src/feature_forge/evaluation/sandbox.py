@@ -446,8 +446,18 @@ def _to_parquet_safe(df: pd.DataFrame) -> pd.DataFrame:
 
 @dataclass(frozen=True)
 class SandboxLimits:
+    """Resolved worker limits for one sandbox execution.
+
+    ``max_memory_mb`` defaults to ``2048`` to match
+    :class:`SandboxedExecutor`'s ``__init__`` default (the operational default
+    established by the thread-cap runner policy, commits 152d2d7/9b783fa).
+    ``SandboxedExecutor.__init__`` is the only construction site and always
+    passes both values explicitly, so this dataclass default documents the
+    intended value rather than acting as a silent fallback.
+    """
+
     timeout_seconds: float = 5.0
-    max_memory_mb: int = 512
+    max_memory_mb: int = 2048
 
 
 @dataclass
