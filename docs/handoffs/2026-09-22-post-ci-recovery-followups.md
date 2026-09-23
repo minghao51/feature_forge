@@ -1,7 +1,7 @@
 # Post-CI-Recovery Follow-Ups: Method Record Contracts, Sandbox Guard Hardening, and Security Policy Runbook
 
 **Date:** 2026-09-22  
-**Status:** Ready for execution  
+**Status:** Complete 2026-09-22 (see REPORT_LOG "Post-CI-recovery follow-ups landed")
 **Predecessor:** `docs/handoffs/2026-09-21-pr1-salvage-ci-recovery-closeout.md` (Complete 2026-09-22)  
 **Base:** `main` at `9d42f6c` (CI run `35731276754` fully green, 13/13 jobs)  
 **Decision owner:** Maintainer  

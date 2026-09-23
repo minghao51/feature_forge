@@ -24,6 +24,55 @@ One entry per event, newest first:
 
 ## Entries
 
+### 2026-09-22 — Post-CI-recovery follow-ups landed (slices F1–F4)
+
+- F1 `fix(methods)`: the `5d2cd42` iteration-record contract now covers all
+  methods. caafe/llmfe initialize `gains`/`kept` at record construction,
+  record partial measurable gains before the storage calls, use
+  `BaseMethod._record_iteration_failure` (typed `error` payload instead of
+  `str(exc)`), and add `error_type` to their failure logs. malmas
+  `feature_failures` entries for `execution_failed` (train and test) now
+  carry `error: {type, message}` threaded from the original exception through
+  `_exec_sandbox` (new `_ExecFailure` carrier; `reason_code` unchanged, ADR
+  0017 continue/fail-fast semantics unchanged). `IterationRecord` docstring
+  no longer lists pending migrations. New
+  `tests/unit/test_iteration_record_contract.py`; `test_malmus.py` untouched.
+- F2 `fix(sandbox)`: runtime IO/escape guards install a
+  `_make_blocked_attribute` sentinel instead of a plain blocked function.
+  Every *explicit* attribute access on the sentinel (`__globals__`,
+  `__dict__`, `__class__`, `__init__.__globals__`, stored callables) raises
+  `AttributeError("blocked-by-sandbox-policy")`; implicit protocol lookups
+  (call → typed blocker, `str`/`repr`/`format` → benign text) resolve on the
+  type and keep working. Closes the `"{0.ctypeslib.__globals__}".format(np)`
+  worker-globals stringification disclosure (handoff §2.3); reviewer-caught
+  follow-on leaks via a stored-callable slot and type-level method attributes
+  are closed by the closure-capturing `__slots__ = ()` + `__getattribute__`
+  design and pinned by test. Preload-assumption comment added at the
+  `sys.modules` submodule patch; `BLOCKED_ESCAPE_PATHS` kept as a documented
+  deliberate policy mirror. Known residual (accepted, unchanged by this
+  work): string-constant traversal can still reach *unpatched* library
+  objects (e.g. `np.lib.npyio.DataSource`), disclosing third-party library
+  internals only, never worker module globals; the AST layer remains
+  authoritative for the library-surface policy.
+- F3 `chore(sandbox)`: `SandboxLimits.max_memory_mb` default aligned 512→2048
+  to match the `SandboxedExecutor.__init__` operational default (origin:
+  thread-cap runner policy `152d2d7`/`9b783fa`); single construction site
+  verified to pass values explicitly, so the change is behavior-neutral.
+- F4 `docs(security)`: added `security/README.md` — dependency-audit red-lane
+  runbook (surface classification, targeted `uv lock --upgrade-package`
+  first, six-field allowlist entries as last resort, diskcache
+  CVE-2025-69872 expiry/re-check) and the maintainer branch-protection
+  checklist with a `gh api` sketch (`main` currently unprotected).
+- Gates: full suite 1170 passed / 9 skipped / 8 xfailed; ruff, format, mypy
+  (src+tests), hygiene, docs-refs, `mkdocs build --strict`, `uv lock --check`,
+  `git diff --check` all green.
+- Implementation: parallel worker subagents (`opencode-go/deepseek-v4.1-flash`)
+  for F1 and F2+F3 plus main-agent refinements (typed `IterationErrorPayload`
+  carrier replacing casts; closure-based sentinel); review: `zai/glm-5.3-flash`
+  (request-changes on the first sentinel shape — storage-slot and
+  type-level-method leaks — verified and fixed; approve-with-nits on the
+  final diff).
+
 ### 2026-09-22 — Follow-up handoff drafted: post-CI-recovery hardening
 
 - Drafted `docs/handoffs/2026-09-22-post-ci-recovery-followups.md` covering the
@@ -1602,6 +1651,14 @@ maintainer direction; ADR 0017 + plan 22 PR 3 scope.
   switch—were incorporated.
 
 ## AI assistance disclosure
+
+- 2026-09-22: Post-CI-recovery follow-up slices F1–F4 (typed iteration
+  failures across caafe/llmfe/malmas, sandbox sentinel hardening, limits
+  default alignment, security runbook) implemented by AI assistance (pi
+  coding agent; two parallel `opencode-go/deepseek-v4.1-flash` worker
+  subagents plus main-agent refinements, with a `zai/glm-5.3-flash` review
+  pass whose blocker finding on the sentinel design was verified and fixed);
+  pending review and acceptance by the maintainer.
 
 - 2026-09-16: Plan 23 PR 2 and PR 3 (partition-aware discovery; fold-local
   preprocessing and selection) implemented by AI assistance (pi coding
